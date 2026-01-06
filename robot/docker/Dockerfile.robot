@@ -88,6 +88,7 @@ RUN apt update -y && apt install -y \
   ros-humble-domain-bridge \
   ros-humble-rosbag2-storage-mcap \
   ros-humble-xacro \
+  ros-humble-diagnostic-updater \
   # ros-humble-rtabmap-ros \
   ros-humble-vision-msgs \
   # ros-humble-nmea-msgs \
@@ -104,7 +105,7 @@ RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(lsb_re
   apt update -y && \
   apt install -y \
     libnvinfer10 libnvinfer-dev libnvinfer-plugin10 \
-    python3-libnvinfer python3-libnvinfer-dev; \
+    python3-libnvinfer python3-libnvinfer-dev;
 
 
 # ARG UBUNTU_RELEASE_YEAR=22

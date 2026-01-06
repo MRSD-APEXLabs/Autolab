@@ -27,6 +27,11 @@ function sws(){
     source "$ROS2_WS_DIR"/install/local_setup.bash || echo "Please make sure to build first with 'bws'"
 }
 
+function rws(){
+    echo "Running \`ros2 launch $@\` in $ROS2_WS_DIR"
+    ros2 launch robot_bringup robot.launch.xml 
+}
+
 # Function to prompt user for confirmation
 confirm_cws() {
     while true; do
