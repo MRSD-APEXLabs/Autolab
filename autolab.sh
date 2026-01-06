@@ -414,10 +414,10 @@ function cmd_setup {
     if [ "$modify_shell" = true ]; then
         local shell_profile=""
         
-        if [ -f "$HOME/.zshrc" ]; then
-            shell_profile="$HOME/.zshrc"
-        elif [ -f "$HOME/.bashrc" ]; then
+        if [ -f "$HOME/.bashrc" ]; then
             shell_profile="$HOME/.bashrc"
+        elif [ -f "$HOME/.zshrc" ]; then
+            shell_profile="$HOME/.zshrc"
         else
             log_warn "Could not determine shell profile. Please add the autolab function to your shell profile manually."
             echo "You can find the function definition in the setup section of $PROJECT_ROOT/autolab.sh"

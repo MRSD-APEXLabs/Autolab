@@ -10,8 +10,7 @@ services:
       tags:
         - *image_tag
     container_name: isaac-sim
-    entrypoint: "" # override the default entrypoint with nothing
-    # for some reason the tmux session manager only works when isaac is running in tmux
+    entrypoint: ""  # override default entrypoint
     command: >
       bash -c "
       tmux new -d -s isaac;
@@ -21,41 +20,35 @@ services:
         else
           tmux send-keys -t isaac 'ros2 launch isaacsim run_isaacsim.launch.py gui:=\"${ISAAC_SIM_GUI}\" play_sim_on_start:=\"${PLAY_SIM_ON_START}\" ' ENTER
         fi
+        # start ZED streamer explicitly, bind to 0.0.0.0
+        tmux send-keys -t isaac 'zedx-streamer-cli --bind-ip 0.0.0.0 --port 30000 --verbose' ENTER
       fi;
       sleep infinity"
-    # Interactive shell
-    stdin_open: true # docker run -i
-    tty: true # docker run -t
+    stdin_open: true
+    tty: true
     ipc: host
     privileged: true
-    networks:
-      autolab_network:
-        ipv4_address: 172.31.0.200 # required to not conflict with other default docker networks on the host machine
-    # env_file:
-      # - ./omni_pass.env
+    network_mode: host   # simpler networking for ZED
+    devices:
+      - /dev/bus/usb:/dev/bus/usb   # full USB access
     environment:
       - AUTOLAUNCH=${AUTOLAUNCH:-'false'}
       - DISPLAY
       - QT_X11_NO_MITSHM=1
-      # ROS2 stuff
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/fastdds.xml
-      # Isaac Sim stuff
       - ISAACSIM_PATH=/isaac-sim
       - ISAACSIM_PYTHON=/isaac-sim/python.sh
     deploy:
-      # let it use the GPU
       resources:
         reservations:
           devices:
-            - driver: nvidia # https://stackoverflow.com/a/70761193
+            - driver: nvidia
               count: 1
-              capabilities: [ gpu ]
+              capabilities: [gpu]
     volumes:
-      # display
       - $HOME/.Xauthority:/root/.Xauthority
       - /tmp/.X11-unix:/tmp/.X11-unix
-      # isaac sim stuff
       - $HOME/Documents/isaac_sim_data/cache/kit:/isaac-sim/kit/cache:rw
       - $HOME/Documents/isaac_sim_data/cache/ov:/root/.cache/ov:rw
       - $HOME/Documents/isaac_sim_data/cache/pip:/root/.cache/pip:rw
@@ -64,24 +57,21 @@ services:
       - $HOME/Documents/isaac_sim_data/logs:/root/.nvidia-omniverse/logs:rw
       - $HOME/Documents/isaac_sim_data/data:/root/.local/share/ov/data:rw
       - $HOME/documents/isaac_sim_data/documents:/root/Documents:rw
-      # IMPORTANT: set the version number without the trailing .0
       - ./user.config.json:/root/.local/share/ov/data/Kit/Isaac-Sim Full/4.5/user.config.json:rw
       - ./ui.py:/isaac-sim/kit/exts/omni.kit.widget.nucleus_connector/omni/kit/widget/nucleus_connector/ui.py:rw
-      # developer stuff
-      - .dev:/root/.dev:rw # developer config
-      - .bashrc:/root/.bashrc:rw # bash config
-      - ../../../common/inputrc:/etc/inputrc:rw # for using page up/down to search through command history
+      - .dev:/root/.dev:rw
+      - .bashrc:/root/.bashrc:rw
+      - ../../../common/inputrc:/etc/inputrc:rw
       - ../../../common/.tmux.conf:/root/.tmux.conf:rw
       - ../../..:/root/Autolab:rw
       - ../../../.devcontainer/isaac-sim/launch.json:/root/Autolab/.vscode/launch.json:rw
       - ../../../.devcontainer/isaac-sim/tasks.json:/root/Autolab/.vscode/tasks.json:rw
+      - ../config/sim_to_robot_bridge.yaml:/sim_to_robot_bridge.yaml:ro
 
-  # ===================================================================================================================
   isaac-sim-gui:
     extends:
       service: isaac-sim
     container_name: isaac-sim-gui
-    # don't spawn by default, only when you want to use the GUI
     profiles: !override
       - isaac-sim-gui
     command: >
@@ -89,13 +79,3 @@ services:
         tmux send-keys -t isaac '/isaac-sim/runapp.sh' ENTER; 
       sleep infinity"
     networks: !reset null
-  # ===================================================================================================================
-  # for running over ethernet for hitl to stream to the NVIDIA jetson device
-  # isaac-sim-hitl:
-  #   extends:
-  #     service: isaac-sim
-  #   profiles: !override
-  #     - hitl
-  #   container_name: isaac-sim
-  #   network_mode: host
-  #   networks: !reset null
