@@ -1,0 +1,10 @@
+# Default initial positions for demo_bot's ros2_control fake system
+
+initial_positions:
+  Revolute_10: 0
+  Revolute_11: 0
+  Revolute_12: 0
+  Revolute_13: 0
+  Revolute_14: 0
+  Slider_1: 0
+  Slider_2: 0

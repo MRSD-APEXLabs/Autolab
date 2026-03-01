@@ -1,0 +1,86 @@
+planning_plugin: ompl_interface/OMPLPlanner
+# The adapters modify the motion plan request before and after the planner runs
+request_adapters: >-
+  default_planner_request_adapters/AddTimeOptimalParameterization
+  default_planner_request_adapters/ResolveConstraintFrames
+  default_planner_request_adapters/FixWorkspaceBounds
+  default_planner_request_adapters/FixStartStateBounds
+  default_planner_request_adapters/FixStartStateCollision
+  default_planner_request_adapters/FixStartStatePathConstraints
+start_state_max_bounds_error: 0.1
+
+planner_configs:
+  SBL:
+    type: geometric::SBL
+    range: 0.0  # Max motion added to tree. 0.0 = automatic
+  EST:
+    type: geometric::EST
+    range: 0.0
+    goal_bias: 0.05
+  LBKPIECE:
+    type: geometric::LBKPIECE
+    range: 0.0
+  BKPIECE:
+    type: geometric::BKPIECE
+    range: 0.0
+  KPIECE:
+    type: geometric::KPIECE
+    range: 0.0
+  RRT:
+    type: geometric::RRT
+    range: 0.0
+    goal_bias: 0.05
+  RRTConnect:
+    type: geometric::RRTConnect
+    range: 0.05  # Max step size in joint space (approx 0.05 rad)
+    solve_constrained_states: true
+  RRTstar:
+      type: geometric::RRTstar
+      range: 0.05            # Smaller step size for better precision
+      goal_bias: 0.1         # Increase focus on the goal
+      # delay_collision_checking: 1
+      # Add these for optimization:
+      optimization_objective: PathLength # Forces RRT* to minimize distance
+  TRRT:
+    type: geometric::TRRT
+    range: 0.0
+    goal_bias: 0.05
+  PRM:
+    type: geometric::PRM
+    max_nearest_neighbors: 10
+  PRMstar:
+    type: geometric::PRMstar
+  FMT:
+    type: geometric::FMT
+    num_samples: 1000
+  BFMT:
+    type: geometric::BFMT
+    num_samples: 1000
+  BITstar:
+    type: geometric::BITstar
+
+# Replacement for your specific robot group
+demo_arm_bot:
+  default_planner_config: RRTConnect
+  publish_planning_samples: true
+  planner_configs:
+    - SBL
+    - EST
+    - LBKPIECE
+    - BKPIECE
+    - KPIECE
+    - RRT
+    - RRTConnect
+    - RRTstar
+    - TRRT
+    - PRM
+    - PRMstar
+    - BITstar
+  ## Any planning path longer than this (relative to world) will be checked for collisions
+# Update this in your yaml
+  longest_valid_segment_fraction: 0.001  # Make this smaller for tighter spaces
+  # ## Used for projection-based planners like KPIECE
+  # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11)  # Example: project to 3D space of these joints
+  enforce_joint_model_state_space: true # Helps with constraints
+  simplify_solutions: true
+  interpolation_type: open_rave # Keeps it human-like

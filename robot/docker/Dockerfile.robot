@@ -81,6 +81,13 @@ RUN apt update && apt install -y \
 RUN apt update -y && apt install -y \
   ros-dev-tools \
   ros-humble-tf2* \
+  ros-humble-moveit \
+  ros-humble-ros2-control \
+  ros-humble-ros2-controllers \
+  ros-humble-controller-manager \
+  ros-humble-joint-state-broadcaster \
+  ros-humble-joint-trajectory-controller \
+  ros-humble-ros2-control-test-assets \
   ros-humble-stereo-image-proc \
   ros-humble-image-view \
   ros-humble-topic-tools \

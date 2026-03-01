@@ -1,0 +1,1326 @@
+client:
+  env: key_.env
+  base_url: https://cad.onshape.com
+document:
+  url: https://cad.onshape.com/documents/15ae01c04e8bbce22998a01c/w/f02976b91efae1607ef61570/e/7395359c4307f8544fd2a305
+  base_url: https://cad.onshape.com
+  did: 15ae01c04e8bbce22998a01c
+  wtype: w
+  wid: f02976b91efae1607ef61570
+  eid: 7395359c4307f8544fd2a305
+  name: Autolab_finalv3step
+assembly:
+  element_id: 7395359c4307f8544fd2a305
+  configuration: default
+  log_response: true
+  with_meta_data: true
+cad:
+  max_depth: 1
+kinematics:
+  use_user_defined_root: true
+robot:
+  name: demo_bot
+  type: urdf
+  fetch_mass_properties: true
+export:
+  file_path: robot.urdf
+  download_assets: true
+names:
+  parts:
+    Finger_right_2:
+      original: Finger_right <2>
+      name: Finger_right_2
+    Finger_left_2:
+      original: Finger_left <2>
+      name: Finger_left_2
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_11_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (11) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_11_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_10_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (10) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_10_1
+    gripper_v43_1_Finger_right_1:
+      original: Finger_right <1>
+      name: gripper_v43_1_Finger_right_1
+    gripper_v43_1_Finger_left_1:
+      original: Finger_left <1>
+      name: gripper_v43_1_Finger_left_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_9_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (9) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_9_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_8_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (8) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_8_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_7_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (7) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_7_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_6_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (6) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_6_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_5_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (5) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_5_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_4_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (4) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_4_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_7_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (7) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_7_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_6_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (6) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_6_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_5_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (5) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_5_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_4_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (4) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_4_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_3_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (3) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_3_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_2_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (2) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_2_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_1_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 (1) <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_1_1
+    gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_1:
+      original: Hexagon Socket Head Cap Screw DIN 912 - M3 x 0.5 x 10 Steel 4.6 Plain
+        v1 <1>
+      name: gripper_v43_1_Hexagon_Socket_Head_Cap_Screw_DIN_912_-_M3_x_05_x_10_Steel_46_Plain_v1_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_7_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (7) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_7_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_6_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (6) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_6_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_5_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (5) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_5_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_4_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (4) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_4_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_3_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (3) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_3_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_2_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (2) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_2_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_1_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 (1) <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_1_1
+    gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_1:
+      original: Hexagon Socket Countersunk Head Screw DIN EN ISO 10642 - M2 x 5 Steel
+        8.8 Plain v1 <1>
+      name: gripper_v43_1_Hexagon_Socket_Countersunk_Head_Screw_DIN_EN_ISO_10642_-_M2_x_5_Steel_88_Plain_v1_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_11_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (11) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_11_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_10_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (10) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_10_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_9_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (9) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_9_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_8_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (8) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_8_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_7_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (7) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_7_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_6_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (6) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_6_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_5_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (5) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_5_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_4_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (4) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_4_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_3_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (3) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_3_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_2_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (2) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_2_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_9_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (9) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_9_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_8_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (8) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_8_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_7_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (7) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_7_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_6_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (6) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_6_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_5_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (5) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_5_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_4_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (4) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_4_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_3_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (3) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_3_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_2_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (2) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_2_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_1_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 (1) <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_1_1
+    gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_1:
+      original: Binding Head Screw JIS B 1111 - M2x8 Steel 4.6 Plain v1 <1>
+      name: gripper_v43_1_Binding_Head_Screw_JIS_B_1111_-_M2x8_Steel_46_Plain_v1_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_1_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 (1) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_1_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_1:
+      original: Hexagon Thin Nut DIN 439-2 - M2 x 0.4 Steel 6 Plain v1 <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M2_x_04_Steel_6_Plain_v1_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_3_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (3) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_3_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_2_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (2) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_2_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_1_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 (1) <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_1_1
+    gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_1:
+      original: Hexagon Thin Nut DIN 439-2 - M3 x 0.5 Steel 6 Plain v1 <1>
+      name: gripper_v43_1_Hexagon_Thin_Nut_DIN_439-2_-_M3_x_05_Steel_6_Plain_v1_1
+    gripper_v43_1_Raised_Cheese_Head_Screw_DIN_7985_-_M2_x_10_-_H_Steel_46_Plain_v1_1_1:
+      original: Raised Cheese Head Screw DIN 7985 - M2 x 10 - H Steel 4.6 Plain v1
+        (1) <1>
+      name: gripper_v43_1_Raised_Cheese_Head_Screw_DIN_7985_-_M2_x_10_-_H_Steel_46_Plain_v1_1_1
+    gripper_v43_1_Raised_Cheese_Head_Screw_DIN_7985_-_M2_x_10_-_H_Steel_46_Plain_v1_1:
+      original: Raised Cheese Head Screw DIN 7985 - M2 x 10 - H Steel 4.6 Plain v1
+        <1>
+      name: gripper_v43_1_Raised_Cheese_Head_Screw_DIN_7985_-_M2_x_10_-_H_Steel_46_Plain_v1_1
+    gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_3_1:
+      original: Broached Hexagon Socket Button Head Cap Screw ANSI B18.3.4M - M3 x
+        0.5 x 10 Steel Grade 2 Plain v1 (3) <1>
+      name: gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_3_1
+    gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_2_1:
+      original: Broached Hexagon Socket Button Head Cap Screw ANSI B18.3.4M - M3 x
+        0.5 x 10 Steel Grade 2 Plain v1 (2) <1>
+      name: gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_2_1
+    gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_1_1:
+      original: Broached Hexagon Socket Button Head Cap Screw ANSI B18.3.4M - M3 x
+        0.5 x 10 Steel Grade 2 Plain v1 (1) <1>
+      name: gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_1_1
+    gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_1:
+      original: Broached Hexagon Socket Button Head Cap Screw ANSI B18.3.4M - M3 x
+        0.5 x 10 Steel Grade 2 Plain v1 <1>
+      name: gripper_v43_1_Broached_Hexagon_Socket_Button_Head_Cap_Screw_ANSI_B1834M_-_M3_x_05_x_10_Steel_Grade_2_Plain_v1_1
+    gripper_v43_1_Switch_1:
+      original: Switch <1>
+      name: gripper_v43_1_Switch_1
+    gripper_v43_1_Switch_2:
+      original: Switch <2>
+      name: gripper_v43_1_Switch_2
+    gripper_v43_1_Cover_1:
+      original: Cover <1>
+      name: gripper_v43_1_Cover_1
+    gripper_v43_1_MGN7_rail_v1_1:
+      original: MGN7 rail v1 <1>
+      name: gripper_v43_1_MGN7_rail_v1_1
+    gripper_v43_1_MGN7C_v1_1_1:
+      original: MGN7C v1 (1) <1>
+      name: gripper_v43_1_MGN7C_v1_1_1
+    gripper_v43_1_MGN7C_v1_1_2:
+      original: MGN7C v1 (1) <2>
+      name: gripper_v43_1_MGN7C_v1_1_2
+    gripper_v43_1_MGN7C_v1_1_3:
+      original: MGN7C v1 (1) <3>
+      name: gripper_v43_1_MGN7C_v1_1_3
+    gripper_v43_1_MGN7C_v1_1_4:
+      original: MGN7C v1 (1) <4>
+      name: gripper_v43_1_MGN7C_v1_1_4
+    gripper_v43_1_MGN7C_v1_1_5:
+      original: MGN7C v1 (1) <5>
+      name: gripper_v43_1_MGN7C_v1_1_5
+    gripper_v43_1_MGN7C_v1_1_6:
+      original: MGN7C v1 (1) <6>
+      name: gripper_v43_1_MGN7C_v1_1_6
+    gripper_v43_1_MGN7C_v1_1_7:
+      original: MGN7C v1 (1) <7>
+      name: gripper_v43_1_MGN7C_v1_1_7
+    gripper_v43_1_MGN7C_v1_1_8:
+      original: MGN7C v1 (1) <8>
+      name: gripper_v43_1_MGN7C_v1_1_8
+    gripper_v43_1_MGN7C_v1_1_9:
+      original: MGN7C v1 (1) <9>
+      name: gripper_v43_1_MGN7C_v1_1_9
+    gripper_v43_1_Body_1_Body_1:
+      original: Body <1>
+      name: gripper_v43_1_Body_1_Body_1
+    gripper_v43_1_MGN7C_v1_1:
+      original: MGN7C v1 <1>
+      name: gripper_v43_1_MGN7C_v1_1
+    gripper_v43_1_MGN7C_v1_2:
+      original: MGN7C v1 <2>
+      name: gripper_v43_1_MGN7C_v1_2
+    gripper_v43_1_MGN7C_v1_3:
+      original: MGN7C v1 <3>
+      name: gripper_v43_1_MGN7C_v1_3
+    gripper_v43_1_MGN7C_v1_4:
+      original: MGN7C v1 <4>
+      name: gripper_v43_1_MGN7C_v1_4
+    gripper_v43_1_MGN7C_v1_5:
+      original: MGN7C v1 <5>
+      name: gripper_v43_1_MGN7C_v1_5
+    gripper_v43_1_MGN7C_v1_6:
+      original: MGN7C v1 <6>
+      name: gripper_v43_1_MGN7C_v1_6
+    gripper_v43_1_MGN7C_v1_7:
+      original: MGN7C v1 <7>
+      name: gripper_v43_1_MGN7C_v1_7
+    gripper_v43_1_MGN7C_v1_8:
+      original: MGN7C v1 <8>
+      name: gripper_v43_1_MGN7C_v1_8
+    gripper_v43_1_MGN7C_v1_9:
+      original: MGN7C v1 <9>
+      name: gripper_v43_1_MGN7C_v1_9
+    gripper_v43_1_p_BEARING_METRIC_600_MINIATURE_SERIES_DOUBLE-SEALED_8mm_ID_16_OD_4_W_688-2RS_v1_1_1:
+      original: "p  BEARING, METRIC 600 MINIATURE SERIES, DOUBLE-SEALED  8mm ID \xD7\
+        \ 16 OD \xD7 4 W  \u2014  688-2RS v1 (1) <1>"
+      name: gripper_v43_1_p_BEARING_METRIC_600_MINIATURE_SERIES_DOUBLE-SEALED_8mm_ID_16_OD_4_W_688-2RS_v1_1_1
+    gripper_v43_1_p_BEARING_METRIC_600_MINIATURE_SERIES_DOUBLE-SEALED_8mm_ID_16_OD_4_W_688-2RS_v1_1:
+      original: "p  BEARING, METRIC 600 MINIATURE SERIES, DOUBLE-SEALED  8mm ID \xD7\
+        \ 16 OD \xD7 4 W  \u2014  688-2RS v1 <1>"
+      name: gripper_v43_1_p_BEARING_METRIC_600_MINIATURE_SERIES_DOUBLE-SEALED_8mm_ID_16_OD_4_W_688-2RS_v1_1
+    gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_1:
+      original: GT2 Timing Pulley AXIS 5mm MOTOR v1 <1>
+      name: gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_1
+    gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_2:
+      original: GT2 Timing Pulley AXIS 5mm MOTOR v1 <2>
+      name: gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_2
+    gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_3:
+      original: GT2 Timing Pulley AXIS 5mm MOTOR v1 <3>
+      name: gripper_v43_1_GT2_Timing_Pulley_AXIS_5mm_MOTOR_v1_3
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bearing_1:
+      original: Bearing <1>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bearing_1
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Stepper_shaft_1:
+      original: Stepper shaft <1>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Stepper_shaft_1
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bearing_2:
+      original: Bearing <2>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bearing_2
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Top_plate_1:
+      original: Top plate <1>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Top_plate_1
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bottom_plate_1:
+      original: Bottom plate <1>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Bottom_plate_1
+    gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Middle_part_1:
+      original: Middle part <1>
+      name: gripper_v43_1_NEMA_17_-_MS17HD2_v1_1_Middle_part_1
+    gripper_v43_1_screw_nut_8mm_v1_1_1:
+      original: screw nut 8mm v1 (1) <1>
+      name: gripper_v43_1_screw_nut_8mm_v1_1_1
+    gripper_v43_1_Lead_Screw_1:
+      original: Lead Screw <1>
+      name: gripper_v43_1_Lead_Screw_1
+    gripper_v43_1_screw_nut_8mm_v1_1:
+      original: screw nut 8mm v1 <1>
+      name: gripper_v43_1_screw_nut_8mm_v1_1
+    gripper_v43_1_GT2_20T-sh8_v1_1:
+      original: GT2_20T-sh8 v1 <1>
+      name: gripper_v43_1_GT2_20T-sh8_v1_1
+    gripper_v43_1_GT2_20T-sh8_v1_2:
+      original: GT2_20T-sh8 v1 <2>
+      name: gripper_v43_1_GT2_20T-sh8_v1_2
+    gripper_v43_1_GT2_20T-sh8_v1_3:
+      original: GT2_20T-sh8 v1 <3>
+      name: gripper_v43_1_GT2_20T-sh8_v1_3
+    Az_Front_right_1:
+      original: Az_Front_right <1>
+      name: Az_Front_right_1
+    wrist_2_p4_1:
+      original: wrist 2 p4 <1>
+      name: wrist_2_p4_1
+    end_effector_p4_1:
+      original: end effector p4 <1>
+      name: end_effector_p4_1
+    wrist_1_p4_1:
+      original: wrist 1 p4 <1>
+      name: wrist_1_p4_1
+    elbow2_p4_1:
+      original: elbow2 p4 <1>
+      name: elbow2_p4_1
+    arm_elbow_4_1:
+      original: arm elbow 4 <1>
+      name: arm_elbow_4_1
+    arm_shoulder241_1:
+      original: arm shoulder2.4.1 <1>
+      name: arm_shoulder241_1
+    Wheel_Front_Right_1:
+      original: Wheel_Front_Right <1>
+      name: Wheel_Front_Right_1
+    Wheel_Front_Left_1:
+      original: Wheel_Front_Left <1>
+      name: Wheel_Front_Left_1
+    Az_Front_Left_1:
+      original: Az_Front_Left <1>
+      name: Az_Front_Left_1
+    Wheel_Back_Left_1:
+      original: Wheel_Back_Left <1>
+      name: Wheel_Back_Left_1
+    Az_Back_left_1:
+      original: Az_Back_left <1>
+      name: Az_Back_left_1
+    Az_Back_Right_1:
+      original: Az_Back_Right <1>
+      name: Az_Back_Right_1
+    Wheel_Back_Right_1:
+      original: Wheel_Back_Right <1>
+      name: Wheel_Back_Right_1
+    Chassis_1_MK5n_B_v1_1_1_Component82_1:
+      original: Component82 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component82_1
+    Chassis_1_MK5n_B_v1_1_1_Component81_1:
+      original: Component81 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component81_1
+    Chassis_1_MK5n_B_v1_1_1_Component80_1:
+      original: Component80 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component80_1
+    Chassis_1_MK5n_B_v1_1_1_Component79_1:
+      original: Component79 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component79_1
+    Chassis_1_MK5n_B_v1_1_1_Component78_1:
+      original: Component78 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component78_1
+    Chassis_1_MK5n_B_v1_1_1_Component77_1:
+      original: Component77 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component77_1
+    Chassis_1_MK5n_B_v1_1_1_Component75_1:
+      original: Component75 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component75_1
+    Chassis_1_MK5n_B_v1_1_1_Component73_1:
+      original: Component73 <1>
+      name: Chassis_1_MK5n_B_v1_1_1_Component73_1
+    Chassis_1_MK5n_A_v1_1_1_Component93_1:
+      original: Component93 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component93_1
+    Chassis_1_MK5n_A_v1_1_1_Component92_1:
+      original: Component92 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component92_1
+    Chassis_1_MK5n_A_v1_1_1_Component91_1:
+      original: Component91 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component91_1
+    Chassis_1_MK5n_A_v1_1_1_Component90_1:
+      original: Component90 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component90_1
+    Chassis_1_MK5n_A_v1_1_1_Component89_1:
+      original: Component89 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component89_1
+    Chassis_1_MK5n_A_v1_1_1_Component88_1:
+      original: Component88 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component88_1
+    Chassis_1_MK5n_A_v1_1_1_Component87_1:
+      original: Component87 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component87_1
+    Chassis_1_MK5n_A_v1_1_1_Component86_1:
+      original: Component86 <1>
+      name: Chassis_1_MK5n_A_v1_1_1_Component86_1
+    Chassis_1_MK5n_B_v1_1_Component71_1:
+      original: Component71 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component71_1
+    Chassis_1_MK5n_B_v1_1_Component70_1:
+      original: Component70 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component70_1
+    Chassis_1_MK5n_B_v1_1_Component69_1:
+      original: Component69 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component69_1
+    Chassis_1_MK5n_B_v1_1_Component68_1:
+      original: Component68 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component68_1
+    Chassis_1_MK5n_B_v1_1_Component67_1:
+      original: Component67 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component67_1
+    Chassis_1_MK5n_B_v1_1_Component66_1:
+      original: Component66 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component66_1
+    Chassis_1_MK5n_B_v1_1_Component64_1:
+      original: Component64 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component64_1
+    Chassis_1_MK5n_B_v1_1_Component62_1:
+      original: Component62 <1>
+      name: Chassis_1_MK5n_B_v1_1_Component62_1
+    Chassis_1_MK5n_A_v1_1_Component11_1:
+      original: Component11 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component11_1
+    Chassis_1_MK5n_A_v1_1_Component10_1:
+      original: Component10 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component10_1
+    Chassis_1_MK5n_A_v1_1_Component9_1:
+      original: Component9 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component9_1
+    Chassis_1_MK5n_A_v1_1_Component8_1:
+      original: Component8 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component8_1
+    Chassis_1_MK5n_A_v1_1_Component7_1:
+      original: Component7 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component7_1
+    Chassis_1_MK5n_A_v1_1_Component6_1:
+      original: Component6 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component6_1
+    Chassis_1_MK5n_A_v1_1_Component5_1:
+      original: Component5 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component5_1
+    Chassis_1_MK5n_A_v1_1_Component4_1:
+      original: Component4 <1>
+      name: Chassis_1_MK5n_A_v1_1_Component4_1
+    Chassis_1_PDP_mount2_1:
+      original: PDP_mount2 <1>
+      name: Chassis_1_PDP_mount2_1
+    Chassis_1_Battery_base_sheet2_1:
+      original: Battery_base_sheet2 <1>
+      name: Chassis_1_Battery_base_sheet2_1
+    Chassis_1_DC_Control_BoxDC1300_v1_1:
+      original: DC Control Box(DC1300) v1 <1>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_1
+    Chassis_1_DC_Control_BoxDC1300_v1_2:
+      original: DC Control Box(DC1300) v1 <2>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_2
+    Chassis_1_DC_Control_BoxDC1300_v1_3:
+      original: DC Control Box(DC1300) v1 <3>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_3
+    Chassis_1_DC_Control_BoxDC1300_v1_4:
+      original: DC Control Box(DC1300) v1 <4>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_4
+    Chassis_1_DC_Control_BoxDC1300_v1_5:
+      original: DC Control Box(DC1300) v1 <5>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_5
+    Chassis_1_DC_Control_BoxDC1300_v1_6:
+      original: DC Control Box(DC1300) v1 <6>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_6
+    Chassis_1_DC_Control_BoxDC1300_v1_7:
+      original: DC Control Box(DC1300) v1 <7>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_7
+    Chassis_1_DC_Control_BoxDC1300_v1_8:
+      original: DC Control Box(DC1300) v1 <8>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_8
+    Chassis_1_DC_Control_BoxDC1300_v1_9:
+      original: DC Control Box(DC1300) v1 <9>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_9
+    Chassis_1_DC_Control_BoxDC1300_v1_10:
+      original: DC Control Box(DC1300) v1 <10>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_10
+    Chassis_1_DC_Control_BoxDC1300_v1_11:
+      original: DC Control Box(DC1300) v1 <11>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_11
+    Chassis_1_DC_Control_BoxDC1300_v1_12:
+      original: DC Control Box(DC1300) v1 <12>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_12
+    Chassis_1_DC_Control_BoxDC1300_v1_13:
+      original: DC Control Box(DC1300) v1 <13>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_13
+    Chassis_1_DC_Control_BoxDC1300_v1_14:
+      original: DC Control Box(DC1300) v1 <14>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_14
+    Chassis_1_DC_Control_BoxDC1300_v1_15:
+      original: DC Control Box(DC1300) v1 <15>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_15
+    Chassis_1_DC_Control_BoxDC1300_v1_16:
+      original: DC Control Box(DC1300) v1 <16>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_16
+    Chassis_1_DC_Control_BoxDC1300_v1_17:
+      original: DC Control Box(DC1300) v1 <17>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_17
+    Chassis_1_DC_Control_BoxDC1300_v1_18:
+      original: DC Control Box(DC1300) v1 <18>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_18
+    Chassis_1_DC_Control_BoxDC1300_v1_19:
+      original: DC Control Box(DC1300) v1 <19>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_19
+    Chassis_1_DC_Control_BoxDC1300_v1_20:
+      original: DC Control Box(DC1300) v1 <20>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_20
+    Chassis_1_DC_Control_BoxDC1300_v1_21:
+      original: DC Control Box(DC1300) v1 <21>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_21
+    Chassis_1_DC_Control_BoxDC1300_v1_22:
+      original: DC Control Box(DC1300) v1 <22>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_22
+    Chassis_1_DC_Control_BoxDC1300_v1_23:
+      original: DC Control Box(DC1300) v1 <23>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_23
+    Chassis_1_DC_Control_BoxDC1300_v1_24:
+      original: DC Control Box(DC1300) v1 <24>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_24
+    Chassis_1_DC_Control_BoxDC1300_v1_25:
+      original: DC Control Box(DC1300) v1 <25>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_25
+    Chassis_1_DC_Control_BoxDC1300_v1_26:
+      original: DC Control Box(DC1300) v1 <26>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_26
+    Chassis_1_DC_Control_BoxDC1300_v1_27:
+      original: DC Control Box(DC1300) v1 <27>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_27
+    Chassis_1_DC_Control_BoxDC1300_v1_28:
+      original: DC Control Box(DC1300) v1 <28>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_28
+    Chassis_1_DC_Control_BoxDC1300_v1_29:
+      original: DC Control Box(DC1300) v1 <29>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_29
+    Chassis_1_DC_Control_BoxDC1300_v1_30:
+      original: DC Control Box(DC1300) v1 <30>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_30
+    Chassis_1_DC_Control_BoxDC1300_v1_31:
+      original: DC Control Box(DC1300) v1 <31>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_31
+    Chassis_1_DC_Control_BoxDC1300_v1_32:
+      original: DC Control Box(DC1300) v1 <32>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_32
+    Chassis_1_DC_Control_BoxDC1300_v1_33:
+      original: DC Control Box(DC1300) v1 <33>
+      name: Chassis_1_DC_Control_BoxDC1300_v1_33
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_1:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <1>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_1
+    Chassis_1_arm_shoulder_4_1:
+      original: arm shoulder 4 <1>
+      name: Chassis_1_arm_shoulder_4_1
+    Chassis_1_arm_shoulder_4_2:
+      original: arm shoulder 4 <2>
+      name: Chassis_1_arm_shoulder_4_2
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_2:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <2>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_2
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_3:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <3>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_3
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_4:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <4>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_4
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_5:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <5>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_5
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_6:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <6>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_6
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_7:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <7>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_7
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_8:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <8>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_8
+    Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_1:
+      original: terminal with cover_1 <1>
+      name: Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_1
+    Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_2:
+      original: terminal with cover_1 <2>
+      name: Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_2
+    Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_3:
+      original: terminal with cover_1 <3>
+      name: Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_3
+    Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_4:
+      original: terminal with cover_1 <4>
+      name: Chassis_1_PDP_20_release_v1_1_terminal_with_cover_1_4
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_1:
+      original: PDP_2.0_NO BREAKERS <1>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_1
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_2:
+      original: PDP_2.0_NO BREAKERS <2>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_2
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_3:
+      original: PDP_2.0_NO BREAKERS <3>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_3
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_4:
+      original: PDP_2.0_NO BREAKERS <4>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_4
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_5:
+      original: PDP_2.0_NO BREAKERS <5>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_5
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_6:
+      original: PDP_2.0_NO BREAKERS <6>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_6
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_7:
+      original: PDP_2.0_NO BREAKERS <7>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_7
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_8:
+      original: PDP_2.0_NO BREAKERS <8>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_8
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_9:
+      original: PDP_2.0_NO BREAKERS <9>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_9
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_10:
+      original: PDP_2.0_NO BREAKERS <10>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_10
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_11:
+      original: PDP_2.0_NO BREAKERS <11>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_11
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_12:
+      original: PDP_2.0_NO BREAKERS <12>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_12
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_13:
+      original: PDP_2.0_NO BREAKERS <13>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_13
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_14:
+      original: PDP_2.0_NO BREAKERS <14>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_14
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_15:
+      original: PDP_2.0_NO BREAKERS <15>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_15
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_16:
+      original: PDP_2.0_NO BREAKERS <16>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_16
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_17:
+      original: PDP_2.0_NO BREAKERS <17>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_17
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_18:
+      original: PDP_2.0_NO BREAKERS <18>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_18
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_19:
+      original: PDP_2.0_NO BREAKERS <19>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_19
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_20:
+      original: PDP_2.0_NO BREAKERS <20>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_20
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_21:
+      original: PDP_2.0_NO BREAKERS <21>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_21
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_22:
+      original: PDP_2.0_NO BREAKERS <22>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_22
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_23:
+      original: PDP_2.0_NO BREAKERS <23>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_23
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_24:
+      original: PDP_2.0_NO BREAKERS <24>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_24
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_25:
+      original: PDP_2.0_NO BREAKERS <25>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_25
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_26:
+      original: PDP_2.0_NO BREAKERS <26>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_26
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_27:
+      original: PDP_2.0_NO BREAKERS <27>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_27
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_28:
+      original: PDP_2.0_NO BREAKERS <28>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_28
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_29:
+      original: PDP_2.0_NO BREAKERS <29>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_29
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_30:
+      original: PDP_2.0_NO BREAKERS <30>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_30
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_31:
+      original: PDP_2.0_NO BREAKERS <31>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_31
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_32:
+      original: PDP_2.0_NO BREAKERS <32>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_32
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_33:
+      original: PDP_2.0_NO BREAKERS <33>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_33
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_34:
+      original: PDP_2.0_NO BREAKERS <34>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_34
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_35:
+      original: PDP_2.0_NO BREAKERS <35>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_35
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_36:
+      original: PDP_2.0_NO BREAKERS <36>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_36
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_37:
+      original: PDP_2.0_NO BREAKERS <37>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_37
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_38:
+      original: PDP_2.0_NO BREAKERS <38>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_38
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_39:
+      original: PDP_2.0_NO BREAKERS <39>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_39
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_40:
+      original: PDP_2.0_NO BREAKERS <40>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_40
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_41:
+      original: PDP_2.0_NO BREAKERS <41>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_41
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_42:
+      original: PDP_2.0_NO BREAKERS <42>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_42
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_43:
+      original: PDP_2.0_NO BREAKERS <43>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_43
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_44:
+      original: PDP_2.0_NO BREAKERS <44>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_44
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_45:
+      original: PDP_2.0_NO BREAKERS <45>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_45
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_46:
+      original: PDP_2.0_NO BREAKERS <46>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_46
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_47:
+      original: PDP_2.0_NO BREAKERS <47>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_47
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_48:
+      original: PDP_2.0_NO BREAKERS <48>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_48
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_49:
+      original: PDP_2.0_NO BREAKERS <49>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_49
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_50:
+      original: PDP_2.0_NO BREAKERS <50>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_50
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_51:
+      original: PDP_2.0_NO BREAKERS <51>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_51
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_52:
+      original: PDP_2.0_NO BREAKERS <52>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_52
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_53:
+      original: PDP_2.0_NO BREAKERS <53>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_53
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_54:
+      original: PDP_2.0_NO BREAKERS <54>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_54
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_55:
+      original: PDP_2.0_NO BREAKERS <55>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_55
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_56:
+      original: PDP_2.0_NO BREAKERS <56>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_56
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_57:
+      original: PDP_2.0_NO BREAKERS <57>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_57
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_58:
+      original: PDP_2.0_NO BREAKERS <58>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_58
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_59:
+      original: PDP_2.0_NO BREAKERS <59>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_59
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_60:
+      original: PDP_2.0_NO BREAKERS <60>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_60
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_61:
+      original: PDP_2.0_NO BREAKERS <61>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_61
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_62:
+      original: PDP_2.0_NO BREAKERS <62>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_62
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_63:
+      original: PDP_2.0_NO BREAKERS <63>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_63
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_64:
+      original: PDP_2.0_NO BREAKERS <64>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_64
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_65:
+      original: PDP_2.0_NO BREAKERS <65>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_65
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_66:
+      original: PDP_2.0_NO BREAKERS <66>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_66
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_67:
+      original: PDP_2.0_NO BREAKERS <67>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_67
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_68:
+      original: PDP_2.0_NO BREAKERS <68>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_68
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_69:
+      original: PDP_2.0_NO BREAKERS <69>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_69
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_70:
+      original: PDP_2.0_NO BREAKERS <70>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_70
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_71:
+      original: PDP_2.0_NO BREAKERS <71>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_71
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_72:
+      original: PDP_2.0_NO BREAKERS <72>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_72
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_73:
+      original: PDP_2.0_NO BREAKERS <73>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_73
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_74:
+      original: PDP_2.0_NO BREAKERS <74>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_74
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_75:
+      original: PDP_2.0_NO BREAKERS <75>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_75
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_76:
+      original: PDP_2.0_NO BREAKERS <76>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_76
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_77:
+      original: PDP_2.0_NO BREAKERS <77>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_77
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_78:
+      original: PDP_2.0_NO BREAKERS <78>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_78
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_79:
+      original: PDP_2.0_NO BREAKERS <79>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_79
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_80:
+      original: PDP_2.0_NO BREAKERS <80>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_80
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_81:
+      original: PDP_2.0_NO BREAKERS <81>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_81
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_82:
+      original: PDP_2.0_NO BREAKERS <82>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_82
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_83:
+      original: PDP_2.0_NO BREAKERS <83>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_83
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_84:
+      original: PDP_2.0_NO BREAKERS <84>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_84
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_85:
+      original: PDP_2.0_NO BREAKERS <85>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_85
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_86:
+      original: PDP_2.0_NO BREAKERS <86>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_86
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_87:
+      original: PDP_2.0_NO BREAKERS <87>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_87
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_88:
+      original: PDP_2.0_NO BREAKERS <88>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_88
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_89:
+      original: PDP_2.0_NO BREAKERS <89>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_89
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_90:
+      original: PDP_2.0_NO BREAKERS <90>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_90
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_91:
+      original: PDP_2.0_NO BREAKERS <91>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_91
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_92:
+      original: PDP_2.0_NO BREAKERS <92>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_92
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_93:
+      original: PDP_2.0_NO BREAKERS <93>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_93
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_94:
+      original: PDP_2.0_NO BREAKERS <94>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_94
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_95:
+      original: PDP_2.0_NO BREAKERS <95>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_95
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_96:
+      original: PDP_2.0_NO BREAKERS <96>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_96
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_97:
+      original: PDP_2.0_NO BREAKERS <97>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_97
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_98:
+      original: PDP_2.0_NO BREAKERS <98>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_98
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_99:
+      original: PDP_2.0_NO BREAKERS <99>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_99
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_100:
+      original: PDP_2.0_NO BREAKERS <100>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_100
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_101:
+      original: PDP_2.0_NO BREAKERS <101>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_101
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_102:
+      original: PDP_2.0_NO BREAKERS <102>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_102
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_103:
+      original: PDP_2.0_NO BREAKERS <103>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_103
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_104:
+      original: PDP_2.0_NO BREAKERS <104>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_104
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_105:
+      original: PDP_2.0_NO BREAKERS <105>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_105
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_106:
+      original: PDP_2.0_NO BREAKERS <106>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_106
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_107:
+      original: PDP_2.0_NO BREAKERS <107>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_107
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_108:
+      original: PDP_2.0_NO BREAKERS <108>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_108
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_109:
+      original: PDP_2.0_NO BREAKERS <109>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_109
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_110:
+      original: PDP_2.0_NO BREAKERS <110>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_110
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_111:
+      original: PDP_2.0_NO BREAKERS <111>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_111
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_112:
+      original: PDP_2.0_NO BREAKERS <112>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_112
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_113:
+      original: PDP_2.0_NO BREAKERS <113>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_113
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_114:
+      original: PDP_2.0_NO BREAKERS <114>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_114
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_115:
+      original: PDP_2.0_NO BREAKERS <115>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_115
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_116:
+      original: PDP_2.0_NO BREAKERS <116>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_116
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_117:
+      original: PDP_2.0_NO BREAKERS <117>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_117
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_118:
+      original: PDP_2.0_NO BREAKERS <118>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_118
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_119:
+      original: PDP_2.0_NO BREAKERS <119>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_119
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_120:
+      original: PDP_2.0_NO BREAKERS <120>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_120
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_121:
+      original: PDP_2.0_NO BREAKERS <121>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_121
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_122:
+      original: PDP_2.0_NO BREAKERS <122>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_122
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_123:
+      original: PDP_2.0_NO BREAKERS <123>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_123
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_124:
+      original: PDP_2.0_NO BREAKERS <124>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_124
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_125:
+      original: PDP_2.0_NO BREAKERS <125>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_125
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_126:
+      original: PDP_2.0_NO BREAKERS <126>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_126
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_127:
+      original: PDP_2.0_NO BREAKERS <127>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_127
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_128:
+      original: PDP_2.0_NO BREAKERS <128>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_128
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_129:
+      original: PDP_2.0_NO BREAKERS <129>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_129
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_130:
+      original: PDP_2.0_NO BREAKERS <130>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_130
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_131:
+      original: PDP_2.0_NO BREAKERS <131>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_131
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_132:
+      original: PDP_2.0_NO BREAKERS <132>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_132
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_133:
+      original: PDP_2.0_NO BREAKERS <133>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_133
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_134:
+      original: PDP_2.0_NO BREAKERS <134>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_134
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_135:
+      original: PDP_2.0_NO BREAKERS <135>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_135
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_136:
+      original: PDP_2.0_NO BREAKERS <136>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_136
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_137:
+      original: PDP_2.0_NO BREAKERS <137>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_137
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_138:
+      original: PDP_2.0_NO BREAKERS <138>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_138
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_139:
+      original: PDP_2.0_NO BREAKERS <139>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_139
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_140:
+      original: PDP_2.0_NO BREAKERS <140>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_140
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_141:
+      original: PDP_2.0_NO BREAKERS <141>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_141
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_142:
+      original: PDP_2.0_NO BREAKERS <142>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_142
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_143:
+      original: PDP_2.0_NO BREAKERS <143>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_143
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_144:
+      original: PDP_2.0_NO BREAKERS <144>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_144
+    Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_145:
+      original: PDP_2.0_NO BREAKERS <145>
+      name: Chassis_1_PDP_20_release_v1_1_PDP_20_NO_BREAKERS_145
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_9:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <9>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_9
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_10:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <10>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_10
+    Chassis_1_4633N12_T-Slotted_Framing_Rail_1:
+      original: 4633N12_T-Slotted Framing Rail <1>
+      name: Chassis_1_4633N12_T-Slotted_Framing_Rail_1
+    Chassis_1_4633N12_T-Slotted_Framing_Rail_2:
+      original: 4633N12_T-Slotted Framing Rail <2>
+      name: Chassis_1_4633N12_T-Slotted_Framing_Rail_2
+    Chassis_1_4633N12_T-Slotted_Framing_Rail_3:
+      original: 4633N12_T-Slotted Framing Rail <3>
+      name: Chassis_1_4633N12_T-Slotted_Framing_Rail_3
+    Chassis_1_2020-corner-bracket_v1_1:
+      original: 2020-corner-bracket v1 <1>
+      name: Chassis_1_2020-corner-bracket_v1_1
+    Chassis_1_2020-corner-bracket_v1_2:
+      original: 2020-corner-bracket v1 <2>
+      name: Chassis_1_2020-corner-bracket_v1_2
+    Chassis_1_2020-corner-bracket_v1_3:
+      original: 2020-corner-bracket v1 <3>
+      name: Chassis_1_2020-corner-bracket_v1_3
+    Chassis_1_2020-corner-bracket_v1_4:
+      original: 2020-corner-bracket v1 <4>
+      name: Chassis_1_2020-corner-bracket_v1_4
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_11:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <11>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_11
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_12:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <12>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_12
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_13:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <13>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_13
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_14:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <14>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_14
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_15:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <15>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_15
+    Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_16:
+      original: 4040 Corner Bracket Right Angle L Shape v1 <16>
+      name: Chassis_1_4040_Corner_Bracket_Right_Angle_L_Shape_v1_16
+    Chassis_1_2020-corner-bracket_v1_5:
+      original: 2020-corner-bracket v1 <5>
+      name: Chassis_1_2020-corner-bracket_v1_5
+    Chassis_1_2020-corner-bracket_v1_6:
+      original: 2020-corner-bracket v1 <6>
+      name: Chassis_1_2020-corner-bracket_v1_6
+    Chassis_1_2020-corner-bracket_v1_7:
+      original: 2020-corner-bracket v1 <7>
+      name: Chassis_1_2020-corner-bracket_v1_7
+    Chassis_1_2020-corner-bracket_v1_8:
+      original: 2020-corner-bracket v1 <8>
+      name: Chassis_1_2020-corner-bracket_v1_8
+    Chassis_1_2020-corner-bracket_v1_9:
+      original: 2020-corner-bracket v1 <9>
+      name: Chassis_1_2020-corner-bracket_v1_9
+    Chassis_1_2020-corner-bracket_v1_10:
+      original: 2020-corner-bracket v1 <10>
+      name: Chassis_1_2020-corner-bracket_v1_10
+    Chassis_1_2020-corner-bracket_v1_11:
+      original: 2020-corner-bracket v1 <11>
+      name: Chassis_1_2020-corner-bracket_v1_11
+    Chassis_1_2020-corner-bracket_v1_12:
+      original: 2020-corner-bracket v1 <12>
+      name: Chassis_1_2020-corner-bracket_v1_12
+    Chassis_1_Camera_support1_1:
+      original: Camera_support1 <1>
+      name: Chassis_1_Camera_support1_1
+    Chassis_1_Camera_support2_1:
+      original: Camera_support2 <1>
+      name: Chassis_1_Camera_support2_1
+    Chassis_1_Arm_Plate_1:
+      original: Arm_Plate <1>
+      name: Chassis_1_Arm_Plate_1
+    Chassis_1_Arm_Stand_1_1:
+      original: Arm Stand 1 <1>
+      name: Chassis_1_Arm_Stand_1_1
+    Chassis_1_Arm_Stand_4_1:
+      original: Arm Stand 4 <1>
+      name: Chassis_1_Arm_Stand_4_1
+    Chassis_1_Arm_Stand_2_1:
+      original: Arm Stand 2 <1>
+      name: Chassis_1_Arm_Stand_2_1
+    Chassis_1_Arm_Stand_3_1:
+      original: Arm Stand 3 <1>
+      name: Chassis_1_Arm_Stand_3_1
+    Chassis_1_Pipe_Front_1:
+      original: Pipe_Front <1>
+      name: Chassis_1_Pipe_Front_1
+    Chassis_1_Pipe_Back_1:
+      original: Pipe_Back <1>
+      name: Chassis_1_Pipe_Back_1
+    Chassis_1_Pipe_Left_1:
+      original: Pipe_Left <1>
+      name: Chassis_1_Pipe_Left_1
+    Chassis_1_Belly_1:
+      original: Belly <1>
+      name: Chassis_1_Belly_1
+    Chassis_1_Pipe_Right_1:
+      original: Pipe_Right <1>
+      name: Chassis_1_Pipe_Right_1
+    Chassis_1_Support1_1:
+      original: Support1 <1>
+      name: Chassis_1_Support1_1
+    Chassis_1_Support2_1:
+      original: Support2 <1>
+      name: Chassis_1_Support2_1
+    Chassis_1_Support_3_1:
+      original: Support 3 <1>
+      name: Chassis_1_Support_3_1
+    Chassis_1_Support5_1:
+      original: Support5 <1>
+      name: Chassis_1_Support5_1
+    Chassis_1_T-joint1_1:
+      original: T-joint1 <1>
+      name: Chassis_1_T-joint1_1
+    Chassis_1_T-joint2_1:
+      original: T-joint2 <1>
+      name: Chassis_1_T-joint2_1
+    Chassis_1_T-joint3_1:
+      original: T-joint3 <1>
+      name: Chassis_1_T-joint3_1
+    Chassis_1_T-joint4_1:
+      original: T-joint4 <1>
+      name: Chassis_1_T-joint4_1
+    Chassis_1_Battery_1_1:
+      original: Battery 1 <1>
+      name: Chassis_1_Battery_1_1
+    Chassis_1_Battery_Support_4_1:
+      original: Battery Support 4 <1>
+      name: Chassis_1_Battery_Support_4_1
+    Chassis_1_Battery_Support_3_1:
+      original: Battery Support 3 <1>
+      name: Chassis_1_Battery_Support_3_1
+    Chassis_1_Battery_Support_2_1:
+      original: Battery Support 2 <1>
+      name: Chassis_1_Battery_Support_2_1
+    Chassis_1_Battery_Support_1_1:
+      original: Battery Support 1 <1>
+      name: Chassis_1_Battery_Support_1_1
+    Chassis_1_Battery_Support_3_1_1:
+      original: Battery Support 3 (1) <1>
+      name: Chassis_1_Battery_Support_3_1_1
+    Chassis_1_Battery_Support_3_1_1_1:
+      original: Battery Support 3 (1) (1) <1>
+      name: Chassis_1_Battery_Support_3_1_1_1
+    Chassis_1_Battery_2_1:
+      original: Battery 2 <1>
+      name: Chassis_1_Battery_2_1
+    Chassis_1_Wellplate_Holder_1:
+      original: Wellplate Holder <1>
+      name: Chassis_1_Wellplate_Holder_1
+    Chassis_1_Arm_Stand_4_1_1:
+      original: Arm Stand 4 (1) <1>
+      name: Chassis_1_Arm_Stand_4_1_1
+    Chassis_1_Belly_1_1:
+      original: Belly (1) <1>
+      name: Chassis_1_Belly_1_1
+    Chassis_1_Arm_Stand_4_1_1_1:
+      original: Arm Stand 4 (1) (1) <1>
+      name: Chassis_1_Arm_Stand_4_1_1_1
+    Chassis_1_Battery_Support_3_1_1_1_1:
+      original: Battery Support 3 (1) (1) (1) <1>
+      name: Chassis_1_Battery_Support_3_1_1_1_1
+    Chassis_1_Battery_Support_3_1_1_1_1_1:
+      original: Battery Support 3 (1) (1) (1) (1) <1>
+      name: Chassis_1_Battery_Support_3_1_1_1_1_1
+    Chassis_1_Battery_2_1_1:
+      original: Battery 2 (1) <1>
+      name: Chassis_1_Battery_2_1_1
+    Chassis_1_T-joint4_1_1:
+      original: T-joint4 (1) <1>
+      name: Chassis_1_T-joint4_1_1
+    Chassis_1_T-joint3_1_1:
+      original: T-joint3 (1) <1>
+      name: Chassis_1_T-joint3_1_1
+    Chassis_1_Component50_1:
+      original: Component50 <1>
+      name: Chassis_1_Component50_1
+    Chassis_1_Component51_1:
+      original: Component51 <1>
+      name: Chassis_1_Component51_1
+    Chassis_1_Component52_1:
+      original: Component52 <1>
+      name: Chassis_1_Component52_1
+    Chassis_1_Component53_1:
+      original: Component53 <1>
+      name: Chassis_1_Component53_1
+    Chassis_1_Component54_1:
+      original: Component54 <1>
+      name: Chassis_1_Component54_1
+    Chassis_1_Camera_support1_1_1:
+      original: Camera_support1 (1) <1>
+      name: Chassis_1_Camera_support1_1_1
+    Chassis_1_Camera_support2_1_1:
+      original: Camera_support2 (1) <1>
+      name: Chassis_1_Camera_support2_1_1
+  mates:
+    Revolute_1:
+      original: Revolute 1
+      name: Revolute_1
+    Revolute_2:
+      original: Revolute 2
+      name: Revolute_2
+    Revolute_3:
+      original: Revolute 3
+      name: Revolute_3
+    Revolute_4:
+      original: Revolute 4
+      name: Revolute_4
+    Revolute_5:
+      original: Revolute 5
+      name: Revolute_5
+    Revolute_6:
+      original: Revolute 6
+      name: Revolute_6
+    Revolute_7:
+      original: Revolute 7
+      name: Revolute_7
+    Revolute_8:
+      original: Revolute 8
+      name: Revolute_8
+    Revolute_9:
+      original: Revolute 9
+      name: Revolute_9
+    Revolute_10:
+      original: Revolute 10
+      name: Revolute_10
+    Revolute_11:
+      original: Revolute 11
+      name: Revolute_11
+    Revolute_12:
+      original: Revolute 12
+      name: Revolute_12
+    Revolute_13:
+      original: Revolute 13
+      name: Revolute_13
+    Revolute_14:
+      original: Revolute 14
+      name: Revolute_14
+    Fastened_1:
+      original: Fastened 1
+      name: Fastened_1
+    Slider_1:
+      original: Slider 1
+      name: Slider_1
+    Slider_2:
+      original: Slider 2
+      name: Slider_2
