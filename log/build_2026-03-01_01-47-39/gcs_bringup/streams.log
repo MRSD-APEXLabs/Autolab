@@ -1,0 +1,23 @@
+[0.133s] Invoking command in '/home/ksriniv2/Autolab/build/gcs_bringup': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/ksriniv2/Autolab/gcs/ros_ws/src/gcs_bringup -DCMAKE_INSTALL_PREFIX=/home/ksriniv2/Autolab/install/gcs_bringup
+[0.694s] -- The C compiler identification is GNU 13.3.0
+[0.694s] -- The CXX compiler identification is GNU 13.3.0
+[0.694s] -- Detecting C compiler ABI info
+[0.694s] -- Detecting C compiler ABI info - done
+[0.694s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.694s] -- Detecting C compile features
+[0.694s] -- Detecting C compile features - done
+[0.694s] -- Detecting CXX compiler ABI info
+[0.694s] -- Detecting CXX compiler ABI info - done
+[0.694s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.694s] -- Detecting CXX compile features
+[0.694s] -- Detecting CXX compile features - done
+[0.694s] -- Found ament_cmake: 2.5.4 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[0.694s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+[0.695s] -- Found ament_lint_auto: 0.17.3 (/opt/ros/jazzy/share/ament_lint_auto/cmake)
+[0.695s] -- Added test 'lint_cmake' to check CMake code style
+[0.695s] -- Added test 'xmllint' to check XML markup files
+[0.695s] -- Configuring done (0.4s)
+[0.695s] -- Generating done (0.0s)
+[0.695s] -- Build files have been written to: /home/ksriniv2/Autolab/build/gcs_bringup
+[0.703s] Invoked command in '/home/ksriniv2/Autolab/build/gcs_bringup' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/ksriniv2/Autolab/gcs/ros_ws/src/gcs_bringup -DCMAKE_INSTALL_PREFIX=/home/ksriniv2/Autolab/install/gcs_bringup
+[0.703s] Invoking command in '/home/ksriniv2/Autolab/build/gcs_bringup': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake --build /home/ksriniv2/Autolab/build/gcs_bringup -- -j32 -l32

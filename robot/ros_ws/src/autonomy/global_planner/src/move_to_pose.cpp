@@ -21,6 +21,7 @@
 // └─────────────────────────────────────────────────────────────┘
 // ============================================================
 
+#include <std_msgs/msg/float64.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/robot_state/robot_state.h>
@@ -50,6 +51,40 @@
 
 #include <fstream>
 #include <iomanip>
+
+
+void add_collision_table(moveit::planning_interface::PlanningSceneInterface& psi)
+{
+    moveit_msgs::msg::CollisionObject table;
+    table.header.frame_id = "world";
+    table.id = "table";
+
+    // Define the shape (a flat box)
+    shape_msgs::msg::SolidPrimitive primitive;
+    primitive.type = primitive.BOX;
+    primitive.dimensions = {1.2, 1.2, 0.05}; // 1m x 1m x 5cm thick
+
+    // Define the pose (placed slightly below the robot base)
+    geometry_msgs::msg::Pose table_pose;
+    table_pose.orientation.w = 1.0;
+    table_pose.position.x = 0.75; // Centered in front of robot
+    table_pose.position.y = 0.0;
+    table_pose.position.z = 0.715; // Adjust this to match your robot's height
+
+    table.primitives.push_back(primitive);
+    table.primitive_poses.push_back(table_pose);
+    table.operation = table.ADD;
+    // moveit_msgs::msg::PlanningScene planning_scene_msg;
+    // planning_scene_msg.is_diff = true;
+
+    // // Force the ACM to ENABLE collision checking for the chassis
+    // planning_scene_msg.allowed_collision_matrix.entry_names.push_back("chassis_link_name"); // Replace with your link name
+    // planning_scene_msg.allowed_collision_matrix.entry_values.resize(1);
+    // planning_scene_msg.allowed_collision_matrix.entry_values[0].enabled.push_back(false); // false = "Not Allowed" to collide (meaning it WILL check for collisions)
+    // psi.applyPlanningScene(planning_scene_msg);
+
+    psi.applyCollisionObject(table);
+}
 
 void saveTrajectoryToFile(
     const moveit_msgs::msg::RobotTrajectory &traj,
@@ -101,14 +136,17 @@ static constexpr int    INPUT_TIMEOUT_SEC         = 5;
 
 namespace defaults
 {
-    static const std::string TASK_TYPE = "Move";
+    static const std::string TASK_TYPE = "Grasp";
 
     static geometry_msgs::msg::Pose target_pose()
     {
         geometry_msgs::msg::Pose p;
-        p.position.x = 0.4282039701938629;
-        p.position.y = 0.222386356722563505;
-        p.position.z = 1.223787112906575203;
+        // p.position.x = 0.4282039701938629;
+        // p.position.y = 0.222386356722563505;
+        // p.position.z = 1.223787112906575203;
+        p.position.x = 0.54;
+        p.position.y = 0.40;
+        p.position.z = 0.96;
 
         // Matches interactive marker exactly: z=1, w≈0 → RPY=(0, 0, PI)
         tf2::Quaternion q;
@@ -196,8 +234,9 @@ visualization_msgs::msg::Marker make_path_marker(
 //  Returns the plan so CHOMP can reuse the goal joint state.
 // ──────────────────────────────────────────────────────────────
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
-    const std::string                                              &task_type,
-    const geometry_msgs::msg::Pose                                 &target_pose,
+    const std::string &task_type,
+    const geometry_msgs::msg::Pose &target_pose,
+    const std::optional<double> &live_grasp_width, // ADD THIS
     moveit::planning_interface::MoveGroupInterface                 &arm_group,
     moveit::planning_interface::MoveGroupInterface                 &gripper_group,
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr              &pub_rrt_path,
@@ -266,10 +305,30 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     pub_rrt_viz->publish(rrt_marker);
     RCLCPP_INFO(node->get_logger(), "[RRT*] Visualisation marker published.");
 
+    // ... inside plan_and_publish_rrt ...
+
     RCLCPP_INFO(node->get_logger(), "[RRT*] Plan succeeded, executing...");
 
+    // 1. Execute the arm motion (This is a blocking call)
+    auto error_code = arm_group.execute(plan);
 
-    arm_group.execute(plan);
+    if (error_code == moveit::core::MoveItErrorCode::SUCCESS) {
+        RCLCPP_INFO(node->get_logger(), "Arm reached target. Waiting for state synchronization...");
+        
+        // 2. THE WORKAROUND: Give the Planning Scene Monitor 500ms to 
+        // update the robot's "Current State" from /joint_states.
+        rclcpp::sleep_for(std::chrono::milliseconds(500)); 
+    } else {
+        RCLCPP_ERROR(node->get_logger(), "Arm execution failed with error code: %d", (int)error_code.val);
+        return std::nullopt;
+    }
+
+    // 3. Force an update so the next planning step knows exactly where we are
+    arm_group.setStartStateToCurrentState();
+    gripper_group.setStartStateToCurrentState();
+
+    // ... proceed to return the plan or handle the gripper ...
+    
 
     // -- publish path --
     nav_msgs::msg::Path rrt_path;
@@ -287,19 +346,21 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
                 rrt_path.poses.size());
 
 
-    // -- gripper --
-    if (task_type == "Grasp")
-    {
-        gripper_group.setNamedTarget("gripper_open");
-        moveit::planning_interface::MoveGroupInterface::Plan gripper_plan;
-        if (gripper_group.plan(gripper_plan) == moveit::core::MoveItErrorCode::SUCCESS)
-        {
-            RCLCPP_INFO(node->get_logger(), "[RRT*] Gripper executing...");
-            gripper_group.execute(gripper_plan);
-        }
-        else
-            RCLCPP_WARN(node->get_logger(), "[RRT*] Gripper plan failed, skipping.");
-    }
+//     // -- gripper execution --
+// // 3. Final Grasp Actuation (Only if Task is Grasp)
+//     if (task_type == "Grasp") {
+//         double width = live_grasp_width.value_or(0.05); // Default to 85mm
+//         double slider_val = width / 2.0;
+
+//         RCLCPP_INFO(node->get_logger(), "[Grasp] Closing gripper to width: %.3f", width);
+
+//         std::map<std::string, double> gripper_joints;
+//         gripper_joints["Slider_1"] = slider_val;
+//         gripper_joints["Slider_2"] = slider_val;
+
+//         gripper_group.setJointValueTarget(gripper_joints);
+//         gripper_group.move();
+//     }
 
     std_msgs::msg::String status;  status.data = "RRT_SUCCESS";
     pub_status->publish(status);
@@ -383,22 +444,64 @@ void plan_and_publish_chomp(
     pub_chomp_viz->publish(chomp_marker);
     RCLCPP_INFO(node->get_logger(), "[CHOMP] Visualisation marker published.");
 
-    // -- gripper --
-    if (task_type == "Grasp")
-    {
-        gripper_group.setNamedTarget("gripper_open");
-        moveit::planning_interface::MoveGroupInterface::Plan gripper_plan;
-        if (gripper_group.plan(gripper_plan) == moveit::core::MoveItErrorCode::SUCCESS)
-        {
-            RCLCPP_INFO(node->get_logger(), "[CHOMP] Gripper executing...");
-            gripper_group.execute(gripper_plan);
-        }
-        else
-            RCLCPP_WARN(node->get_logger(), "[CHOMP] Gripper plan failed, skipping.");
-    }
-
     std_msgs::msg::String status;  status.data = "CHOMP_SUCCESS";
     pub_status->publish(status);
+}
+void add_hollow_point_cloud_obstacle(moveit::planning_interface::PlanningSceneInterface& psi)
+{
+    moveit_msgs::msg::CollisionObject obj;
+    obj.header.frame_id = "world";
+    obj.id = "hollow_front_open_cube";
+
+    // Define the "Point" shape (a tiny sphere)
+    shape_msgs::msg::SolidPrimitive pt;
+    pt.type = pt.SPHERE;
+    pt.dimensions = {0.02}; // 2cm diameter per point
+
+    // Updated Parameters
+    double cx = 0.7;      // Shifted in X (further from robot)
+    double cy = 0.35; 
+    double cz = 1.02;      // Height
+    double size = 0.5;     // 30cm cube
+    
+    double res = 0.04;     // Spacing between points
+    double s = size / 2.0;
+
+    // Helper to add a point to the object
+    auto add_pt = [&](double x, double y, double z) {
+        geometry_msgs::msg::Pose p;
+        p.position.x = x; p.position.y = y; p.position.z = z;
+        p.orientation.w = 1.0;
+        obj.primitives.push_back(pt);
+        obj.primitive_poses.push_back(p);
+    };
+
+    // Generate 5 faces. 
+    // We omit the "Front" face (the one at cx - s, which faces the robot).
+    for (double i = -s; i <= s; i += res) {
+        for (double j = -s; j <= s; j += res) {
+            
+            // 1. Bottom Face (z = -s)
+            add_pt(cx + i, cy + j, cz - s);
+            
+            // 2. Top Face (z = +s) <-- Now CLOSED
+            add_pt(cx + i, cy + j, cz + s);
+            
+            // 3. Back Face (x = +s) <-- Away from robot
+            add_pt(cx + s, cy + i, cz + j);
+            
+            // 4. Left Side (y = -s)
+            add_pt(cx + i, cy - s, cz + j);
+            
+            // 5. Right Side (y = +s)
+            add_pt(cx + i, cy + s, cz + j);
+
+            // Note: We skip the "Front Face" (x = -s) so the arm can enter horizontally.
+        }
+    }
+
+    obj.operation = obj.ADD;
+    psi.applyCollisionObject(obj);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -421,7 +524,11 @@ int main(int argc, char *argv[])
     // ── MoveIt planning groups ─────────────────────────────────────────────
     moveit::planning_interface::MoveGroupInterface arm_group(node, "demo_arm_bot");
     moveit::planning_interface::MoveGroupInterface gripper_group(node, "demo_gripper_bot");
-
+    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+    add_collision_table(planning_scene_interface);
+    // ... inside main ...
+    // add_collision_table(planning_scene_interface);
+    // add_hollow_point_cloud_obstacle(planning_scene_interface);
     arm_group.setPoseReferenceFrame("world");
     arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
 
@@ -460,6 +567,8 @@ int main(int argc, char *argv[])
                               "/planning/chomp_trajectory", 10);
     auto pub_status     = node->create_publisher<std_msgs::msg::String>(
                               "/planning/status",           10);
+    auto pub_dummy_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>(
+    "/perception/dummy_obstacle_cloud", 10);
     // Visualisation: green = RRT path,  blue = CHOMP trajectory
     // Add /planning/rrt_viz and /planning/chomp_viz as
     // Marker displays in RViz to see the paths.
@@ -472,6 +581,8 @@ int main(int argc, char *argv[])
     std::optional<geometry_msgs::msg::Pose>      live_target_pose;
     std::optional<std::string>                   live_task_type;
     sensor_msgs::msg::JointState::SharedPtr      live_joint_state;
+    std::optional<double>                        live_grasp_width; // NEW: Grasp width in meters
+    sensor_msgs::msg::PointCloud2::SharedPtr latest_obstacle_cloud;
 
     // ── Subscribers ───────────────────────────────────────────────────────
 
@@ -489,12 +600,9 @@ int main(int argc, char *argv[])
     // Obstacle point cloud from perception  →  collision scene
     auto sub_obstacle_cloud = node->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/perception/obstacle_pointcloud",
-        rclcpp::QoS(1).durability_volatile().best_effort(),
-        [&node](const sensor_msgs::msg::PointCloud2::SharedPtr msg)
-        {
-            RCLCPP_DEBUG(node->get_logger(), "Obstacle cloud received: %u x %u points.",
-                         msg->width, msg->height);
-            // TODO: forward to MoveIt PlanningSceneInterface as collision objects
+        rclcpp::QoS(1).best_effort(),
+        [&latest_obstacle_cloud](const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+            latest_obstacle_cloud = msg;
         });
 
     // Target pose from perception
@@ -506,6 +614,16 @@ int main(int argc, char *argv[])
             live_target_pose = msg->pose;
             RCLCPP_INFO(node->get_logger(), "Target pose received: (%.3f, %.3f, %.3f)",
                         msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+        });
+
+        // Grasp width from perception
+    auto sub_grasp_width = node->create_subscription<std_msgs::msg::Float64>(
+        "/perception/grasp_width", 
+        rclcpp::QoS(10).reliable(),
+        [&live_grasp_width, &node](const std_msgs::msg::Float64::SharedPtr msg)
+        {
+            live_grasp_width = msg->data;
+            RCLCPP_INFO(node->get_logger(), "Grasp width received: %.3f m", msg->data);
         });
 
     // Task type from task planner  ("Move" | "Grasp" | "Place")
@@ -537,6 +655,18 @@ int main(int argc, char *argv[])
     // ── Wait for perception input, then fall back to defaults if needed ───
     RCLCPP_INFO(node->get_logger(), "Waiting %d s for perception input...", INPUT_TIMEOUT_SEC);
     std::this_thread::sleep_for(std::chrono::seconds(INPUT_TIMEOUT_SEC));
+    if (latest_obstacle_cloud) {
+        RCLCPP_INFO(node->get_logger(), "Live obstacle cloud detected.");
+        // If you want to process the live cloud, do it here.
+    } else {
+        RCLCPP_WARN(node->get_logger(), "No live cloud. Adding hollow fallback to Planning Scene...");
+        add_hollow_point_cloud_obstacle(planning_scene_interface);
+    }
+
+    // Convert the 5 faces into collision boxes so the robot doesn't hit them
+    // MoveIt works much better with 'Boxes' than raw points for RRT*
+    std::vector<moveit_msgs::msg::CollisionObject> collision_objects;
+
 
     const geometry_msgs::msg::Pose target_pose =
         live_target_pose.has_value() ? live_target_pose.value() : defaults::target_pose();
@@ -562,7 +692,7 @@ int main(int argc, char *argv[])
 
     // ── Stage 1: RRT* (OMPL)  →  /planning/rrt_path ─────────────────
     auto rrt_plan_opt = plan_and_publish_rrt(
-        task_type, target_pose,
+        task_type, target_pose, live_grasp_width, // PASS IT HERE
         arm_group, gripper_group,
         pub_rrt_path, pub_status, pub_rrt_viz, node);
         
@@ -576,16 +706,41 @@ int main(int argc, char *argv[])
 
     // ── Stage 2: CHOMP  →  /planning/chomp_trajectory ────────────────
     // CHOMP reuses the RRT goal joint state (no IK plugin required)
+    // 2. Conditional Stage 2: 
+    // Inside main()
     if (rrt_plan_opt.has_value())
     {
-        plan_and_publish_chomp(
-            task_type, rrt_plan_opt.value(),
-            arm_group, gripper_group,
-            pub_chomp_traj, pub_status, pub_chomp_viz, node);
-    }
-    else
-    {
-        RCLCPP_WARN(node->get_logger(), "Skipping CHOMP: RRT did not produce a valid plan.");
+        // ONLY run CHOMP if it's a Move task. 
+        // If it's a Grasp, the RRT function already finished the job.
+        if (task_type == "Move") 
+        {
+            plan_and_publish_chomp(
+                task_type, rrt_plan_opt.value(),
+                arm_group, gripper_group,
+                pub_chomp_traj, pub_status, pub_chomp_viz, node);
+        }
+        else if (task_type == "Grasp") {
+            // We are already at the target pose from the RRT stage.
+            // Now just actuate the gripper.
+            double width = live_grasp_width.value_or(0.05);
+            double slider_val = width / 2.0;
+
+            RCLCPP_INFO(node->get_logger(), "[Grasp] Closing gripper at target position.");
+
+            std::map<std::string, double> gripper_joints;
+            gripper_joints["Slider_1"] = slider_val;
+            gripper_joints["Slider_2"] = slider_val;
+            gripper_group.setStartStateToCurrentState();
+            gripper_group.setJointValueTarget(gripper_joints);
+
+            
+            // Use move() which is blocking - it ensures the gripper 
+            // closes before the program finishes.
+            gripper_group.move(); 
+            // After gripper_group.move();
+            arm_group.clearPoseTargets();
+            gripper_group.clearPoseTargets();
+        }
     }
 
     // ── Clean shutdown ────────────────────────────────────────────────────

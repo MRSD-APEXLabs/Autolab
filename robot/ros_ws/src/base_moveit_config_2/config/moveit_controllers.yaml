@@ -1,5 +1,3 @@
-# MoveIt uses this configuration for controller management
-
 moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
 
 moveit_simple_controller_manager:
@@ -9,6 +7,8 @@ moveit_simple_controller_manager:
 
   demo_arm_bot_controller:
     type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory  # Isaac Sim / ros2_control standard
+    default: True
     joints:
       - Revolute_9
       - Revolute_10
@@ -16,8 +16,11 @@ moveit_simple_controller_manager:
       - Revolute_12
       - Revolute_13
       - Revolute_14
+
   demo_gripper_bot_controller:
     type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: True
     joints:
       - Slider_1
       - Slider_2

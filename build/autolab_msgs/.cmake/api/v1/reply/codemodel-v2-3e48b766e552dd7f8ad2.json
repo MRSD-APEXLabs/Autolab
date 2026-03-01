@@ -1,0 +1,242 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-a7c4fbe315c078a74ee3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				},
+				{
+					"build" : "autolab_msgs__py",
+					"jsonFile" : "directory-autolab_msgs__py-684972a679c115b73dcd.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/ksriniv2/Autolab/build/autolab_msgs/autolab_msgs__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "autolab_msgs",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_autolab_msgs_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_autolab_msgs_egg-272d69d130820ec8f070.json",
+					"name" : "ament_cmake_python_build_autolab_msgs_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_autolab_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_autolab_msgs-102b1d26cc9e8c12922a.json",
+					"name" : "ament_cmake_python_copy_autolab_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs-a3961653f76bf8066d33.json",
+					"name" : "autolab_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__cpp-60c0fedf36287004b958.json",
+					"name" : "autolab_msgs__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "autolab_msgs__py::@5ddc7442bf56d6ec620f",
+					"jsonFile" : "target-autolab_msgs__py-22c0ee399fbeb92c1f4f.json",
+					"name" : "autolab_msgs__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_generator_c-ed85b78e5e003f2a97d1.json",
+					"name" : "autolab_msgs__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_generator_py-6c4366905d9c2f1ee157.json",
+					"name" : "autolab_msgs__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_generator_type_description::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_generator_type_description-dbe3590e9ac1f922ab1a.json",
+					"name" : "autolab_msgs__rosidl_generator_type_description",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_c-aea8a38e58c0bb36292e.json",
+					"name" : "autolab_msgs__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_cpp-dd1dc336715178a98bf7.json",
+					"name" : "autolab_msgs__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_fastrtps_c-dd27fe14fd0449f08ee1.json",
+					"name" : "autolab_msgs__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_fastrtps_cpp-73a23d54e21989bc797e.json",
+					"name" : "autolab_msgs__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_introspection_c-c75b0bab85d1cc00efb4.json",
+					"name" : "autolab_msgs__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs__rosidl_typesupport_introspection_cpp-8b9324a4c329cb6b4a19.json",
+					"name" : "autolab_msgs__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs_s__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs_s__rosidl_typesupport_c-fdfc5d36c7176c346544.json",
+					"name" : "autolab_msgs_s__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs_s__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs_s__rosidl_typesupport_fastrtps_c-a21357d57a79d6476a6a.json",
+					"name" : "autolab_msgs_s__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs_s__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs_s__rosidl_typesupport_introspection_c-9df0823fb2702fa159ad.json",
+					"name" : "autolab_msgs_s__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "autolab_msgs_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-autolab_msgs_uninstall-21b9ae60c44d09a4154a.json",
+					"name" : "autolab_msgs_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-92efcaaea81ce8a5876a.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/ksriniv2/Autolab/build/autolab_msgs",
+		"source" : "/home/ksriniv2/Autolab/common/ros_packages/autolab_msgs"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 6
+	}
+}

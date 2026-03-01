@@ -7,5 +7,5 @@ initial_positions:
   Revolute_13: 0
   Revolute_14: 0
   Revolute_9: 0
-  Slider_1: 0
-  Slider_2: 0
+  Slider_1: 0.05
+  Slider_2: 0.05
