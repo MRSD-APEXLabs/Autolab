@@ -88,6 +88,7 @@ RUN apt update -y && apt install -y \
   ros-humble-joint-state-broadcaster \
   ros-humble-joint-trajectory-controller \
   ros-humble-ros2-control-test-assets \
+  ros-humble-moveit-visual-tools \
   ros-humble-stereo-image-proc \
   ros-humble-image-view \
   ros-humble-topic-tools \

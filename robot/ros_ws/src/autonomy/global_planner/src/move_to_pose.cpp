@@ -24,6 +24,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/robot_state/robot_state.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
+#include <moveit_msgs/msg/collision_object.hpp>
+
 
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -104,8 +107,8 @@ namespace defaults
     {
         geometry_msgs::msg::Pose p;
         p.position.x = 0.4282039701938629;
-        p.position.y = 0.0022386356722563505;
-        p.position.z = 0.023787112906575203;
+        p.position.y = 0.222386356722563505;
+        p.position.z = 1.223787112906575203;
 
         // Matches interactive marker exactly: z=1, w≈0 → RPY=(0, 0, PI)
         tf2::Quaternion q;
@@ -403,6 +406,10 @@ void plan_and_publish_chomp(
 // ──────────────────────────────────────────────────────────────
 int main(int argc, char *argv[])
 {
+
+
+
+
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared("move_to_pose_node");
 
@@ -558,6 +565,14 @@ int main(int argc, char *argv[])
         task_type, target_pose,
         arm_group, gripper_group,
         pub_rrt_path, pub_status, pub_rrt_viz, node);
+        
+    
+    // moveit_visual_tools::MoveItVisualTools visual_tools(node, "world", "demo_arm_bot");
+    // visual_tools.deleteAllMarkers();
+
+    // // Whenever you plan:
+    // visual_tools.publishTrajectoryLine(plan.trajectory_, ik_jmg);
+    // visual_tools.trigger(); // This pushes all queued markers to RViz at once
 
     // ── Stage 2: CHOMP  →  /planning/chomp_trajectory ────────────────
     // CHOMP reuses the RRT goal joint state (no IK plugin required)

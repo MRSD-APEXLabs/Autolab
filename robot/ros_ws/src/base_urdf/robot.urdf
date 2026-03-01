@@ -522,6 +522,6 @@
     <joint name="world_to_robot" type="fixed">
     <parent link="world"/>
     <child link="Chassis_1"/>
-    <origin xyz="0 0 0" rpy="0 3.14159261 0"/>  <!-- flip around X -->
+    <origin xyz="0 0 0.893" rpy="0 3.14159261 0"/>  <!-- flip around X -->
   </joint>
 </robot>
