@@ -57,6 +57,8 @@ RUN USER=gcs && \
   mkdir -p /etc/fixuid && \
   printf "user: $USER\ngroup: $GROUP\n" > /etc/fixuid/config.yml
 
+RUN USER=gcs && GROUP=gcs && mkdir -p /run/mosquitto && chown gcs:gcs /run/mosquitto
+
 # Cleanup. Prevent people accidentally doing git commits from within Docker
 RUN apt purge git -y && apt autoremove -y && apt clean -y && rm -rf /var/lib/apt/lists/*
 
