@@ -167,4 +167,4 @@ fi
 
 export RCUTILS_COLORIZED_OUTPUT=1
 
-export ROS_DOMAIN_ID=0
+#export ROS_DOMAIN_ID=0
