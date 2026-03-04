@@ -1,0 +1,14 @@
+filebeat.inputs:
+  - type: mqtt
+    hosts: ["tcp://gcs:1883"]
+    topics: ["#"]
+    client_id: filebeat-autolab
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "ros2-telemetry-%{+yyyy.MM.dd}"
+
+setup.ilm.enabled: false
+setup.template.enabled: false
+
+logging.level: info
