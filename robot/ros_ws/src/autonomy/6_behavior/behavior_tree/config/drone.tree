@@ -1,5 +1,14 @@
 ?
 	->
+		(Command Lab Machine)
+		?
+			->
+				(OT-2 Liquid Handler)
+				[Execute OT-2 Protocol]
+			->
+				(Custom Shaker Module)
+				[Execute Shaker Protocol]
+	->
 		(Pause Commanded)
 		?
 			[Pause]
