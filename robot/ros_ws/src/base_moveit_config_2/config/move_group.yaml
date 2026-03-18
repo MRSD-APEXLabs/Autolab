@@ -386,9 +386,9 @@
       link="Finger_right_2"/><axis xyz="0 0 -1"/><limit effort="1" lower="-0.1" upper="0.1"
       velocity="1"/></joint><joint name="world_to_robot" type="fixed"><parent link="world"/><child
       link="Chassis_1"/><origin rpy="0 3.14159261 0" xyz="0 0 0"/><!-- flip around
-      X --></joint><ros2_control name="FakeSystem" type="system"><hardware><!-- By
+      X --></joint><ros2_control name="TopicBasedSystem" type="system"><hardware><!-- By
       default, set up controllers for simulation. This won't work on real hardware
-      --><plugin>mock_components/GenericSystem</plugin></hardware><joint name="Revolute_9"><command_interface
+      --><plugin>topic_based_ros2_control/TopicBasedSystem</plugin><param name="joint_commands_topic">/isaac/joint_commands</param><param name="joint_states_topic">/isaac/joint_states</param></hardware><joint name="Revolute_9"><command_interface
       name="position"/><state_interface name="position"><param name="initial_value">0</param></state_interface><state_interface
       name="velocity"/></joint><joint name="Revolute_10"><command_interface name="position"/><state_interface
       name="position"><param name="initial_value">0</param></state_interface><state_interface

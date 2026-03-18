@@ -1,0 +1,13 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from behavior_tree_msgs/msg/BehaviorTreeCommands.msg
+// generated code does not contain a copyright notice
+
+#include "behavior_tree_msgs/msg/BehaviorTreeCommand.idl"
+
+module behavior_tree_msgs {
+  module msg {
+    struct BehaviorTreeCommands {
+      sequence<behavior_tree_msgs::msg::BehaviorTreeCommand> commands;
+    };
+  };
+};
