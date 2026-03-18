@@ -39,6 +39,9 @@ services:
       - FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/fastdds.xml
       - ISAACSIM_PATH=/isaac-sim
       - ISAACSIM_PYTHON=/isaac-sim/python.sh
+      - ROS_DOMAIN_ID=0
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     deploy:
       resources:
         reservations:
@@ -79,3 +82,4 @@ services:
         tmux send-keys -t isaac '/isaac-sim/runapp.sh' ENTER; 
       sleep infinity"
     networks: !reset null
+   

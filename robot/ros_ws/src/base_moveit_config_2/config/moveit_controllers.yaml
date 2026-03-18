@@ -24,3 +24,7 @@ moveit_simple_controller_manager:
     joints:
       - Slider_1
       - Slider_2
+trajectory_execution:
+  allowed_start_tolerance: 0.05
+  allowed_execution_duration_scaling: 2.0
+  allowed_goal_duration_margin: 0.5

@@ -63,3 +63,17 @@ Flow of the code
         If "Grasp": Actuates the gripper sliders to the live_grasp_width using gripper_group.move().
 
         Data Logging: Saves the final time-stamped joint trajectories to .txt files for analysis
+        
+Additional code to run integration with isaac-sim 
+
+sudo apt update
+sudo apt install ros-humble-topic-based-ros2-control
+
+ros2 run controller_manager ros2_control_node --ros-args -p use_sim_time:=True
+
+# Check if controller is running
+ros2 control list_controllers
+Should output
+
+# Check live ee pose
+ros2 run tf2_ros tf2_echo world end_effector_p4_1
