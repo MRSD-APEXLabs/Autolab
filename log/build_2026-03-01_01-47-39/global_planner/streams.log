@@ -1,0 +1,46 @@
+[0.132s] Invoking command in '/home/ksriniv2/Autolab/build/global_planner': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/ksriniv2/Autolab/robot/ros_ws/src/autonomy/global_planner -DCMAKE_INSTALL_PREFIX=/home/ksriniv2/Autolab/install/global_planner
+[0.694s] -- The C compiler identification is GNU 13.3.0
+[0.694s] -- The CXX compiler identification is GNU 13.3.0
+[0.694s] -- Detecting C compiler ABI info
+[0.694s] -- Detecting C compiler ABI info - done
+[0.694s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.694s] -- Detecting C compile features
+[0.694s] -- Detecting C compile features - done
+[0.694s] -- Detecting CXX compiler ABI info
+[0.694s] -- Detecting CXX compiler ABI info - done
+[0.694s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.694s] -- Detecting CXX compile features
+[0.694s] -- Detecting CXX compile features - done
+[0.694s] -- Found ament_cmake: 2.5.4 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[0.694s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+[0.694s] -- Found rclcpp: 28.1.13 (/opt/ros/jazzy/share/rclcpp/cmake)
+[0.694s] -- Found rosidl_generator_c: 4.6.6 (/opt/ros/jazzy/share/rosidl_generator_c/cmake)
+[0.694s] -- Found rosidl_generator_cpp: 4.6.6 (/opt/ros/jazzy/share/rosidl_generator_cpp/cmake)
+[0.694s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.694s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.694s] -- Found rmw_implementation_cmake: 7.3.2 (/opt/ros/jazzy/share/rmw_implementation_cmake/cmake)
+[0.694s] -- Found rmw_fastrtps_cpp: 8.4.3 (/opt/ros/jazzy/share/rmw_fastrtps_cpp/cmake)
+[0.694s] -- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.13")  
+[0.694s] -- Found FastRTPS: /opt/ros/jazzy/include (Required is at least version "2.13") 
+[0.695s] -- Using RMW implementation 'rmw_fastrtps_cpp' as default
+[0.695s] -- Configuring incomplete, errors occurred!
+[0.695s] [31mCMake Error at CMakeLists.txt:10 (find_package):
+[0.695s]   By not providing "Findmoveit_ros_planning_interface.cmake" in
+[0.695s]   CMAKE_MODULE_PATH this project has asked CMake to find a package
+[0.695s]   configuration file provided by "moveit_ros_planning_interface", but CMake
+[0.695s]   did not find one.
+[0.695s] 
+[0.695s]   Could not find a package configuration file provided by
+[0.695s]   "moveit_ros_planning_interface" with any of the following names:
+[0.695s] 
+[0.695s]     moveit_ros_planning_interfaceConfig.cmake
+[0.695s]     moveit_ros_planning_interface-config.cmake
+[0.695s] 
+[0.695s]   Add the installation prefix of "moveit_ros_planning_interface" to
+[0.695s]   CMAKE_PREFIX_PATH or set "moveit_ros_planning_interface_DIR" to a directory
+[0.695s]   containing one of the above files.  If "moveit_ros_planning_interface"
+[0.695s]   provides a separate development package or SDK, be sure it has been
+[0.695s]   installed.
+[0.695s] 
+[0.695s] [0m
+[0.702s] Invoked command in '/home/ksriniv2/Autolab/build/global_planner' returned '1': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/ksriniv2/Autolab/robot/ros_ws/src/autonomy/global_planner -DCMAKE_INSTALL_PREFIX=/home/ksriniv2/Autolab/install/global_planner

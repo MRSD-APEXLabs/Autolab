@@ -216,3 +216,5 @@ fi
 
 export RCUTILS_COLORIZED_OUTPUT=1  # get colored output from ROS2 tools
 
+export ROS_DOMAIN_ID=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
