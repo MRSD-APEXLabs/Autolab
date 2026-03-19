@@ -1,0 +1,14 @@
+groups:
+  - Commands:
+    - Fixed Trajectory:
+        condition_name: Fixed Trajectory Commanded
+    - Global Plan:
+        condition_name: Global Plan Commanded
+    - Pause:
+        condition_name: Pause Commanded
+    - Rewind:
+        condition_name: Rewind Commanded
+    - Disarm:
+        condition_name: Disarm Commanded
+    - Autonomously Explore:
+        condition_name: Autonomously Explore Commanded

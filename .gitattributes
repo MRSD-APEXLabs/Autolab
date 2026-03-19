@@ -1,2 +1,8 @@
+<<<<<<< HEAD
 *.pt filter=lfs diff=lfs merge=lfs -text
 weights/**/*.pt filter=lfs diff=lfs merge=lfs -text
+=======
+*.step filter=lfs diff=lfs merge=lfs -text
+*.usd filter=lfs diff=lfs merge=lfs -text
+*.so filter=lfs diff=lfs merge=lfs -text
+>>>>>>> 71c29d4f1cab83c66fc3bc23c1a7fce63dfd5ec8

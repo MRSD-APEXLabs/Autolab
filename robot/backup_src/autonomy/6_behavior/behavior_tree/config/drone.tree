@@ -1,0 +1,41 @@
+?
+	->
+		(Pause Commanded)
+		?
+			[Pause]
+	->
+		(Rewind Commanded)
+		?
+			[Rewind]
+	->
+		(Fixed Trajectory Commanded)
+		?
+			[Follow Fixed Trajectory]
+	->
+		(Global Plan Commanded)
+		?
+			[Follow Global Plan]
+	->
+		(Arm Commanded)
+		?
+			(Armed)
+			[Arm]
+	->
+		(Disarm Commanded)
+		?
+			<!>
+				(Armed)
+			[Disarm]
+	->
+		(Autonomously Explore Commanded)
+		->
+			<!>
+				(State Estimate Timed Out)
+			?
+				(Armed)
+				[Arm]
+		?
+			->
+				(Stuck)
+				[Rewind]
+			[Follow Global Plan]

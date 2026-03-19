@@ -1,0 +1,85 @@
+services:
+  isaac-sim:
+    profiles:
+      - ""
+      - sitl
+    image: &image_tag ${PROJECT_DOCKER_REGISTRY}/${PROJECT_NAME}:v${DOCKER_IMAGE_TAG}_isaac-sim
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.isaac-ros
+      tags:
+        - *image_tag
+    container_name: isaac-sim
+    entrypoint: ""  # override default entrypoint
+    command: >
+      bash -c "
+      tmux new -d -s isaac;
+      if [ $$AUTOLAUNCH = 'true' ]; then
+        if [ \"${ISAAC_SIM_USE_STANDALONE_SCRIPT}\" = 'true' ]; then
+          tmux send-keys -t isaac '/isaac-sim/python.sh /root/Autolab/simulation/isaac-sim/launch_scripts/${ISAAC_SIM_SCRIPT_NAME}' ENTER
+        else
+          tmux send-keys -t isaac 'ros2 launch isaacsim run_isaacsim.launch.py gui:=\"${ISAAC_SIM_GUI}\" play_sim_on_start:=\"${PLAY_SIM_ON_START}\" ' ENTER
+        fi
+        # start ZED streamer explicitly, bind to 0.0.0.0
+        tmux send-keys -t isaac 'zedx-streamer-cli --bind-ip 0.0.0.0 --port 30000 --verbose' ENTER
+      fi;
+      sleep infinity"
+    stdin_open: true
+    tty: true
+    ipc: host
+    privileged: true
+    network_mode: host   # simpler networking for ZED
+    devices:
+      - /dev/bus/usb:/dev/bus/usb   # full USB access
+    environment:
+      - AUTOLAUNCH=${AUTOLAUNCH:-'false'}
+      - DISPLAY
+      - QT_X11_NO_MITSHM=1
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/fastdds.xml
+      - ISAACSIM_PATH=/isaac-sim
+      - ISAACSIM_PYTHON=/isaac-sim/python.sh
+      - ROS_DOMAIN_ID=0
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - $HOME/.Xauthority:/root/.Xauthority
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - $HOME/Documents/isaac_sim_data/cache/kit:/isaac-sim/kit/cache:rw
+      - $HOME/Documents/isaac_sim_data/cache/ov:/root/.cache/ov:rw
+      - $HOME/Documents/isaac_sim_data/cache/pip:/root/.cache/pip:rw
+      - $HOME/Documents/isaac_sim_data/cache/glcache:/root/.cache/nvidia/GLCache:rw
+      - $HOME/Documents/isaac_sim_data/cache/computecache:/root/.nv/ComputeCache:rw
+      - $HOME/Documents/isaac_sim_data/logs:/root/.nvidia-omniverse/logs:rw
+      - $HOME/Documents/isaac_sim_data/data:/root/.local/share/ov/data:rw
+      - $HOME/documents/isaac_sim_data/documents:/root/Documents:rw
+      - ./user.config.json:/root/.local/share/ov/data/Kit/Isaac-Sim Full/4.5/user.config.json:rw
+      - ./ui.py:/isaac-sim/kit/exts/omni.kit.widget.nucleus_connector/omni/kit/widget/nucleus_connector/ui.py:rw
+      - .dev:/root/.dev:rw
+      - .bashrc:/root/.bashrc:rw
+      - ../../../common/inputrc:/etc/inputrc:rw
+      - ../../../common/.tmux.conf:/root/.tmux.conf:rw
+      - ../../..:/root/Autolab:rw
+      - ../../../.devcontainer/isaac-sim/launch.json:/root/Autolab/.vscode/launch.json:rw
+      - ../../../.devcontainer/isaac-sim/tasks.json:/root/Autolab/.vscode/tasks.json:rw
+      - ../config/sim_to_robot_bridge.yaml:/sim_to_robot_bridge.yaml:ro
+
+  isaac-sim-gui:
+    extends:
+      service: isaac-sim
+    container_name: isaac-sim-gui
+    profiles: !override
+      - isaac-sim-gui
+    command: >
+      bash -c "tmux new -d -s isaac; 
+        tmux send-keys -t isaac '/isaac-sim/runapp.sh' ENTER; 
+      sleep infinity"
+    networks: !reset null
+   

@@ -1,0 +1,8 @@
+{
+  "package_name": "autolab_msgs",
+  "non_idl_tuples": [
+    "/home/ksriniv2/Autolab/common/ros_packages/autolab_msgs:msg/TrajectoryXYZVYaw.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/autolab_msgs:msg/WaypointXYZVYaw.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/autolab_msgs:msg/Odometry.msg"
+  ]
+}

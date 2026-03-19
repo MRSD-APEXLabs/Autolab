@@ -1,0 +1,25 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: base_urdf
+    relative_path: robot.urdf
+  srdf:
+    relative_path: config/demo_bot.srdf
+  package_settings:
+    author_name: Karthik Srinivasan
+    author_email: ksriniv2@andrew.cmu.edu
+    generated_timestamp: 1771703003
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity

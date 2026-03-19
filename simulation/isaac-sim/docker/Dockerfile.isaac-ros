@@ -1,0 +1,142 @@
+ARG ISAAC_VERSION="5.0.0"
+# expects context to be the root of the repository, i.e. AutoLab/. this is so we can access AutoLab/ros_ws/
+FROM nvcr.io/nvidia/isaac-sim:${ISAAC_VERSION}
+ARG ISAAC_VERSION
+WORKDIR /isaac-sim
+
+USER root
+# isaac's ros2 launch run_isaacsim.launch.py hardcodes to search in this path, so we have to put the executables here
+RUN mkdir -p /root/.local/share/ov/pkg/ && \
+    ln -s /isaac-sim /root/.local/share/ov/pkg/isaac-sim-${ISAAC_VERSION}
+
+# allows us to run isaac-sim as root
+ENV OMNI_KIT_ALLOW_ROOT=1
+
+# setup environment
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV ROS_DISTRO=humble
+
+# setup timezone
+RUN echo 'Etc/UTC' > /etc/timezone && \
+    ln -s /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+    apt-get update && \
+    apt-get install -q -y --no-install-recommends tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+# install base packages
+RUN apt-get update && apt-get install -q -y --no-install-recommends \
+    dirmngr \
+    gnupg2 \
+    unzip \
+    tmux \
+    iputils-ping \
+    net-tools \
+    curl \
+    emacs \
+    vim \
+    nano \
+    gdb \
+    xterm \
+    tree \
+    less \
+    htop \
+    jq \
+    git \
+    build-essential \
+    cmake \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    meson \
+    ninja-build \
+    wget \
+    libcgal-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# setup ros2 key
+RUN set -eux; \
+    key='C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654'; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$key"; \
+    mkdir -p /usr/share/keyrings; \
+    gpg --batch --export "$key" > /usr/share/keyrings/ros2-latest-archive-keyring.gpg; \
+    gpgconf --kill all; \
+    rm -rf "$GNUPGHOME"
+
+# setup ros2 apt source
+RUN echo "deb [ signed-by=/usr/share/keyrings/ros2-latest-archive-keyring.gpg ] http://packages.ros.org/ros2/ubuntu jammy main" > /etc/apt/sources.list.d/ros2-latest.list
+
+# Remove conflicting third-party apt sources that cause libbrotli conflicts
+RUN rm -f /etc/apt/sources.list.d/*deb.sury.org*.list || true && apt-get update
+
+RUN apt-get update && \
+    apt-get install -y --allow-downgrades --no-install-recommends libbrotli1=1.0.9-2build6 && \
+    apt-mark hold libbrotli1 && \
+    apt-get install -y --no-install-recommends \
+    libfreetype6-dev \
+    libfontconfig1-dev \
+    ros-humble-desktop \
+    ros-dev-tools \
+    python3-rosdep \
+    ros-humble-tf2* \
+    ros-humble-ackermann-msgs \
+    ros-humble-topic-tools \
+    ros-humble-grid-map \
+    ros-humble-domain-bridge \
+    ros-humble-moveit \
+    zstd \
+    python3-colcon-common-extensions && \
+    rm -rf /var/lib/apt/lists/*
+
+# install python packages
+RUN /isaac-sim/python.sh -m pip install --upgrade pip && \
+    /isaac-sim/python.sh -m pip install PyYAML tmuxp scipy \
+    kconfiglib jinja2 empy==3.3.4 jsonschema pyros-genmsg packaging toml numpy future
+
+ARG isaac_dir_name="IsaacSim-ros_workspaces-IsaacSim-${ISAAC_VERSION}"
+# Install Isaac Sim ROS2 workspace so that we can run the isaacsim ROS package
+RUN cd /tmp/ && \
+    curl -L -O https://github.com/isaac-sim/IsaacSim-ros_workspaces/archive/refs/tags/IsaacSim-${ISAAC_VERSION}.zip && \
+    unzip IsaacSim-${ISAAC_VERSION}.zip && \
+    mv ${isaac_dir_name}/humble_ws /humble_ws && \
+    cd /humble_ws && \
+    . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install && \
+    rm -rf /tmp/IsaacSim-${ISAAC_VERSION}.zip /tmp/${isaac_dir_name}
+
+
+# rm -rf /tmp/PegasusSimulator
+ENV ISAACSIM_PATH=/isaac-sim
+ENV ACCEPT_EULA="Y"
+# ENV ISAACSIM_PYTHON=/isaac-sim/python.sh
+
+RUN /isaac-sim/python.sh -m pip install lark-parser
+
+# TMux config
+RUN git clone https://github.com/tmux-plugins/tpm /root/.tmux/plugins/tpm
+
+# copy FastDDS config
+COPY docker/fastdds.xml /isaac-sim/fastdds.xml
+
+# ROS2 humble launch script seeks this
+RUN ln -s /isaac-sim /root/isaacsim
+
+ARG UBUNTU_RELEASE_YEAR=22
+ARG CUDA_MAJOR=12
+ARG CUDA_MINOR=8
+ARG ZED_SDK_MAJOR=5
+ARG ZED_SDK_MINOR=1
+# Install ZED SDK
+RUN wget -q -O ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run https://download.stereolabs.com/zedsdk/${ZED_SDK_MAJOR}.${ZED_SDK_MINOR}/cu${CUDA_MAJOR}/ubuntu${UBUNTU_RELEASE_YEAR} && \
+  chmod +x ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run ; ./ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run -- silent && \
+  ln -sf /lib/x86_64-linux-gnu/libusb-1.0.so.0 /usr/lib/x86_64-linux-gnu/libusb-1.0.so && \
+  rm ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run
+
+
+# Cleanup. Prevent people accidentally doing git commits as root in Docker
+RUN apt purge -y git && apt autoremove -y \
+    && apt clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /isaac-sim
