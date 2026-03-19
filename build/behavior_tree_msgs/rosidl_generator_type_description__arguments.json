@@ -1,0 +1,16 @@
+{
+  "package_name": "behavior_tree_msgs",
+  "output_dir": "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_generator_type_description/behavior_tree_msgs",
+  "idl_tuples": [
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/Active.idl",
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/Status.idl",
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/BehaviorTreeCommand.idl",
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/BehaviorTreeCommands.idl",
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/GraphVizXdot.idl",
+    "/home/ksriniv2/Autolab/build/behavior_tree_msgs/rosidl_adapter/behavior_tree_msgs:msg/GraphVizXdotCompressed.idl"
+  ],
+  "include_paths": [
+    "std_msgs:/opt/ros/jazzy/share/std_msgs",
+    "builtin_interfaces:/opt/ros/jazzy/share/builtin_interfaces"
+  ]
+}

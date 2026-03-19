@@ -1,0 +1,37 @@
+name: my_domain_bridge
+from_domain: 1
+to_domain: 2
+topics:
+  # Bridge "/foo/chatter" topic from doman ID 2 to domain ID 3
+
+  /robot_1/vdb_mapping/vdb_map_visualization:
+    from_domain: 1
+    to_domain: 0
+    type: visualization_msgs/msg/Marker
+
+  # /robot_1/odometry_conversion/odometry:
+  #   from_domain: 1
+  #   to_domain: 0
+  #   type: nav_msgs/msg/Odometry
+
+  /robot_1/joint_command:
+    from_domain: 1
+    to_domain: 0
+    type: sensor_msgs/msg/JointState
+    
+  /robot_1/joint_states:
+    from_domain: 1
+    to_domain: 0
+    type: sensor_msgs/msg/JointState
+
+
+  /robot_1/behavior/behavior_tree_graphviz:
+    type: behavior_tree_msgs/msg/GraphVizXdot
+    from_domain: 1
+    to_domain: 0
+
+  clock:
+    type: rosgraph_msgs/msg/Clock
+    qos:
+      durability: volatile
+      depth: 1

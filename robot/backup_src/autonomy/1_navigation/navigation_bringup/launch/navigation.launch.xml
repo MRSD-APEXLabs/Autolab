@@ -1,0 +1,10 @@
+<!-- NAVIGATION -->
+<launch>
+    <group>
+
+        <node pkg="navigation_controller" exec="navigation_controller" namespace="navigation_controller"
+        output="screen">
+        </node>
+
+    </group>  
+</launch>

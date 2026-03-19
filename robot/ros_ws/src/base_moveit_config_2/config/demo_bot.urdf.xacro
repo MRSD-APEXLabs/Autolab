@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="demo_bot">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import demo_bot urdf file -->
+    <xacro:include filename="$(find base_urdf)/robot.urdf" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="demo_bot.ros2_control.xacro" />
+
+
+    <xacro:demo_bot_ros2_control name="TopicBasedSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

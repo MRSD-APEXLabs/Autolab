@@ -1,0 +1,41 @@
+[0.004s] Invoking command in '/home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config -- -j32 -l32
+[0.019s] Invoked command in '/home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config -- -j32 -l32
+[0.024s] Invoking command in '/home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config
+[0.026s] -- Install configuration: ""
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/ament_index/resource_index/package_run_dependencies/demo_bot_moveit_config
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/ament_index/resource_index/parent_prefix_path/demo_bot_moveit_config
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/environment/ament_prefix_path.sh
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/environment/ament_prefix_path.dsv
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/environment/path.sh
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/environment/path.dsv
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/local_setup.bash
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/local_setup.sh
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/local_setup.zsh
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/local_setup.dsv
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/package.dsv
+[0.026s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/ament_index/resource_index/packages/demo_bot_moveit_config
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/cmake/demo_bot_moveit_configConfig.cmake
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/cmake/demo_bot_moveit_configConfig-version.cmake
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/package.xml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/rsp.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/spawn_controllers.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/setup_assistant.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/demo.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/moveit_rviz.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/static_virtual_joint_tfs.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/warehouse_db.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/launch/move_group.launch.py
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/pilz_cartesian_limits.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/ros2_controllers.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/demo_bot.urdf.xacro
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/moveit_controllers.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/joint_limits.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/initial_positions.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/kinematics.yaml
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/demo_bot.ros2_control.xacro
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/moveit.rviz
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/config/demo_bot.srdf
+[0.027s] -- Up-to-date: /home/robot/AutoLab/robot/ros_ws/src/install/demo_bot_moveit_config/share/demo_bot_moveit_config/.setup_assistant
+[0.027s] Invoked command in '/home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/robot/AutoLab/robot/ros_ws/src/build/demo_bot_moveit_config

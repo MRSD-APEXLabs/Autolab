@@ -1,0 +1,26 @@
+<!-- AUTONOMY -->
+<launch>
+
+  <!-- Interface -->
+  <include
+    file="$(find-pkg-share $(env INTERFACE_LAUNCH_PACKAGE))/launch/$(env INTERFACE_LAUNCH_FILE)" />
+
+  <!-- Navigation -->
+  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)" />
+
+  <!-- Perception -->
+  <include
+    file="$(find-pkg-share $(env PERCEPTION_LAUNCH_PACKAGE))/launch/$(env PERCEPTION_LAUNCH_FILE)" />
+
+  <!-- Local -->
+  <include file="$(find-pkg-share $(env LOCAL_LAUNCH_PACKAGE))/launch/$(env LOCAL_LAUNCH_FILE)" />
+
+  <!-- Global -->
+  <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
+
+  <!-- Behavior -->
+  <include
+    file="$(find-pkg-share $(env BEHAVIOR_LAUNCH_PACKAGE))/launch/$(env BEHAVIOR_LAUNCH_FILE)" />
+
+
+</launch>

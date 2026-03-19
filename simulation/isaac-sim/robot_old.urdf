@@ -1,0 +1,257 @@
+<?xml version="1.0" ?>
+<robot name="demo_bot">
+  <link name="Chasis_1">
+    <visual name="Chasis_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Chasis_1.stl"/>
+      </geometry>
+      <material name="Chasis_1-material">
+        <color rgba="1 0 0.5 1"/>
+      </material>
+    </visual>
+    <collision name="Chasis_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Chasis_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0.00029957171" iyy="0.00030586696" izz="0.00060543821" ixy="-2.0740415e-06" ixz="1.2570242e-07" iyz="1.3619172e-07"/>
+      <origin xyz="-0.036891628 -0.010629791 -7.8843153e-05" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="WS2_1">
+    <visual name="WS2_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS2_1.stl"/>
+      </geometry>
+      <material name="WS2_1-material">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="WS2_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS2_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 -0.066675 -0.10874375" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="WS1_1">
+    <visual name="WS1_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS1_1.stl"/>
+      </geometry>
+      <material name="WS1_1-material">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="WS1_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS1_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 0.066675 -0.10874375" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="WS4_1">
+    <visual name="WS4_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS4_1.stl"/>
+      </geometry>
+      <material name="WS4_1-material">
+        <color rgba="1 0 0.5 1"/>
+      </material>
+    </visual>
+    <collision name="WS4_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS4_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 -0.066675 -0.10874375" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="WS3_1">
+    <visual name="WS3_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS3_1.stl"/>
+      </geometry>
+      <material name="WS3_1-material">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="WS3_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/WS3_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 0.066675 -0.10874375" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Wheel2_1">
+    <visual name="Wheel2_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel2_1.stl"/>
+      </geometry>
+      <material name="Wheel2_1-material">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision name="Wheel2_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel2_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 0.0508 -0.06874688" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Wheel1_1">
+    <visual name="Wheel1_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel1_1.stl"/>
+      </geometry>
+      <material name="Wheel1_1-material">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+    <collision name="Wheel1_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel1_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 -0.0508 -0.06874688" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Wheel4_1">
+    <visual name="Wheel4_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel4_1.stl"/>
+      </geometry>
+      <material name="Wheel4_1-material">
+        <color rgba="1 0 0.5 1"/>
+      </material>
+    </visual>
+    <collision name="Wheel4_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel4_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 0.0508 -0.06874688" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Wheel3_1">
+    <visual name="Wheel3_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel3_1.stl"/>
+      </geometry>
+      <material name="Wheel3_1-material">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="Wheel3_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/Wheel3_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0.066675 -0.0508 -0.06874688" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <joint name="Revolute_2" type="revolute">
+    <origin xyz="0.183325 -0.27388 0.10874375" rpy="9.3813846e-16 0 -2.9582284e-31"/>
+    <parent link="Chasis_1"/>
+    <child link="WS2_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_4" type="revolute">
+    <origin xyz="0.183325 0.23352665 0.1081421" rpy="-4.4408921e-16 0 5.5511151e-17"/>
+    <parent link="Chasis_1"/>
+    <child link="WS1_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_6" type="revolute">
+    <origin xyz="-0.324084 0.233325 0.10874375" rpy="2.220446e-16 0 -3.1415927"/>
+    <parent link="Chasis_1"/>
+    <child link="WS4_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_8" type="revolute">
+    <origin xyz="-0.324084 -0.274087 0.10874375" rpy="2.2870594e-14 0 3.1415927"/>
+    <parent link="Chasis_1"/>
+    <child link="WS3_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_1" type="revolute">
+    <origin xyz="0 0.0024615 -0.05794375" rpy="-1.5707963 0 0"/>
+    <parent link="WS2_1"/>
+    <child link="Wheel2_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_3" type="revolute">
+    <origin xyz="0 -0.0024615 -0.05794375" rpy="1.5707963 0 0"/>
+    <parent link="WS1_1"/>
+    <child link="Wheel1_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_5" type="revolute">
+    <origin xyz="0 0.0024615 -0.05794375" rpy="-1.5707963 0 0"/>
+    <parent link="WS4_1"/>
+    <child link="Wheel4_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_7" type="revolute">
+    <origin xyz="0 -0.0024615 -0.05794375" rpy="1.5707963 0 0"/>
+    <parent link="WS3_1"/>
+    <child link="Wheel3_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+</robot>
