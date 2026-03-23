@@ -12,18 +12,22 @@ using namespace std::chrono_literals;
 LabMachineExecutive::LabMachineExecutive()
     : Node("lab_machine_executive"),
       ot2_current_step_(0),
+      ot2_connecting_(false),
       http_in_flight_(false)
 {
     // ROS2 parameters
     this->declare_parameter<std::string>("ot2_base_url",     "http://192.168.1.100:8000");
+    this->declare_parameter<std::string>("ot2_host",         "192.168.1.100");
     this->declare_parameter<std::string>("shaker_base_url",  "http://192.168.1.101:8080");
     this->declare_parameter<std::string>("shaker_endpoint",  "/pwm");
 
     this->get_parameter("ot2_base_url",    ot2_base_url_);
+    this->get_parameter("ot2_host",        ot2_host_);
     this->get_parameter("shaker_base_url", shaker_base_url_);
     this->get_parameter("shaker_endpoint", shaker_endpoint_);
 
-    RCLCPP_INFO(this->get_logger(), "OT-2 base URL: %s", ot2_base_url_.c_str());
+    RCLCPP_INFO(this->get_logger(), "OT-2 base URL: %s (robot host: %s)",
+                ot2_base_url_.c_str(), ot2_host_.c_str());
     RCLCPP_INFO(this->get_logger(), "Shaker base URL: %s%s",
                 shaker_base_url_.c_str(), shaker_endpoint_.c_str());
 
@@ -118,6 +122,38 @@ std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
     return "/commands/" + slug;
 }
 
+// POST /robot/connect {"host": ot2_host_}
+// Returns true on 200 (connected) or 400 (already connected).
+bool LabMachineExecutive::connect_ot2() {
+    nlohmann::json body = {{"host", ot2_host_}};
+    std::string body_str = body.dump();
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    std::string url = ot2_base_url_ + "/robot/connect";
+    curl_easy_setopt(curl, CURLOPT_URL,           url.c_str());
+    curl_easy_setopt(curl, CURLOPT_POST,           1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS,     body_str.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,  static_cast<long>(body_str.size()));
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  discard_response);
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    // 200 = connected, 400 = already connected (both are fine)
+    return (res == CURLE_OK) && (http_code == 200 || http_code == 400);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Timer callback — runs at 20 Hz
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,15 +172,16 @@ void LabMachineExecutive::timer_callback() {
 
 void LabMachineExecutive::tick_ot2() {
     if (!ot2_action_->is_active()) {
-        // Reset step counter when action deactivates so next run starts fresh
+        // Reset state when action deactivates so next run starts fresh
         if (ot2_action_->active_has_changed()) {
             ot2_current_step_ = 0;
+            ot2_connecting_   = false;
             http_in_flight_   = false;
         }
         return;
     }
 
-    // ── New activation: parse protocol ───────────────────────────────────────
+    // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
         if (ot2_protocol_json_.empty()) {
             RCLCPP_WARN(this->get_logger(),
@@ -161,9 +198,31 @@ void LabMachineExecutive::tick_ot2() {
             return;
         }
         ot2_current_step_ = 0;
-        http_in_flight_   = false;
-        RCLCPP_INFO(this->get_logger(), "OT-2 protocol started: %zu steps",
-                    ot2_steps_.size());
+        ot2_connecting_   = true;
+        http_in_flight_   = true;
+        RCLCPP_INFO(this->get_logger(), "OT-2 connecting to %s…", ot2_host_.c_str());
+        pending_http_ = std::async(std::launch::async,
+                                   &LabMachineExecutive::connect_ot2, this);
+        ot2_action_->set_running();
+        return;
+    }
+
+    // ── Poll connect future ───────────────────────────────────────────────────
+    if (ot2_connecting_) {
+        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            bool ok = pending_http_.get();
+            http_in_flight_ = false;
+            ot2_connecting_ = false;
+            if (!ok) {
+                RCLCPP_ERROR(this->get_logger(), "OT-2 connect failed — FAILURE");
+                ot2_action_->set_failure();
+                return;
+            }
+            RCLCPP_INFO(this->get_logger(), "OT-2 connected — starting %zu steps",
+                        ot2_steps_.size());
+        }
+        ot2_action_->set_running();
+        return;
     }
 
     // ── Dispatch next step if none in flight ─────────────────────────────────
@@ -187,7 +246,7 @@ void LabMachineExecutive::tick_ot2() {
         return;
     }
 
-    // ── Poll in-flight future ─────────────────────────────────────────────────
+    // ── Poll in-flight step future ────────────────────────────────────────────
     if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         bool ok = pending_http_.get();
         http_in_flight_ = false;

@@ -37,11 +37,13 @@ class LabMachineExecutive : public rclcpp::Node {
     // ── OT-2 step-machine state ───────────────────────────────────────────────
     nlohmann::json ot2_steps_;     // parsed steps array
     int ot2_current_step_;         // index into ot2_steps_
+    bool ot2_connecting_;          // true while /robot/connect is in flight
     std::future<bool> pending_http_; // in-flight HTTP call
     bool http_in_flight_;
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;
+    std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
 
@@ -59,6 +61,7 @@ class LabMachineExecutive : public rclcpp::Node {
     bool dispatch_ot2_step(const nlohmann::json& step);
 
     // Static HTTP helper — runs in std::async thread
+    bool connect_ot2();
     static bool http_post(const std::string& url,
                           const std::string& body,
                           const std::string& content_type);
