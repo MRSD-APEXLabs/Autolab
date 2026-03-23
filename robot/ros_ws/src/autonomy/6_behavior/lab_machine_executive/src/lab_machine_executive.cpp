@@ -29,14 +29,14 @@ LabMachineExecutive::LabMachineExecutive()
 
     // BT conditions
     command_lab_machine_condition_ = new bt::Condition("Command Lab Machine", this);
-    ot2_condition_                 = new bt::Condition("OT-2 Liquid Handler", this);
+    ot2_condition_                 = new bt::Condition("OT2 Liquid Handler", this);
     shaker_condition_              = new bt::Condition("Custom Shaker Module", this);
     conditions_.push_back(command_lab_machine_condition_);
     conditions_.push_back(ot2_condition_);
     conditions_.push_back(shaker_condition_);
 
     // BT actions
-    ot2_action_    = new bt::Action("Execute OT-2 Protocol", this);
+    ot2_action_    = new bt::Action("Execute OT2 Protocol", this);
     shaker_action_ = new bt::Action("Execute Shaker Protocol", this);
     actions_.push_back(ot2_action_);
     actions_.push_back(shaker_action_);
