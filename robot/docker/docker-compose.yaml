@@ -22,6 +22,9 @@ services:
     environment:
       - AUTOLAUNCH=${AUTOLAUNCH:-true}
       - NVIDIA_DRIVER_CAPABILITIES=all
+      - ROS_DOMAIN_ID=0
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     command: >
       bash -c "
       service ssh restart;

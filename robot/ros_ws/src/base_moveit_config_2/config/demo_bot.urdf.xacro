@@ -9,6 +9,6 @@
     <xacro:include filename="demo_bot.ros2_control.xacro" />
 
 
-    <xacro:demo_bot_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+    <xacro:demo_bot_ros2_control name="TopicBasedSystem" initial_positions_file="$(arg initial_positions_file)"/>
 
 </robot>

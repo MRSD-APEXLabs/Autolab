@@ -1,0 +1,11 @@
+{
+  "package_name": "behavior_tree_msgs",
+  "non_idl_tuples": [
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/Active.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/Status.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/BehaviorTreeCommand.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/BehaviorTreeCommands.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/GraphVizXdot.msg",
+    "/home/ksriniv2/Autolab/common/ros_packages/behavior_tree_msgs:msg/GraphVizXdotCompressed.msg"
+  ]
+}
