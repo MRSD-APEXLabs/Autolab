@@ -58,6 +58,10 @@ planner_configs:
     num_samples: 1000
   BITstar:
     type: geometric::BITstar
+  InformedRRTstar:
+    type: geometric::InformedRRTstar
+    range: 0.05
+    goal_bias: 0.05
 
 # Replacement for your specific robot group
 demo_arm_bot:
@@ -76,11 +80,13 @@ demo_arm_bot:
     - PRM
     - PRMstar
     - BITstar
+    - InformedRRTstar 
   ## Any planning path longer than this (relative to world) will be checked for collisions
-# Update this in your yaml
+  # Update this in your yaml
   longest_valid_segment_fraction: 0.001  # Make this smaller for tighter spaces
   # ## Used for projection-based planners like KPIECE
-  # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11)  # Example: project to 3D space of these joints
+  # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11, Revolute_12)  # Example: project to 3D space of these joints
   enforce_joint_model_state_space: true # Helps with constraints
+  # enforce_constrained_state_space: true  
   simplify_solutions: true
   interpolation_type: open_rave # Keeps it human-like

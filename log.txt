@@ -1,0 +1,398 @@
+
+[robot_1]robot@efeb158d441b:~/AutoLab/robot/ros_ws$ ros2 launch global_planner move_and_rviz.launch.py 
+[INFO] [launch]: All log files can be found below /home/robot/.ros/log/2026-03-17-22-57-20-228651-efeb158d441b-6630
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [robot_state_publisher-1]: process started with pid [6631]
+[INFO] [move_group-2]: process started with pid [6633]
+[INFO] [rviz2-3]: process started with pid [6635]
+[robot_state_publisher-1] [INFO] [1773788240.404303172] [robot_state_publisher]: got segment Az_Back_Right_1
+[robot_state_publisher-1] [INFO] [1773788240.404366694] [robot_state_publisher]: got segment Az_Back_left_1
+[robot_state_publisher-1] [INFO] [1773788240.404370672] [robot_state_publisher]: got segment Az_Front_Left_1
+[robot_state_publisher-1] [INFO] [1773788240.404373026] [robot_state_publisher]: got segment Az_Front_right_1
+[robot_state_publisher-1] [INFO] [1773788240.404375180] [robot_state_publisher]: got segment Chassis_1
+[robot_state_publisher-1] [INFO] [1773788240.404377525] [robot_state_publisher]: got segment Finger_left_2
+[robot_state_publisher-1] [INFO] [1773788240.404379849] [robot_state_publisher]: got segment Finger_right_2
+[robot_state_publisher-1] [INFO] [1773788240.404381993] [robot_state_publisher]: got segment Wheel_Back_Left_1
+[robot_state_publisher-1] [INFO] [1773788240.404384478] [robot_state_publisher]: got segment Wheel_Back_Right_1
+[robot_state_publisher-1] [INFO] [1773788240.404386702] [robot_state_publisher]: got segment Wheel_Front_Left_1
+[robot_state_publisher-1] [INFO] [1773788240.404388877] [robot_state_publisher]: got segment Wheel_Front_Right_1
+[robot_state_publisher-1] [INFO] [1773788240.404390940] [robot_state_publisher]: got segment arm_elbow_4_1
+[robot_state_publisher-1] [INFO] [1773788240.404393275] [robot_state_publisher]: got segment arm_shoulder241_1
+[robot_state_publisher-1] [INFO] [1773788240.404395479] [robot_state_publisher]: got segment elbow2_p4_1
+[robot_state_publisher-1] [INFO] [1773788240.404397723] [robot_state_publisher]: got segment end_effector_p4_1
+[robot_state_publisher-1] [INFO] [1773788240.404399757] [robot_state_publisher]: got segment gripper_v43_1
+[robot_state_publisher-1] [INFO] [1773788240.404402082] [robot_state_publisher]: got segment world
+[robot_state_publisher-1] [INFO] [1773788240.404404236] [robot_state_publisher]: got segment wrist_1_p4_1
+[robot_state_publisher-1] [INFO] [1773788240.404406360] [robot_state_publisher]: got segment wrist_2_p4_1
+[rviz2-3] QStandardPaths: XDG_RUNTIME_DIR not set, defaulting to '/tmp/runtime-robot'
+[move_group-2] [INFO] [1773788240.412292471] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0 seconds
+[move_group-2] [INFO] [1773788240.412333168] [moveit_robot_model.robot_model]: Loading robot model 'demo_bot'...
+[move_group-2] [INFO] [1773788240.412338028] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint
+[rviz2-3] [INFO] [1773788240.702022723] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-3] [INFO] [1773788240.702100111] [rviz2]: OpenGl version: 4.6 (GLSL 4.6)
+[rviz2-3] [INFO] [1773788240.764043702] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-3] Warning: class_loader.impl: SEVERE WARNING!!! A namespace collision has occurred with plugin factory for class rviz_default_plugins::displays::InteractiveMarkerDisplay. New factory will OVERWRITE existing one. This situation occurs when libraries containing plugins are directly linked against an executable (the one running right now generating this message). Please separate plugins out into their own library or just don't link against the library and use either class_loader::ClassLoader/MultiLibraryClassLoader to open.
+[rviz2-3]          at line 253 in /opt/ros/humble/include/class_loader/class_loader/class_loader_core.hpp
+[move_group-2] [INFO] [1773788242.950973720] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Publishing maintained planning scene on 'monitored_planning_scene'
+[move_group-2] [INFO] [1773788242.951094552] [moveit.ros_planning_interface.moveit_cpp]: Listening to 'joint_states' for joint states
+[move_group-2] [INFO] [1773788242.951532791] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[move_group-2] [INFO] [1773788242.952076281] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/attached_collision_object' for attached collision objects
+[move_group-2] [INFO] [1773788242.952093024] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor
+[move_group-2] [INFO] [1773788242.952377959] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/planning_scene'
+[move_group-2] [INFO] [1773788242.952390493] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting world geometry update monitor for collision objects, attached objects, octomap updates.
+[move_group-2] [INFO] [1773788242.952611176] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'collision_object'
+[move_group-2] [INFO] [1773788242.952838120] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to 'planning_scene_world' for planning scene world geometry
+[move_group-2] [WARN] [1773788242.952978419] [moveit.ros.occupancy_map_monitor.middleware_handle]: Resolution not specified for Octomap. Assuming resolution = 0.1 instead
+TODO: [move_group-2] [ERROR] [1773788242.952984891] [moveit.ros.occupancy_map_monitor.middleware_handle]: No 3D sensor plugin(s) defined for octomap updates
+[INFO] [ros2_control_node-4]: process started with pid [6688]
+[ros2_control_node-4] [WARN] [1773788243.422679356] [controller_manager]: [Deprecated] Passing the robot description parameter directly to the control_manager node is deprecated. Use '~/robot_description' topic from 'robot_state_publisher' instead.
+[ros2_control_node-4] [INFO] [1773788243.422837308] [resource_manager]: Loading hardware 'TopicBasedSystem' 
+[ros2_control_node-4] [INFO] [1773788243.423330282] [resource_manager]: Initialize hardware 'TopicBasedSystem' 
+[ros2_control_node-4] [INFO] [1773788243.426957477] [resource_manager]: Successful initialization of hardware 'TopicBasedSystem'
+[ros2_control_node-4] [INFO] [1773788243.427012893] [resource_manager]: 'configure' hardware 'TopicBasedSystem' 
+[ros2_control_node-4] [INFO] [1773788243.427020197] [resource_manager]: Successful 'configure' of hardware 'TopicBasedSystem'
+[ros2_control_node-4] [INFO] [1773788243.427026700] [resource_manager]: 'activate' hardware 'TopicBasedSystem' 
+[ros2_control_node-4] [INFO] [1773788243.427030978] [resource_manager]: Successful 'activate' of hardware 'TopicBasedSystem'
+[ros2_control_node-4] [INFO] [1773788243.430294677] [controller_manager]: update rate is 100 Hz
+[ros2_control_node-4] [INFO] [1773788243.430315527] [controller_manager]: Spawning controller_manager RT thread with scheduler priority: 50
+TODO: For real hardware this needs to be fixed [ros2_control_node-4] [WARN] [1773788243.430387205] [controller_manager]: Could not enable FIFO RT scheduling policy: with error number <1>(Operation not permitted). See [https://control.ros.org/master/doc/ros2_control/controller_manager/doc/userdoc.html] for details on how to enable realtime scheduling.
+[rviz2-3] [ERROR] [1773788243.811775880] [moveit_ros_visualization.motion_planning_frame]: Action server: /recognize_objects not available
+[rviz2-3] [INFO] [1773788243.818934577] [moveit_ros_visualization.motion_planning_frame]: MoveGroup namespace changed: / -> . Reloading params.
+[rviz2-3] [INFO] [1773788243.861122259] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0 seconds
+[rviz2-3] [INFO] [1773788243.861156514] [moveit_robot_model.robot_model]: Loading robot model 'demo_bot'...
+[rviz2-3] [INFO] [1773788243.861163628] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint
+[rviz2-3] [INFO] [1773788246.479853837] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Starting planning scene monitor
+[rviz2-3] [INFO] [1773788246.480455359] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Listening to '/monitored_planning_scene'
+[rviz2-3] [INFO] [1773788247.610318225] [interactive_marker_display_109336405772160]: Connected on namespace: /rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic
+[rviz2-3] [INFO] [1773788247.678604869] [interactive_marker_display_109336405772160]: Sending request for interactive markers
+[rviz2-3] [INFO] [1773788247.711394063] [interactive_marker_display_109336405772160]: Service response received for initialization
+[INFO] [spawner-5]: process started with pid [6743]
+[ros2_control_node-4] [INFO] [1773788248.871705654] [controller_manager]: Loading controller 'joint_state_broadcaster'
+[spawner-5] [INFO] [1773788248.924874080] [spawner_joint_state_broadcaster]: Loaded joint_state_broadcaster
+[ros2_control_node-4] [INFO] [1773788248.926111419] [controller_manager]: Configuring controller 'joint_state_broadcaster'
+[ros2_control_node-4] [INFO] [1773788248.926185030] [joint_state_broadcaster]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published
+[move_group-2] [WARN] [1773788249.058142990] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[spawner-5] [INFO] [1773788249.058534289] [spawner_joint_state_broadcaster]: Configured and activated joint_state_broadcaster
+[INFO] [spawner-5]: process has finished cleanly [pid 6743]
+[INFO] [spawner-6]: process started with pid [6791]
+[INFO] [spawner-7]: process started with pid [6793]
+[ros2_control_node-4] [INFO] [1773788250.574570911] [controller_manager]: Loading controller 'demo_gripper_bot_controller'
+[ros2_control_node-4] [WARN] [1773788250.581425086] [demo_gripper_bot_controller]: [Deprecated]: "allow_nonzero_velocity_at_trajectory_end" is set to true. The default behavior will change to false.
+[ros2_control_node-4] [INFO] [1773788250.615292123] [controller_manager]: Loading controller 'demo_arm_bot_controller'
+[ros2_control_node-4] [WARN] [1773788250.620059051] [demo_arm_bot_controller]: [Deprecated]: "allow_nonzero_velocity_at_trajectory_end" is set to true. The default behavior will change to false.
+[spawner-7] [INFO] [1773788250.622923045] [spawner_demo_gripper_bot_controller]: Loaded demo_gripper_bot_controller
+[ros2_control_node-4] [INFO] [1773788250.659762694] [controller_manager]: Configuring controller 'demo_gripper_bot_controller'
+[ros2_control_node-4] [INFO] [1773788250.659829762] [demo_gripper_bot_controller]: No specific joint names are used for command interfaces. Using 'joints' parameter.
+[ros2_control_node-4] [INFO] [1773788250.659841094] [demo_gripper_bot_controller]: Command interfaces are [position] and state interfaces are [position velocity].
+[ros2_control_node-4] [INFO] [1773788250.659850873] [demo_gripper_bot_controller]: Using 'splines' interpolation method.
+[ros2_control_node-4] [INFO] [1773788250.660309801] [demo_gripper_bot_controller]: Controller state will be published at 50.00 Hz.
+[ros2_control_node-4] [INFO] [1773788250.661230815] [demo_gripper_bot_controller]: Action status changes will be monitored at 20.00 Hz.
+[spawner-6] [INFO] [1773788250.667579101] [spawner_demo_arm_bot_controller]: Loaded demo_arm_bot_controller
+[ros2_control_node-4] [INFO] [1773788250.709023417] [controller_manager]: Configuring controller 'demo_arm_bot_controller'
+[ros2_control_node-4] [INFO] [1773788250.709104001] [demo_arm_bot_controller]: No specific joint names are used for command interfaces. Using 'joints' parameter.
+[ros2_control_node-4] [INFO] [1773788250.709113118] [demo_arm_bot_controller]: Command interfaces are [position] and state interfaces are [position velocity].
+[ros2_control_node-4] [INFO] [1773788250.709120693] [demo_arm_bot_controller]: Using 'splines' interpolation method.
+[ros2_control_node-4] [INFO] [1773788250.709391962] [demo_arm_bot_controller]: Controller state will be published at 50.00 Hz.
+[ros2_control_node-4] [INFO] [1773788250.710197966] [demo_arm_bot_controller]: Action status changes will be monitored at 20.00 Hz.
+[spawner-7] [INFO] [1773788250.845555734] [spawner_demo_gripper_bot_controller]: Configured and activated demo_gripper_bot_controller
+[spawner-6] [INFO] [1773788250.933049324] [spawner_demo_arm_bot_controller]: Configured and activated demo_arm_bot_controller
+[INFO] [spawner-7]: process has finished cleanly [pid 6793]
+[INFO] [spawner-6]: process has finished cleanly [pid 6791]
+[rviz2-3] [INFO] [1773788252.630613962] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: Failed to call service get_planning_scene, have you launched move_group or called psm.providePlanningSceneService()?
+[rviz2-3] [INFO] [1773788252.630734643] [moveit_ros_visualization.motion_planning_frame]: group demo_arm_bot
+[rviz2-3] [INFO] [1773788252.630743189] [moveit_ros_visualization.motion_planning_frame]: Constructing new MoveGroup connection for group 'demo_arm_bot' in namespace ''
+[move_group-2] [INFO] [1773788254.939710803] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'ompl'
+[move_group-2] [INFO] [1773788254.945258144] [moveit.ros_planning.planning_pipeline]: Using planning interface 'OMPL'
+[move_group-2] [INFO] [1773788254.946412475] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.path_tolerance' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1773788254.946422965] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.resample_dt' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1773788254.946425209] [moveit_ros.add_time_optimal_parameterization]: Param 'ompl.min_angle_change' was not set. Using default value: 0.001000
+[move_group-2] [INFO] [1773788254.946434377] [moveit_ros.fix_workspace_bounds]: Param 'ompl.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-2] [INFO] [1773788254.946440609] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_bounds_error' was set to 0.100000
+[move_group-2] [INFO] [1773788254.946442863] [moveit_ros.fix_start_state_bounds]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1773788254.946447351] [moveit_ros.fix_start_state_collision]: Param 'ompl.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1773788254.946450528] [moveit_ros.fix_start_state_collision]: Param 'ompl.jiggle_fraction' was not set. Using default value: 0.020000
+[move_group-2] [INFO] [1773788254.946453443] [moveit_ros.fix_start_state_collision]: Param 'ompl.max_sampling_attempts' was not set. Using default value: 100
+[move_group-2] [INFO] [1773788254.946459455] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-2] [INFO] [1773788254.946461559] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-2] [INFO] [1773788254.946463102] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-2] [INFO] [1773788254.946465055] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-2] [INFO] [1773788254.946466548] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-2] [INFO] [1773788254.946468011] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-2] [INFO] [1773788254.947734857] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'pilz_industrial_motion_planner'
+[move_group-2] [INFO] [1773788254.948736835] [moveit.pilz_industrial_motion_planner.joint_limits_aggregator]: Reading limits from namespace robot_description_planning
+[move_group-2] [INFO] [1773788254.952741663] [moveit.pilz_industrial_motion_planner]: Available plugins: pilz_industrial_motion_planner/PlanningContextLoaderCIRC pilz_industrial_motion_planner/PlanningContextLoaderLIN pilz_industrial_motion_planner/PlanningContextLoaderPTP 
+[move_group-2] [INFO] [1773788254.952751342] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderCIRC
+[move_group-2] [INFO] [1773788254.953249095] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [CIRC]
+[move_group-2] [INFO] [1773788254.953253784] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderLIN
+[move_group-2] [INFO] [1773788254.953601219] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [LIN]
+[move_group-2] [INFO] [1773788254.953604255] [moveit.pilz_industrial_motion_planner]: About to load: pilz_industrial_motion_planner/PlanningContextLoaderPTP
+[move_group-2] [INFO] [1773788254.953901524] [moveit.pilz_industrial_motion_planner]: Registered Algorithm [PTP]
+[move_group-2] [INFO] [1773788254.953907876] [moveit.ros_planning.planning_pipeline]: Using planning interface 'Pilz Industrial Motion Planner'
+[move_group-2] [INFO] [1773788254.954533785] [moveit.ros_planning_interface.moveit_cpp]: Loading planning pipeline 'chomp'
+[move_group-2] [INFO] [1773788254.955846228] [moveit.ros_planning.planning_pipeline]: Using planning interface 'CHOMP'
+[move_group-2] [INFO] [1773788254.956406661] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.path_tolerance' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1773788254.956410719] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.resample_dt' was not set. Using default value: 0.100000
+[move_group-2] [INFO] [1773788254.956449994] [moveit_ros.add_time_optimal_parameterization]: Param 'chomp.min_angle_change' was not set. Using default value: 0.001000
+[move_group-2] [INFO] [1773788254.956459492] [moveit_ros.fix_workspace_bounds]: Param 'chomp.default_workspace_bounds' was not set. Using default value: 10.000000
+[move_group-2] [INFO] [1773788254.956465373] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_bounds_error' was set to 0.100000
+[move_group-2] [INFO] [1773788254.956467237] [moveit_ros.fix_start_state_bounds]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1773788254.956471525] [moveit_ros.fix_start_state_collision]: Param 'chomp.start_state_max_dt' was not set. Using default value: 0.500000
+[move_group-2] [INFO] [1773788254.956473609] [moveit_ros.fix_start_state_collision]: Param 'chomp.jiggle_fraction' was set to 0.050000
+[move_group-2] [INFO] [1773788254.956475583] [moveit_ros.fix_start_state_collision]: Param 'chomp.max_sampling_attempts' was not set. Using default value: 100
+[move_group-2] [INFO] [1773788254.956480082] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Add Time Optimal Parameterization'
+[move_group-2] [INFO] [1773788254.956481584] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Resolve constraint frames to robot links'
+[move_group-2] [INFO] [1773788254.956482626] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Workspace Bounds'
+[move_group-2] [INFO] [1773788254.956483839] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Bounds'
+[move_group-2] [INFO] [1773788254.956484771] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State In Collision'
+[move_group-2] [INFO] [1773788254.956485692] [moveit.ros_planning.planning_pipeline]: Using planning request adapter 'Fix Start State Path Constraints'
+[move_group-2] [INFO] [1773788254.968726961] [moveit.plugins.moveit_simple_controller_manager]: Added FollowJointTrajectory controller for demo_arm_bot_controller
+[move_group-2] [INFO] [1773788254.969680297] [moveit.plugins.moveit_simple_controller_manager]: Added FollowJointTrajectory controller for demo_gripper_bot_controller
+[move_group-2] [INFO] [1773788254.969794856] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788254.969813121] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788254.970145708] [moveit_ros.trajectory_execution_manager]: Trajectory execution is managing controllers
+[move_group-2] [INFO] [1773788254.970158272] [move_group.move_group]: MoveGroup debug mode is ON
+[move_group-2] [INFO] [1773788254.977308332] [move_group.move_group]: 
+[move_group-2] 
+[move_group-2] ********************************************************
+[move_group-2] * MoveGroup using: 
+[move_group-2] *     - ApplyPlanningSceneService
+[move_group-2] *     - ClearOctomapService
+[move_group-2] *     - CartesianPathService
+[move_group-2] *     - ExecuteTrajectoryAction
+[move_group-2] *     - GetPlanningSceneService
+[move_group-2] *     - KinematicsService
+[move_group-2] *     - MoveAction
+[move_group-2] *     - MotionPlanService
+[move_group-2] *     - QueryPlannersService
+[move_group-2] *     - StateValidationService
+[move_group-2] ********************************************************
+[move_group-2] 
+[move_group-2] [INFO] [1773788254.977326136] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context using planning plugin ompl_interface/OMPLPlanner
+[move_group-2] [INFO] [1773788254.977330284] [moveit_move_group_capabilities_base.move_group_context]: MoveGroup context initialization complete
+[move_group-2] Loading 'move_group/ApplyPlanningSceneService'...
+[move_group-2] Loading 'move_group/ClearOctomapService'...
+[move_group-2] Loading 'move_group/MoveGroupCartesianPathService'...
+[move_group-2] Loading 'move_group/MoveGroupExecuteTrajectoryAction'...
+[move_group-2] Loading 'move_group/MoveGroupGetPlanningSceneService'...
+[move_group-2] Loading 'move_group/MoveGroupKinematicsService'...
+[move_group-2] Loading 'move_group/MoveGroupMoveAction'...
+[move_group-2] Loading 'move_group/MoveGroupPlanService'...
+[move_group-2] Loading 'move_group/MoveGroupQueryPlannersService'...
+[move_group-2] Loading 'move_group/MoveGroupStateValidationService'...
+[move_group-2] 
+[move_group-2] You can start planning now!
+[move_group-2] 
+[rviz2-3] [INFO] [1773788255.039611276] [move_group_interface]: Ready to take commands for planning group demo_arm_bot.
+[rviz2-3] [INFO] [1773788255.040108178] [moveit_ros_visualization.motion_planning_frame]: group demo_arm_bot
+[INFO] [move_to_pose-8]: process started with pid [6922]
+[move_to_pose-8] [INFO] [1773788255.448376916] [moveit_rdf_loader.rdf_loader]: Loaded robot model in 0 seconds
+[move_to_pose-8] [INFO] [1773788255.448432943] [moveit_robot_model.robot_model]: Loading robot model 'demo_bot'...
+[move_to_pose-8] [INFO] [1773788255.448439095] [moveit_robot_model.robot_model]: No root/virtual joint specified in SRDF. Assuming fixed joint
+[move_to_pose-8] [INFO] [1773788256.236745845] [move_group_interface]: Ready to take commands for planning group demo_arm_bot.
+[move_to_pose-8] [INFO] [1773788256.240009725] [move_group_interface]: Ready to take commands for planning group demo_gripper_bot.
+[move_to_pose-8] [INFO] [1773788259.523300948] [moveit_ros.current_state_monitor]: Listening to joint states on topic 'joint_states'
+[move_to_pose-8] [INFO] [1773788259.560571120] [move_to_pose_node]: Current EE pose:
+[move_to_pose-8] [INFO] [1773788259.560656974] [move_to_pose_node]:   position:    x=0.2125  y=0.0022  z=0.9168
+[move_to_pose-8] [INFO] [1773788259.560665541] [move_to_pose_node]:   orientation: x=-0.0000  y=-0.0000  z=1.0000  w=-0.0000
+[move_to_pose-8] [INFO] [1773788259.560674357] [move_to_pose_node]:   RPY (deg):   r=-0.00  p=0.00  y=-180.00
+[move_to_pose-8] [INFO] [1773788259.565478416] [move_to_pose_node]: Waiting 5 s for perception topics...
+[move_to_pose-8] [WARN] [1773788264.565569706] [move_to_pose_node]: No obstacle cloud — adding hollow fallback obstacle.
+[move_to_pose-8] [WARN] [1773788264.567428044] [move_to_pose_node]: Using default target pose.
+[move_to_pose-8] [WARN] [1773788264.567435498] [move_to_pose_node]: Using default task type: Grasp.
+[move_to_pose-8] [INFO] [1773788264.567439396] [move_to_pose_node]: Current joint state (8 joints):
+[move_to_pose-8] [INFO] [1773788264.567444606] [move_to_pose_node]:   Revolute_10                    pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567450276] [move_to_pose_node]:   Revolute_11                    pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567453382] [move_to_pose_node]:   Revolute_12                    pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567456478] [move_to_pose_node]:   Revolute_9                     pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567458913] [move_to_pose_node]:   Revolute_13                    pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567461358] [move_to_pose_node]:   Revolute_14                    pos=0.0000  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567464063] [move_to_pose_node]:   Slider_1                       pos=0.0500  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567467850] [move_to_pose_node]:   Slider_2                       pos=0.0500  vel=0.0000
+[move_to_pose-8] [INFO] [1773788264.567471607] [move_to_pose_node]: [Gripper] Opening...
+[move_group-2] [INFO] [1773788264.568044113] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_group-2] [INFO] [1773788264.568204240] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_to_pose-8] [INFO] [1773788264.568236361] [move_group_interface]: Plan and Execute request accepted
+[move_group-2] [INFO] [1773788264.569210066] [moveit_move_group_default_capabilities.move_action_capability]: Combined planning and execution request received for MoveGroup action. Forwarding to planning and execution pipeline.
+[move_group-2] [INFO] [1773788264.569257927] [moveit_move_group_default_capabilities.move_action_capability]: Goal constraints are already satisfied. No need to plan or execute any motions
+[move_group-2] [INFO] [1773788264.569277395] [moveit_move_group_default_capabilities.move_action_capability]: Requested path and goal constraints are already met.
+[move_to_pose-8] [INFO] [1773788264.569460305] [move_group_interface]: Plan and Execute request complete!
+[move_to_pose-8] [INFO] [1773788264.570068249] [move_to_pose_node]: [Path planning] Task: Grasp  target=(0.250, -0.100, 0.880)
+[move_to_pose-8] [INFO] [1773788264.570434089] [move_to_pose_node]: [Path Planning] IK check passed.
+[move_to_pose-8] [INFO] [1773788264.570521667] [move_group_interface]: MoveGroup action client/server ready
+[move_group-2] [INFO] [1773788264.570613293] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_group-2] [INFO] [1773788264.570649602] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_to_pose-8] [INFO] [1773788264.570670212] [move_group_interface]: Planning request accepted
+[move_group-2] [INFO] [1773788264.570688537] [moveit_move_group_default_capabilities.move_action_capability]: Planning request received for MoveGroup action. Forwarding to planning pipeline.
+[move_group-2] [INFO] [1773788264.570698365] [moveit_move_group_capabilities_base.move_group_capability]: Using planning pipeline 'ompl'
+[move_group-2] [INFO] [1773788264.571956294] [moveit.ompl_planning.model_based_planning_context]: Planner configuration 'demo_arm_bot' will use planner 'geometric::RRTConnect'. Additional configuration parameters will be set when the planner is constructed.
+[move_group-2] [INFO] [1773788264.572275806] [moveit.ompl_planning.model_based_planning_context]: demo_arm_bot: Allocating specialized state sampler for state space
+[move_group-2] [INFO] [1773788264.948103078] [moveit.ompl_planning.model_based_planning_context]: demo_arm_bot: Allocating specialized state sampler for state space
+[move_group-2] [INFO] [1773788264.955565537] [moveit_move_group_default_capabilities.move_action_capability]: Motion plan was computed successfully.
+[move_to_pose-8] [INFO] [1773788264.955735502] [move_group_interface]: Planning request complete!
+[move_to_pose-8] [INFO] [1773788264.956474718] [move_group_interface]: time taken to generate plan: 0.381458 seconds
+[move_to_pose-8] [INFO] [1773788264.956574048] [move_to_pose_node]: [Path Planning] RViz marker published (green).
+[move_to_pose-8] [INFO] [1773788264.956582354] [move_to_pose_node]: [Path Planning] Executing plan...
+[move_group-2] [INFO] [1773788264.956779982] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Received goal request
+[move_to_pose-8] [INFO] [1773788264.956832082] [move_group_interface]: Execute request accepted
+[move_group-2] [INFO] [1773788264.956838183] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Execution request received
+[move_group-2] [INFO] [1773788264.956857761] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788264.956868562] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788264.956921613] [moveit_ros.trajectory_execution_manager]: Validating trajectory with allowed_start_tolerance 0.05
+[move_group-2] [INFO] [1773788264.956984313] [moveit_ros.trajectory_execution_manager]: Starting trajectory execution ...
+[move_group-2] [INFO] [1773788264.957009942] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788264.957019801] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788264.957126606] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: sending trajectory to demo_arm_bot_controller
+[ros2_control_node-4] [INFO] [1773788264.957297232] [demo_arm_bot_controller]: Received new action goal
+[ros2_control_node-4] [INFO] [1773788264.957336848] [demo_arm_bot_controller]: Accepted new action goal
+[move_group-2] [INFO] [1773788264.957435908] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: demo_arm_bot_controller started execution
+[move_group-2] [INFO] [1773788264.957445116] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Goal request accepted!
+[move_group-2] [WARN] [1773788265.325157329] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788266.326440819] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788267.362036189] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788268.384199787] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788269.412056720] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[ros2_control_node-4] [INFO] [1773788269.624576233] [demo_arm_bot_controller]: Goal reached, success!
+[move_group-2] [INFO] [1773788269.657738778] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Controller 'demo_arm_bot_controller' successfully finished
+[move_group-2] [INFO] [1773788269.657789936] [moveit_ros.trajectory_execution_manager]: Completed trajectory execution with status SUCCEEDED ...
+[move_group-2] [INFO] [1773788269.657852736] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Execution completed: SUCCEEDED
+[move_to_pose-8] [INFO] [1773788269.658074020] [move_group_interface]: Execute request success!
+[move_to_pose-8] [INFO] [1773788269.658750746] [move_to_pose_node]: [Path Planning] Execution succeeded. Syncing state...
+[move_to_pose-8] [INFO] [1773788270.158881617] [move_to_pose_node]: [Path Planning] Path published (24 waypoints).
+[move_to_pose-8] [INFO] [1773788270.158913718] [move_to_pose_node]: [Gripper] Closing to width=0.0200 m (slider=0.0100).
+[move_group-2] [INFO] [1773788270.159116396] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_group-2] [INFO] [1773788270.159194887] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_to_pose-8] [INFO] [1773788270.159209855] [move_group_interface]: Plan and Execute request accepted
+[move_group-2] [INFO] [1773788270.159236947] [moveit_move_group_default_capabilities.move_action_capability]: Combined planning and execution request received for MoveGroup action. Forwarding to planning and execution pipeline.
+[move_group-2] [INFO] [1773788270.159281292] [moveit_ros.plan_execution]: Planning attempt 1 of at most 1
+[move_group-2] [INFO] [1773788270.160545122] [moveit.ompl_planning.model_based_planning_context]: Planner configuration 'demo_gripper_bot' will use planner 'geometric::RRTConnect'. Additional configuration parameters will be set when the planner is constructed.
+[move_group-2] [INFO] [1773788270.175814487] [moveit_kinematic_constraints.kinematic_constraints]: Constraint satisfied:: Joint name: 'Slider_1', actual value: 0.009975, desired value: 0.010000, tolerance_above: 0.000100, tolerance_below: 0.000100
+[move_group-2] [INFO] [1773788270.175859213] [moveit_kinematic_constraints.kinematic_constraints]: Constraint satisfied:: Joint name: 'Slider_2', actual value: 0.009958, desired value: 0.010000, tolerance_above: 0.000100, tolerance_below: 0.000100
+[move_group-2] [INFO] [1773788270.175873901] [moveit_collision_detection_fcl.collision_common]: Found a contact between 'wellplate' (type 'Object') and 'Finger_left_2' (type 'Robot link'), which constitutes a collision. Contact information is not stored.
+[move_group-2] [INFO] [1773788270.175877809] [moveit_collision_detection_fcl.collision_common]: Collision checking is considered complete (collision was found and 0 contacts are stored)
+[move_group-2] [ERROR] [1773788270.190784981] [ompl]: ./src/ompl/geometric/planners/rrt/src/RRTConnect.cpp:265 - demo_gripper_bot/demo_gripper_bot: Unable to sample any valid states for goal tree
+[move_group-2] [WARN] [1773788270.190832792] [moveit.ompl_planning.model_based_planning_context]: Invalid goal state
+[move_group-2] [INFO] [1773788270.190837221] [moveit.ompl_planning.model_based_planning_context]: Unable to solve the planning problem
+[move_group-2] [INFO] [1773788270.190852760] [moveit_move_group_default_capabilities.move_action_capability]: Unknown event
+[move_to_pose-8] [INFO] [1773788270.190972961] [move_group_interface]: Plan and Execute request aborted
+[move_to_pose-8] [ERROR] [1773788270.191665437] [move_group_interface]: MoveGroupInterface::move() failed or timeout reached
+[move_to_pose-8] [INFO] [1773788270.191695123] [move_to_pose_node]: [Scene] Attaching wellplate to end_effector_p4_1.
+[move_to_pose-8] [INFO] [1773788270.192194900] [move_to_pose_node]: [Gripper] Closing to width=0.0200 m (slider=0.0100).
+[move_group-2] [INFO] [1773788270.192458164] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_to_pose-8] [INFO] [1773788270.192499163] [move_group_interface]: Plan and Execute request accepted
+[move_group-2] [INFO] [1773788270.192500475] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_group-2] [INFO] [1773788270.192518289] [moveit_move_group_default_capabilities.move_action_capability]: Combined planning and execution request received for MoveGroup action. Forwarding to planning and execution pipeline.
+[move_group-2] [INFO] [1773788270.192532056] [moveit_ros.plan_execution]: Planning attempt 1 of at most 1
+[move_group-2] [INFO] [1773788270.193546538] [moveit.ompl_planning.model_based_planning_context]: Planner configuration 'demo_gripper_bot' will use planner 'geometric::RRTConnect'. Additional configuration parameters will be set when the planner is constructed.
+[move_group-2] [WARN] [1773788270.207580458] [moveit_trajectory_processing.time_optimal_trajectory_generation]: Joint acceleration limits are not defined. Using the default 1 rad/s^2. You can define acceleration limits in the URDF or joint_limits.yaml.
+[move_group-2] [INFO] [1773788270.207999471] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788270.208010231] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788270.208046330] [moveit_ros.trajectory_execution_manager]: Validating trajectory with allowed_start_tolerance 0.05
+[move_group-2] [INFO] [1773788270.208092559] [moveit_ros.trajectory_execution_manager]: Starting trajectory execution ...
+[move_group-2] [INFO] [1773788270.208124450] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788270.208141022] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788270.208296960] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: sending trajectory to demo_gripper_bot_controller
+[ros2_control_node-4] [INFO] [1773788270.208384117] [demo_gripper_bot_controller]: Received new action goal
+[ros2_control_node-4] [INFO] [1773788270.208417321] [demo_gripper_bot_controller]: Accepted new action goal
+[move_group-2] [INFO] [1773788270.208517863] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: demo_gripper_bot_controller started execution
+[move_group-2] [INFO] [1773788270.208527923] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Goal request accepted!
+[move_group-2] [WARN] [1773788270.503613289] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[ros2_control_node-4] [INFO] [1773788271.248762884] [demo_gripper_bot_controller]: Goal reached, success!
+[move_group-2] [INFO] [1773788271.258637130] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Controller 'demo_gripper_bot_controller' successfully finished
+[move_group-2] [INFO] [1773788271.258669452] [moveit_ros.trajectory_execution_manager]: Completed trajectory execution with status SUCCEEDED ...
+[move_group-2] [INFO] [1773788271.268220629] [moveit_move_group_default_capabilities.move_action_capability]: Solution was found and executed.
+[move_to_pose-8] [INFO] [1773788271.268492229] [move_group_interface]: Plan and Execute request complete!
+[move_to_pose-8] [INFO] [1773788271.269175607] [move_to_pose_node]: [Place] Planning to (0.540, 0.400, 0.960)...
+[move_to_pose-8] [INFO] [1773788271.269350853] [move_group_interface]: MoveGroup action client/server ready
+[move_group-2] [INFO] [1773788271.269520728] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_group-2] [INFO] [1773788271.269551668] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_to_pose-8] [INFO] [1773788271.269553932] [move_group_interface]: Planning request accepted
+[move_group-2] [INFO] [1773788271.269579811] [moveit_move_group_default_capabilities.move_action_capability]: Planning request received for MoveGroup action. Forwarding to planning pipeline.
+[move_group-2] [INFO] [1773788271.269584480] [moveit_move_group_capabilities_base.move_group_capability]: Using planning pipeline 'ompl'
+[move_group-2] [INFO] [1773788271.270211140] [moveit_collision_detection_fcl.collision_common]: Found a contact between 'table' (type 'Object') and 'wellplate' (type 'Robot attached'), which constitutes a collision. Contact information is not stored.
+[move_group-2] [INFO] [1773788271.270219807] [moveit_collision_detection_fcl.collision_common]: Collision checking is considered complete (collision was found and 0 contacts are stored)
+[move_group-2] [INFO] [1773788271.270222732] [moveit_ros.fix_start_state_collision]: Start state appears to be in collision with respect to group demo_arm_bot
+[move_group-2] [INFO] [1773788271.270282547] [moveit_ros.fix_start_state_collision]: Found a valid state near the start state at distance 0.058494 after 0 attempts
+[move_group-2] [INFO] [1773788271.270760212] [moveit.ompl_planning.model_based_planning_context]: Planner configuration 'demo_arm_bot' will use planner 'geometric::RRTConnect'. Additional configuration parameters will be set when the planner is constructed.
+[move_group-2] [INFO] [1773788271.270868389] [moveit.ompl_planning.model_based_planning_context]: demo_arm_bot: Allocating specialized state sampler for state space
+[move_group-2] [INFO] [1773788276.854734744] [moveit.ros_planning.planning_pipeline]: Planning adapters have added states at index positions: [ 0 ]
+[move_group-2] [INFO] [1773788276.875015924] [moveit_move_group_default_capabilities.move_action_capability]: Motion plan was computed successfully.
+[move_to_pose-8] [INFO] [1773788276.875324175] [move_group_interface]: Planning request complete!
+[move_to_pose-8] [INFO] [1773788276.875484031] [move_group_interface]: time taken to generate plan: 5.55005 seconds
+[move_group-2] [INFO] [1773788276.875888555] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Received goal request
+[move_to_pose-8] [INFO] [1773788276.875970672] [move_group_interface]: Execute request accepted
+[move_group-2] [INFO] [1773788276.875990080] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Execution request received
+[move_group-2] [INFO] [1773788276.876027241] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788276.876050986] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788276.876137853] [moveit_ros.trajectory_execution_manager]: Validating trajectory with allowed_start_tolerance 0.05
+[move_group-2] [INFO] [1773788276.876255758] [moveit_ros.trajectory_execution_manager]: Starting trajectory execution ...
+[move_group-2] [INFO] [1773788276.876295845] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788276.876312236] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788276.876450972] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: sending trajectory to demo_arm_bot_controller
+[ros2_control_node-4] [INFO] [1773788276.876606109] [demo_arm_bot_controller]: Received new action goal
+[ros2_control_node-4] [INFO] [1773788276.876643340] [demo_arm_bot_controller]: Accepted new action goal
+[move_group-2] [INFO] [1773788276.876728884] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: demo_arm_bot_controller started execution
+[move_group-2] [INFO] [1773788276.876737160] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Goal request accepted!
+[move_group-2] [WARN] [1773788277.223020251] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788278.280147306] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788279.298630748] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788280.389637358] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788281.417089410] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788282.445301571] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788283.459827604] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788284.478579412] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788285.496277588] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788286.513810862] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788287.529588639] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788288.531673195] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788289.552367676] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788290.580122278] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788291.600681789] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788292.628986013] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788293.717811912] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788294.728844076] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788295.755019958] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788296.773813401] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788297.847985893] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788298.877378427] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788299.909738528] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788300.998024553] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788302.087707539] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788303.119899761] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788304.140509813] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788305.161074835] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788306.293157178] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788307.305906445] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [WARN] [1773788308.351637058] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[ros2_control_node-4] [INFO] [1773788309.377537453] [demo_arm_bot_controller]: Goal reached, success!
+[move_group-2] [INFO] [1773788309.377916228] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Controller 'demo_arm_bot_controller' successfully finished
+[move_group-2] [INFO] [1773788309.377986011] [moveit_ros.trajectory_execution_manager]: Completed trajectory execution with status SUCCEEDED ...
+[move_group-2] [INFO] [1773788309.378132883] [moveit_move_group_default_capabilities.execute_trajectory_action_capability]: Execution completed: SUCCEEDED
+[move_to_pose-8] [INFO] [1773788309.378395055] [move_group_interface]: Execute request success!
+[move_to_pose-8] [INFO] [1773788309.378699137] [move_to_pose_node]: [Place] Reached place position.
+[move_to_pose-8] [INFO] [1773788309.378722241] [move_to_pose_node]: [Gripper] Opening...
+[move_group-2] [INFO] [1773788309.378928766] [moveit_move_group_default_capabilities.move_action_capability]: Received request
+[move_to_pose-8] [INFO] [1773788309.378970196] [move_group_interface]: Plan and Execute request accepted
+[move_group-2] [INFO] [1773788309.378976428] [moveit_move_group_default_capabilities.move_action_capability]: executing..
+[move_group-2] [INFO] [1773788309.379001876] [moveit_move_group_default_capabilities.move_action_capability]: Combined planning and execution request received for MoveGroup action. Forwarding to planning and execution pipeline.
+[move_group-2] [INFO] [1773788309.379024459] [moveit_ros.plan_execution]: Planning attempt 1 of at most 1
+[move_group-2] [INFO] [1773788309.380112683] [moveit.ompl_planning.model_based_planning_context]: Planner configuration 'demo_gripper_bot' will use planner 'geometric::RRTConnect'. Additional configuration parameters will be set when the planner is constructed.
+[move_group-2] [INFO] [1773788309.396352503] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788309.396385777] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788309.396409673] [moveit_ros.trajectory_execution_manager]: Validating trajectory with allowed_start_tolerance 0.05
+[move_group-2] [INFO] [1773788309.396502711] [moveit_ros.trajectory_execution_manager]: Starting trajectory execution ...
+[move_group-2] [INFO] [1773788309.396527699] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788309.396539261] [moveit.plugins.moveit_simple_controller_manager]: Returned 2 controllers in list
+[move_group-2] [INFO] [1773788309.396646917] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: sending trajectory to demo_gripper_bot_controller
+[ros2_control_node-4] [INFO] [1773788309.396862229] [demo_gripper_bot_controller]: Received new action goal
+[ros2_control_node-4] [INFO] [1773788309.396940870] [demo_gripper_bot_controller]: Accepted new action goal
+[move_group-2] [INFO] [1773788309.397050830] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: demo_gripper_bot_controller started execution
+[move_group-2] [INFO] [1773788309.397057032] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Goal request accepted!
+[move_group-2] [WARN] [1773788309.448498545] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[ros2_control_node-4] [INFO] [1773788310.472857081] [demo_gripper_bot_controller]: Goal reached, success!
+[move_group-2] [WARN] [1773788310.472971691] [moveit_ros.planning_scene_monitor.planning_scene_monitor]: The complete state of the robot is not yet known.  Missing Revolute_5, Revolute_1, Revolute_6, Revolute_2, Revolute_7, Revolute_3, Revolute_8, Revolute_4
+[move_group-2] [INFO] [1773788310.497247105] [moveit.simple_controller_manager.follow_joint_trajectory_controller_handle]: Controller 'demo_gripper_bot_controller' successfully finished
+[move_group-2] [INFO] [1773788310.497283965] [moveit_ros.trajectory_execution_manager]: Completed trajectory execution with status SUCCEEDED ...
+[move_group-2] [INFO] [1773788310.506603227] [moveit_move_group_default_capabilities.move_action_capability]: Solution was found and executed.
+[move_to_pose-8] [INFO] [1773788310.507000307] [move_group_interface]: Plan and Execute request complete!
+[move_to_pose-8] [INFO] [1773788310.507433967] [move_to_pose_node]: [Scene] Detaching wellplate.
+[INFO] [move_to_pose-8]: process has finished cleanly [pid 6922]

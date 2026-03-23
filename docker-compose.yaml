@@ -4,9 +4,9 @@
 # Components are organized by functionality
 # This allows for modular development and deployment
 include:
-  - simulation/isaac-sim/docker/docker-compose.yaml
+  # - simulation/isaac-sim/docker/docker-compose.yaml
   - robot/docker/docker-compose.yaml
-  - gcs/docker/docker-compose.yaml
+  # - gcs/docker/docker-compose.yaml
   # - docs/docker/docker-compose.yaml
 
 networks:
@@ -16,3 +16,4 @@ networks:
       driver: default
       config:
         - subnet: 172.31.0.0/24
+

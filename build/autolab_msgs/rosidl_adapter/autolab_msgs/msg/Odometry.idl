@@ -1,0 +1,26 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from autolab_msgs/msg/Odometry.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+#include "geometry_msgs/msg/Twist.idl"
+#include "geometry_msgs/msg/Vector3.idl"
+#include "std_msgs/msg/Header.idl"
+
+module autolab_msgs {
+  module msg {
+    struct Odometry {
+      std_msgs::msg::Header header;
+
+      string child_frame_id;
+
+      geometry_msgs::msg::Pose pose;
+
+      geometry_msgs::msg::Twist twist;
+
+      geometry_msgs::msg::Vector3 acceleration;
+
+      geometry_msgs::msg::Vector3 jerk;
+    };
+  };
+};

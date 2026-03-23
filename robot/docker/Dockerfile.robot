@@ -84,6 +84,7 @@ RUN apt update -y && apt install -y \
   ros-humble-moveit \
   ros-humble-ros2-control \
   ros-humble-ros2-controllers \
+  ros-humble-topic-based-ros2-control \
   ros-humble-controller-manager \
   ros-humble-joint-state-broadcaster \
   ros-humble-joint-trajectory-controller \
@@ -244,3 +245,9 @@ RUN apt autoremove -y \
 
 USER robot:robot
 ENTRYPOINT ["fixuid"]
+
+RUN cd ~/AutoLab/robot/ros_ws \
+&& rm -rf build install log \
+&& colcon build --packages-ignore robot_bringup rviz_behavior_tree_panel \
+&& source install/setup.bash
+
