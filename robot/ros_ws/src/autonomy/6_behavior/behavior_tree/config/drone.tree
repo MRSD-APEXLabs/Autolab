@@ -3,8 +3,8 @@
 		(Command Lab Machine)
 		?
 			->
-				(OT-2 Liquid Handler)
-				[Execute OT-2 Protocol]
+				(OT2 Liquid Handler)
+				[Execute OT2 Protocol]
 			->
 				(Custom Shaker Module)
 				[Execute Shaker Protocol]
