@@ -192,8 +192,6 @@ void LabMachineExecutive::tick_ot2() {
             ot2_phase_        = OT2Phase::IDLE;
             ot2_terminal_     = false;
             http_in_flight_   = false;
-            command_lab_machine_condition_->set(false);
-            ot2_condition_->set(false);
         }
         return;
     }
@@ -205,6 +203,8 @@ void LabMachineExecutive::tick_ot2() {
         if (ot2_protocol_json_.empty()) {
             RCLCPP_WARN(this->get_logger(),
                         "OT-2 action activated but no protocol received — FAILURE");
+            command_lab_machine_condition_->set(false);
+            ot2_condition_->set(false);
             ot2_terminal_ = true;
             ot2_action_->set_failure();
             return;
@@ -214,6 +214,8 @@ void LabMachineExecutive::tick_ot2() {
             ot2_steps_ = doc.at("steps");
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "Malformed OT-2 protocol JSON: %s", e.what());
+            command_lab_machine_condition_->set(false);
+            ot2_condition_->set(false);
             ot2_terminal_ = true;
             ot2_action_->set_failure();
             return;
@@ -235,6 +237,8 @@ void LabMachineExecutive::tick_ot2() {
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 connect failed — FAILURE");
+                command_lab_machine_condition_->set(false);
+                ot2_condition_->set(false);
                 ot2_terminal_ = true;
                 ot2_action_->set_failure();
                 return;
@@ -275,6 +279,8 @@ void LabMachineExecutive::tick_ot2() {
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(),
                              "OT-2 step %d failed — FAILURE", ot2_current_step_);
+                command_lab_machine_condition_->set(false);
+                ot2_condition_->set(false);
                 ot2_terminal_ = true;
                 ot2_action_->set_failure();
                 return;
@@ -292,6 +298,8 @@ void LabMachineExecutive::tick_ot2() {
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 home failed — FAILURE");
+                command_lab_machine_condition_->set(false);
+                ot2_condition_->set(false);
                 ot2_terminal_ = true;
                 ot2_action_->set_failure();
                 return;
@@ -313,11 +321,15 @@ void LabMachineExecutive::tick_ot2() {
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 disconnect failed — FAILURE");
+                command_lab_machine_condition_->set(false);
+                ot2_condition_->set(false);
                 ot2_terminal_ = true;
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            command_lab_machine_condition_->set(false);
+            ot2_condition_->set(false);
             ot2_terminal_ = true;
             ot2_action_->set_success();
         }
@@ -348,8 +360,6 @@ void LabMachineExecutive::tick_shaker() {
     if (!shaker_action_->is_active()) {
         if (shaker_action_->active_has_changed()) {
             http_in_flight_ = false;
-            command_lab_machine_condition_->set(false);
-            shaker_condition_->set(false);
         }
         return;
     }
@@ -396,9 +406,13 @@ void LabMachineExecutive::tick_shaker() {
 
         if (ok) {
             RCLCPP_INFO(this->get_logger(), "Shaker command succeeded — SUCCESS");
+            command_lab_machine_condition_->set(false);
+            shaker_condition_->set(false);
             shaker_action_->set_success();
         } else {
             RCLCPP_ERROR(this->get_logger(), "Shaker command failed — FAILURE");
+            command_lab_machine_condition_->set(false);
+            shaker_condition_->set(false);
             shaker_action_->set_failure();
         }
         return;
