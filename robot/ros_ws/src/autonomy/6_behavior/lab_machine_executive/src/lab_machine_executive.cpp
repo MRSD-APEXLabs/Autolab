@@ -12,7 +12,8 @@ using namespace std::chrono_literals;
 LabMachineExecutive::LabMachineExecutive()
     : Node("lab_machine_executive"),
       ot2_current_step_(0),
-      ot2_connecting_(false),
+      ot2_phase_(OT2Phase::IDLE),
+      ot2_terminal_(false),
       http_in_flight_(false)
 {
     // ROS2 parameters
@@ -120,6 +121,14 @@ bool LabMachineExecutive::http_post(const std::string& url,
     return (res == CURLE_OK) && (http_code >= 200) && (http_code < 300);
 }
 
+bool LabMachineExecutive::home_ot2() {
+    return http_post(ot2_base_url_ + "/robot/home", "{}", "application/json");
+}
+
+bool LabMachineExecutive::disconnect_ot2() {
+    return http_post(ot2_base_url_ + "/robot/disconnect", "{}", "application/json");
+}
+
 // Converts OT-2 step action name to REST endpoint path.
 // e.g. "pick_up_tips" → "/commands/pick-up-tips"
 std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
@@ -178,10 +187,10 @@ void LabMachineExecutive::timer_callback() {
 
 void LabMachineExecutive::tick_ot2() {
     if (!ot2_action_->is_active()) {
-        // Reset state when action deactivates so next run starts fresh
         if (ot2_action_->active_has_changed()) {
             ot2_current_step_ = 0;
-            ot2_connecting_   = false;
+            ot2_phase_        = OT2Phase::IDLE;
+            ot2_terminal_     = false;
             http_in_flight_   = false;
             command_lab_machine_condition_->set(false);
             ot2_condition_->set(false);
@@ -189,24 +198,28 @@ void LabMachineExecutive::tick_ot2() {
         return;
     }
 
+    if (ot2_terminal_) return;
+
     // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
         if (ot2_protocol_json_.empty()) {
             RCLCPP_WARN(this->get_logger(),
                         "OT-2 action activated but no protocol received — FAILURE");
+            ot2_terminal_ = true;
             ot2_action_->set_failure();
             return;
         }
         try {
-            auto doc    = nlohmann::json::parse(ot2_protocol_json_);
-            ot2_steps_  = doc.at("steps");
+            auto doc   = nlohmann::json::parse(ot2_protocol_json_);
+            ot2_steps_ = doc.at("steps");
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "Malformed OT-2 protocol JSON: %s", e.what());
+            ot2_terminal_ = true;
             ot2_action_->set_failure();
             return;
         }
         ot2_current_step_ = 0;
-        ot2_connecting_   = true;
+        ot2_phase_        = OT2Phase::CONNECTING;
         http_in_flight_   = true;
         RCLCPP_INFO(this->get_logger(), "OT-2 connecting to %s…", ot2_host_.c_str());
         pending_http_ = std::async(std::launch::async,
@@ -215,61 +228,102 @@ void LabMachineExecutive::tick_ot2() {
         return;
     }
 
-    // ── Poll connect future ───────────────────────────────────────────────────
-    if (ot2_connecting_) {
+    // ── CONNECTING ────────────────────────────────────────────────────────────
+    if (ot2_phase_ == OT2Phase::CONNECTING) {
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             bool ok = pending_http_.get();
             http_in_flight_ = false;
-            ot2_connecting_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 connect failed — FAILURE");
+                ot2_terminal_ = true;
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 connected — starting %zu steps",
                         ot2_steps_.size());
+            ot2_phase_ = OT2Phase::STEPPING;
         }
         ot2_action_->set_running();
         return;
     }
 
-    // ── Dispatch next step if none in flight ─────────────────────────────────
-    if (!http_in_flight_) {
-        if (ot2_current_step_ >= static_cast<int>(ot2_steps_.size())) {
-            RCLCPP_INFO(this->get_logger(), "OT-2 protocol complete — SUCCESS");
+    // ── STEPPING ──────────────────────────────────────────────────────────────
+    if (ot2_phase_ == OT2Phase::STEPPING) {
+        if (!http_in_flight_) {
+            if (ot2_current_step_ >= static_cast<int>(ot2_steps_.size())) {
+                RCLCPP_INFO(this->get_logger(), "OT-2 steps complete — homing…");
+                ot2_phase_      = OT2Phase::HOMING;
+                http_in_flight_ = true;
+                pending_http_   = std::async(std::launch::async,
+                                             &LabMachineExecutive::home_ot2, this);
+                ot2_action_->set_running();
+                return;
+            }
+            const auto& step = ot2_steps_[ot2_current_step_];
+            RCLCPP_INFO(this->get_logger(), "OT-2 step %d: %s",
+                        ot2_current_step_, step.value("action", "?").c_str());
+            pending_http_   = std::async(std::launch::async,
+                                         &LabMachineExecutive::dispatch_ot2_step,
+                                         this, step);
+            http_in_flight_ = true;
+            ot2_action_->set_running();
+            return;
+        }
+        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            bool ok = pending_http_.get();
+            http_in_flight_ = false;
+            if (!ok) {
+                RCLCPP_ERROR(this->get_logger(),
+                             "OT-2 step %d failed — FAILURE", ot2_current_step_);
+                ot2_terminal_ = true;
+                ot2_action_->set_failure();
+                return;
+            }
+            ot2_current_step_++;
+        }
+        ot2_action_->set_running();
+        return;
+    }
+
+    // ── HOMING ────────────────────────────────────────────────────────────────
+    if (ot2_phase_ == OT2Phase::HOMING) {
+        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            bool ok = pending_http_.get();
+            http_in_flight_ = false;
+            if (!ok) {
+                RCLCPP_ERROR(this->get_logger(), "OT-2 home failed — FAILURE");
+                ot2_terminal_ = true;
+                ot2_action_->set_failure();
+                return;
+            }
+            RCLCPP_INFO(this->get_logger(), "OT-2 homed — disconnecting…");
+            ot2_phase_      = OT2Phase::DISCONNECTING;
+            http_in_flight_ = true;
+            pending_http_   = std::async(std::launch::async,
+                                         &LabMachineExecutive::disconnect_ot2, this);
+        }
+        ot2_action_->set_running();
+        return;
+    }
+
+    // ── DISCONNECTING ─────────────────────────────────────────────────────────
+    if (ot2_phase_ == OT2Phase::DISCONNECTING) {
+        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            bool ok = pending_http_.get();
+            http_in_flight_ = false;
+            if (!ok) {
+                RCLCPP_ERROR(this->get_logger(), "OT-2 disconnect failed — FAILURE");
+                ot2_terminal_ = true;
+                ot2_action_->set_failure();
+                return;
+            }
+            RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            ot2_terminal_ = true;
             ot2_action_->set_success();
-            return;
         }
-
-        const auto& step = ot2_steps_[ot2_current_step_];
-        RCLCPP_INFO(this->get_logger(), "OT-2 step %d: %s",
-                    ot2_current_step_,
-                    step.value("action", "?").c_str());
-
-        pending_http_  = std::async(std::launch::async,
-                                    &LabMachineExecutive::dispatch_ot2_step,
-                                    this, step);
-        http_in_flight_ = true;
         ot2_action_->set_running();
         return;
     }
-
-    // ── Poll in-flight step future ────────────────────────────────────────────
-    if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-        bool ok = pending_http_.get();
-        http_in_flight_ = false;
-
-        if (!ok) {
-            RCLCPP_ERROR(this->get_logger(),
-                         "OT-2 step %d failed — FAILURE", ot2_current_step_);
-            ot2_action_->set_failure();
-            return;
-        }
-        ot2_current_step_++;
-    }
-
-    // Still RUNNING (either waiting on future or just advanced to next step)
-    ot2_action_->set_running();
 }
 
 bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step) {
