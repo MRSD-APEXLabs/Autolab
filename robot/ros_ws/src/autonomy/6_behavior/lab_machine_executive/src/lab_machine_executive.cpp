@@ -65,6 +65,11 @@ void LabMachineExecutive::command_callback(
     const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg)
 {
     if (msg->device == "ot2") {
+        if (ot2_phase_ != OT2Phase::IDLE) {
+            RCLCPP_WARN(this->get_logger(),
+                        "OT-2 run in progress — ignoring new protocol");
+            return;
+        }
         ot2_protocol_json_ = msg->parameters_json;
         command_lab_machine_condition_->set(true);
         ot2_condition_->set(true);
@@ -72,6 +77,11 @@ void LabMachineExecutive::command_callback(
         RCLCPP_INFO(this->get_logger(), "Received OT-2 protocol (%zu bytes)",
                     ot2_protocol_json_.size());
     } else if (msg->device == "shaker") {
+        if (shaker_condition_->get()) {
+            RCLCPP_WARN(this->get_logger(),
+                        "Shaker run in progress — ignoring new command");
+            return;
+        }
         shaker_protocol_json_ = msg->parameters_json;
         command_lab_machine_condition_->set(true);
         shaker_condition_->set(true);
