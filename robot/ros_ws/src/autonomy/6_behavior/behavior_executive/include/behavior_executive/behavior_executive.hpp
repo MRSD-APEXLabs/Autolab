@@ -42,9 +42,6 @@ class BehaviorExecutive : public rclcpp::Node {
     bt::Condition* state_estimate_timed_out_condition;
     bt::Condition* stuck_condition;
     bt::Condition* autonomously_explore_condition;
-    bt::Condition* command_lab_machine_condition;
-    bt::Condition* ot2_liquid_handler_condition;
-    bt::Condition* custom_shaker_module_condition;
     std::vector<bt::Condition*> conditions;
 
     // Action variables

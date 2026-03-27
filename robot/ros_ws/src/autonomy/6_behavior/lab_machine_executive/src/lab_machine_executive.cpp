@@ -65,10 +65,16 @@ void LabMachineExecutive::command_callback(
 {
     if (msg->device == "ot2") {
         ot2_protocol_json_ = msg->parameters_json;
+        command_lab_machine_condition_->set(true);
+        ot2_condition_->set(true);
+        shaker_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received OT-2 protocol (%zu bytes)",
                     ot2_protocol_json_.size());
     } else if (msg->device == "shaker") {
         shaker_protocol_json_ = msg->parameters_json;
+        command_lab_machine_condition_->set(true);
+        shaker_condition_->set(true);
+        ot2_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received shaker protocol (%zu bytes)",
                     shaker_protocol_json_.size());
     } else {
@@ -177,6 +183,8 @@ void LabMachineExecutive::tick_ot2() {
             ot2_current_step_ = 0;
             ot2_connecting_   = false;
             http_in_flight_   = false;
+            command_lab_machine_condition_->set(false);
+            ot2_condition_->set(false);
         }
         return;
     }
@@ -283,7 +291,14 @@ bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void LabMachineExecutive::tick_shaker() {
-    if (!shaker_action_->is_active()) return;
+    if (!shaker_action_->is_active()) {
+        if (shaker_action_->active_has_changed()) {
+            http_in_flight_ = false;
+            command_lab_machine_condition_->set(false);
+            shaker_condition_->set(false);
+        }
+        return;
+    }
 
     if (shaker_action_->active_has_changed()) {
         // New activation — fire single HTTP call asynchronously

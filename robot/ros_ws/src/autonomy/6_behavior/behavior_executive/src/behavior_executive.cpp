@@ -33,9 +33,6 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     state_estimate_timed_out_condition = new bt::Condition("State Estimate Timed Out", this);
     stuck_condition = new bt::Condition("Stuck", this);
     autonomously_explore_condition = new bt::Condition("Autonomously Explore Commanded", this);
-    command_lab_machine_condition = new bt::Condition("Command Lab Machine", this);
-    ot2_liquid_handler_condition = new bt::Condition("OT2 Liquid Handler", this);
-    custom_shaker_module_condition = new bt::Condition("Custom Shaker Module", this);
     conditions.push_back(armed_condition);
     conditions.push_back(stationary_condition);
     conditions.push_back(pause_commanded_condition);
@@ -47,9 +44,6 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     conditions.push_back(state_estimate_timed_out_condition);
     conditions.push_back(stuck_condition);
     conditions.push_back(autonomously_explore_condition);
-    conditions.push_back(command_lab_machine_condition);
-    conditions.push_back(ot2_liquid_handler_condition);
-    conditions.push_back(custom_shaker_module_condition);
 
     // actions
     arm_action = new bt::Action("Arm", this);
