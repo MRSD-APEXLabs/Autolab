@@ -34,7 +34,7 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     stuck_condition = new bt::Condition("Stuck", this);
     autonomously_explore_condition = new bt::Condition("Autonomously Explore Commanded", this);
     command_lab_machine_condition = new bt::Condition("Command Lab Machine", this);
-    ot2_liquid_handler_condition = new bt::Condition("OT-2 Liquid Handler", this);
+    ot2_liquid_handler_condition = new bt::Condition("OT2 Liquid Handler", this);
     custom_shaker_module_condition = new bt::Condition("Custom Shaker Module", this);
     conditions.push_back(armed_condition);
     conditions.push_back(stationary_condition);
