@@ -155,7 +155,7 @@ bool LabMachineExecutive::connect_ot2() {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS,     body_str.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,  static_cast<long>(body_str.size()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        60L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  discard_response);
 
     CURLcode res = curl_easy_perform(curl);
