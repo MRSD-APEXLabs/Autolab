@@ -28,5 +28,8 @@
 
         </node>
 
+        <!-- Lab Machine Executive -->
+        <include file="$(find-pkg-share lab_machine_executive)/launch/lab_machine_executive.launch.xml" />
+
     </group>
 </launch>

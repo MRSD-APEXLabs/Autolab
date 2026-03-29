@@ -106,7 +106,9 @@ RUN apt update -y && apt install -y \
   # ros-humble-backward-ros \
   # ros-humble-zed-msgs \
   libcgal-dev \
-  python3-colcon-common-extensions
+  python3-colcon-common-extensions \
+  libcurl4-openssl-dev \
+  nlohmann-json3-dev
 
 # Install TensorRT
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(lsb_release -rs | tr -d .)/x86_64/cuda-keyring_1.1-1_all.deb && \ 
