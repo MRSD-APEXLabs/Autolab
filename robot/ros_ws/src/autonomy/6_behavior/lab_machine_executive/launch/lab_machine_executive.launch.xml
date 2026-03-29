@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="lab_machine_executive" exec="lab_machine_executive" output="screen">
+        <param from="$(find-pkg-share lab_machine_executive)/config/lab_machines.yaml" />
+    </node>
+</launch>
