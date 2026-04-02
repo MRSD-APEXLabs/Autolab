@@ -216,6 +216,11 @@ void LabMachineExecutive::tick_ot2() {
 
     // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
+        if (ot2_phase_ != OT2Phase::IDLE) {
+            // BT re-activated mid-run — ignore, keep running
+            ot2_action_->set_running();
+            return;
+        }
         if (ot2_protocol_json_.empty()) {
             RCLCPP_WARN(this->get_logger(),
                         "OT-2 action activated but no protocol received — FAILURE");
