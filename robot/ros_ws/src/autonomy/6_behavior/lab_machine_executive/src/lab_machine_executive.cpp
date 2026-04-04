@@ -204,14 +204,10 @@ void LabMachineExecutive::timer_callback() {
 void LabMachineExecutive::tick_ot2() {
     if (!ot2_action_->is_active()) {
         if (ot2_action_->active_has_changed()) {
-            // Only reset when no run is in progress; mid-run deactivations are
-            // transient BT re-ticks — preserve state so the run can resume.
-            if (ot2_phase_ == OT2Phase::IDLE || ot2_terminal_) {
-                ot2_current_step_ = 0;
-                ot2_phase_        = OT2Phase::IDLE;
-                ot2_terminal_     = false;
-                http_in_flight_   = false;
-            }
+            ot2_current_step_ = 0;
+            ot2_phase_        = OT2Phase::IDLE;
+            ot2_terminal_     = false;
+            http_in_flight_   = false;
         }
         return;
     }
@@ -220,11 +216,6 @@ void LabMachineExecutive::tick_ot2() {
 
     // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
-        if (ot2_phase_ != OT2Phase::IDLE) {
-            // BT re-activated mid-run — ignore, keep running
-            ot2_action_->set_running();
-            return;
-        }
         if (ot2_protocol_json_.empty()) {
             RCLCPP_WARN(this->get_logger(),
                         "OT-2 action activated but no protocol received — FAILURE");
