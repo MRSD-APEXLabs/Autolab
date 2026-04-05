@@ -65,9 +65,10 @@ private:
     void fail_manip(bt::Action* action);
 
     // ── Async operations (blocking; run in std::async threads) ────────────────
-    // Send { cmd: mode, mode: <mode> } then poll { cmd: status } until the
-    // reported state matches expect_state. Returns false on timeout/error.
-    bool activate_camera_mode(const std::string& mode, const std::string& expect_state);
+    // Send { cmd: mode, mode: <mode> } then poll { cmd: status }.
+    // wait_complete=false: return true once worker_alive==true (inspect — just confirm active).
+    // wait_complete=true:  return true once mode returns to idle (servo — wait for finish).
+    bool activate_camera_mode(const std::string& mode, bool wait_complete);
 
     // Placeholder planning: logs intent and sleeps for planning_placeholder_s_.
     bool run_planning(const std::string& pose_type);
