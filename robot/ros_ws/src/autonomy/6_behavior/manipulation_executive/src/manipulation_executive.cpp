@@ -313,6 +313,11 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
         std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
 
         std::string resp = ws_round_trip(status_cmd.dump());
+
+        RCLCPP_INFO(this->get_logger(),
+                    "[camera-edge status] poll %d/%d  raw='%s'",
+                    i + 1, MAX_POLLS, resp.empty() ? "<empty>" : resp.c_str());
+
         if (resp.empty()) continue;
 
         try {
@@ -320,14 +325,14 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
             std::string resp_mode  = doc.value("mode",         "");
             bool        resp_alive = doc.value("worker_alive", false);
 
+            RCLCPP_INFO(this->get_logger(),
+                        "[camera-edge status] mode='%s' worker_alive=%s  (want mode='%s' wait_complete=%d confirmed_active=%d)",
+                        resp_mode.c_str(), resp_alive ? "true" : "false",
+                        mode.c_str(), wait_complete, confirmed_active);
+
             if (!wait_complete) {
-                // Inspect: just confirm mode is active
+                // Inspect: succeed once active; keep polling if not yet active
                 if (resp_mode == mode && resp_alive) return true;
-                if (!resp_alive || resp_mode == "idle") {
-                    RCLCPP_ERROR(this->get_logger(),
-                                 "Camera-edge failed to activate mode='%s'", mode.c_str());
-                    continue;
-                }
             } else {
                 // Servo: wait for activation then completion (returns to idle)
                 if (!confirmed_active) {
@@ -336,8 +341,10 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
                     return true;  // servo finished
                 }
             }
-        } catch (...) {
-            // Malformed response — keep polling
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(this->get_logger(),
+                        "[camera-edge status] failed to parse response: %s  raw='%s'",
+                        e.what(), resp.c_str());
         }
     }
 
