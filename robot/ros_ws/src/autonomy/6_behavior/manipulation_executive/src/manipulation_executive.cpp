@@ -326,7 +326,7 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
                 if (!resp_alive || resp_mode == "idle") {
                     RCLCPP_ERROR(this->get_logger(),
                                  "Camera-edge failed to activate mode='%s'", mode.c_str());
-                    return false;
+                    continue;
                 }
             } else {
                 // Servo: wait for activation then completion (returns to idle)
