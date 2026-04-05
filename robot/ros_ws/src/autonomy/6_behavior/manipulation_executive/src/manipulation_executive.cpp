@@ -144,7 +144,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
         in_flight_   = true;
         pending_ = std::async(std::launch::async,
                               &ManipulationExecutive::activate_camera_mode,
-                              this, "inspect", "active");
+                              this, "inspect", false);
         action->set_running();
         return;
     }
@@ -185,7 +185,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             in_flight_   = true;
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::activate_camera_mode,
-                                  this, "servo", "complete");
+                                  this, "servo", true);
         }
         action->set_running();
         return;
@@ -281,27 +281,33 @@ std::string ManipulationExecutive::ws_round_trip(const std::string& msg)
 // ─────────────────────────────────────────────────────────────────────────────
 // activate_camera_mode — runs in std::async thread
 //
-// Sends { "cmd": "mode", "mode": <mode> }, then polls { "cmd": "status" }
-// until the response shows the expected state, or a timeout elapses.
+// Sends { "cmd": "mode", "mode": <mode> }, then polls { "cmd": "status" }.
 //
-// TODO: confirm response format with camera-edge team (main.py).
-//       Current assumption: { "mode": "<mode>", "state": "<state>" }
-//       expect_state == "active"   for inspect  (mode is running)
-//       expect_state == "complete" for servo     (mode finished)
+// Response format: { "mode": "<current_mode>", "worker_alive": <bool> }
+//   worker_alive == true  AND mode == sent_mode  →  mode is running (active)
+//   worker_alive == false OR  mode == "idle"     →  not running (failed/idle)
+//
+// wait_complete == false (inspect):
+//   Return true once worker_alive==true && mode==sent_mode (confirmed active).
+//   Return false immediately if worker_alive==false (failed to start).
+//
+// wait_complete == true (servo):
+//   First confirm activation (worker_alive==true), then wait until the mode
+//   returns to idle (worker_alive==false), which signals servo has finished.
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
-                                                  const std::string& expect_state)
+                                                  bool wait_complete)
 {
-    // Send mode command
-    nlohmann::json set_cmd = {{"cmd", "mode"}, {"mode", mode}};
-    ws_round_trip(set_cmd.dump());  // response not checked; fire-and-confirm via status
+    nlohmann::json set_cmd    = {{"cmd", "mode"},   {"mode", mode}};
+    nlohmann::json status_cmd = {{"cmd", "status"}};
 
-    // Poll status until expect_state is seen or timeout
-    constexpr int MAX_POLLS   = 60;   // 60 × 500 ms = 30 s timeout
+    constexpr int MAX_POLLS        = 60;   // 60 × 500 ms = 30 s timeout
     constexpr int POLL_INTERVAL_MS = 500;
 
-    nlohmann::json status_cmd = {{"cmd", "status"}};
+    ws_round_trip(set_cmd.dump());  // fire mode command; confirm via status polls
+
+    bool confirmed_active = false;
 
     for (int i = 0; i < MAX_POLLS; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
@@ -311,12 +317,24 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
 
         try {
             auto doc = nlohmann::json::parse(resp);
-            // TODO: update field names once camera-edge API is confirmed
-            std::string resp_mode  = doc.value("mode",  "");
-            std::bool resp_state = doc.value("worker_alive", "");
+            std::string resp_mode  = doc.value("mode",         "");
+            bool        resp_alive = doc.value("worker_alive", false);
 
-            if (resp_mode == mode && resp_state == true) {
-                return true;
+            if (!wait_complete) {
+                // Inspect: just confirm mode is active
+                if (resp_mode == mode && resp_alive) return true;
+                if (!resp_alive || resp_mode == "idle") {
+                    RCLCPP_ERROR(this->get_logger(),
+                                 "Camera-edge failed to activate mode='%s'", mode.c_str());
+                    return false;
+                }
+            } else {
+                // Servo: wait for activation then completion (returns to idle)
+                if (!confirmed_active) {
+                    confirmed_active = (resp_mode == mode && resp_alive);
+                } else if (!resp_alive || resp_mode == "idle") {
+                    return true;  // servo finished
+                }
             }
         } catch (...) {
             // Malformed response — keep polling
@@ -324,8 +342,8 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
     }
 
     RCLCPP_ERROR(this->get_logger(),
-                 "Timed out waiting for camera-edge mode='%s' state='%s'",
-                 mode.c_str(), expect_state.c_str());
+                 "Timed out waiting for camera-edge mode='%s' (wait_complete=%d)",
+                 mode.c_str(), wait_complete);
     return false;
 }
 
