@@ -45,6 +45,9 @@ ManipulationExecutive::ManipulationExecutive()
     actions_.push_back(pick_up_action_);
     actions_.push_back(place_action_);
 
+    // Phase publisher — monitor with: ros2 topic echo /behavior/manipulation_phase
+    phase_pub_ = this->create_publisher<std_msgs::msg::String>("manipulation_phase", 10);
+
     // Command subscription
     cmd_sub_ = this->create_subscription<behavior_tree_msgs::msg::ManipulationCommand>(
         "manipulation_command", 10,
@@ -92,10 +95,27 @@ void ManipulationExecutive::command_callback(
 // Timer callback — 20 Hz
 // ─────────────────────────────────────────────────────────────────────────────
 
+static const char* phase_name(ManipulationExecutive::ManipPhase p)
+{
+    switch (p) {
+        case ManipulationExecutive::ManipPhase::IDLE:               return "IDLE";
+        case ManipulationExecutive::ManipPhase::ACTIVATING_INSPECT: return "ACTIVATING_INSPECT";
+        case ManipulationExecutive::ManipPhase::PLANNING:           return "PLANNING";
+        case ManipulationExecutive::ManipPhase::ACTIVATING_SERVO:   return "ACTIVATING_SERVO";
+        case ManipulationExecutive::ManipPhase::PLANNING_SAFE:      return "PLANNING_SAFE";
+        default:                                                     return "UNKNOWN";
+    }
+}
+
 void ManipulationExecutive::timer_callback()
 {
     tick_manip(pick_up_action_, ManipType::PICK_UP);
     tick_manip(place_action_,   ManipType::PLACE);
+
+    // Publish current phase for monitoring
+    std_msgs::msg::String phase_msg;
+    phase_msg.data = phase_name(manip_phase_);
+    phase_pub_->publish(phase_msg);
 
     for (auto* c : conditions_) c->publish();
     for (auto* a : actions_)    a->publish();
@@ -293,9 +313,9 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
             auto doc = nlohmann::json::parse(resp);
             // TODO: update field names once camera-edge API is confirmed
             std::string resp_mode  = doc.value("mode",  "");
-            std::string resp_state = doc.value("state", "");
+            std::bool resp_state = doc.value("worker_alive", "");
 
-            if (resp_mode == mode && resp_state == expect_state) {
+            if (resp_mode == mode && resp_state == true) {
                 return true;
             }
         } catch (...) {

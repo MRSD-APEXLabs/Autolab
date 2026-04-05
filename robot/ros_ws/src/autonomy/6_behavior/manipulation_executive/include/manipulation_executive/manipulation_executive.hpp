@@ -9,10 +9,20 @@
 #include <behavior_tree/behavior_tree.hpp>
 #include <behavior_tree_msgs/msg/manipulation_command.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
 
 class ManipulationExecutive : public rclcpp::Node {
 public:
     ManipulationExecutive();
+
+    enum class ManipType  { PICK_UP, PLACE };
+    enum class ManipPhase {
+        IDLE,
+        ACTIVATING_INSPECT,
+        PLANNING,
+        ACTIVATING_SERVO,
+        PLANNING_SAFE,
+    };
 
 private:
     // ── BT nodes ──────────────────────────────────────────────────────────────
@@ -25,15 +35,6 @@ private:
     std::vector<bt::Action*> actions_;
 
     // ── Manipulation state (shared; only one action active at a time) ──────────
-    enum class ManipType  { PICK_UP, PLACE };
-    enum class ManipPhase {
-        IDLE,
-        ACTIVATING_INSPECT,  // send inspect mode; poll until active
-        PLANNING,            // TODO: real planning service; placeholder: sleep
-        ACTIVATING_SERVO,    // send servo mode; poll until complete
-        PLANNING_SAFE,       // TODO: real planning service; placeholder: sleep
-    };
-
     ManipType  manip_type_    {ManipType::PICK_UP};
     ManipPhase manip_phase_   {ManipPhase::IDLE};
     bool       manip_terminal_{false};
@@ -51,6 +52,7 @@ private:
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
