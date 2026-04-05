@@ -265,6 +265,11 @@ std::string ManipulationExecutive::ws_round_trip(const std::string& msg)
                                               std::to_string(camera_edge_port_));
         net::connect(ws.next_layer(), results.begin(), results.end());
         ws.handshake(camera_edge_host_, "/");
+
+        // Server sends a greeting on connect ("connected") — drain it before sending
+        beast::flat_buffer greeting;
+        ws.read(greeting);
+
         ws.write(net::buffer(msg));
 
         beast::flat_buffer buffer;
