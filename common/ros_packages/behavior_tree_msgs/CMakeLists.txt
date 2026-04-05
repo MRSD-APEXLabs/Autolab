@@ -26,6 +26,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GraphVizXdot.msg"
   "msg/GraphVizXdotCompressed.msg"
   "msg/LabMachineCommand.msg"
+  "msg/ManipulationCommand.msg"
   DEPENDENCIES std_msgs
 )
 
