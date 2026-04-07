@@ -38,6 +38,12 @@
 					(Armed)
 				[Disarm]
 		->
+			(Pick Up Commanded)
+			[Pick Up Object]
+		->
+			(Place Commanded)
+			[Place Object]
+		->
 			(Autonomously Explore Commanded)
 			->
 				<!>
