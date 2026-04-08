@@ -1,0 +1,30 @@
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - demo_arm_bot_controller
+    - demo_gripper_bot_controller
+
+  demo_arm_bot_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory  # Isaac Sim / ros2_control standard
+    default: True
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
+
+  demo_gripper_bot_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: True
+    joints:
+      - Slider_1
+      - Slider_2
+trajectory_execution:
+  allowed_start_tolerance: 0.05
+  allowed_execution_duration_scaling: 2.0
+  allowed_goal_duration_margin: 0.5

@@ -18,6 +18,9 @@
   <!-- Global -->
   <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
 
+  <!-- Planning -->
+  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)" />
+
   <!-- Behavior -->
   <include
     file="$(find-pkg-share $(env BEHAVIOR_LAUNCH_PACKAGE))/launch/$(env BEHAVIOR_LAUNCH_FILE)" />

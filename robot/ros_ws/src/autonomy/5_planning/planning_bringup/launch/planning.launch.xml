@@ -1,0 +1,13 @@
+<!-- PLANNING -->
+<launch>
+    <arg name="robot_ip" default="192.168.1.236"/>
+    <arg name="hw_ns" default="xarm"/>
+
+    <include file="$(find-pkg-share xarm_moveit_config)/launch/xarm6_moveit_realmove.launch.py">
+        <arg name="robot_ip" value="$(var robot_ip)" />
+        <arg name="dof" value="6" />
+        <arg name="robot_type" value="xarm" />
+        <arg name="hw_ns" value="$(var hw_ns)" />
+        <arg name="no_gui_ctrl" value="false" />
+    </include>
+</launch>
