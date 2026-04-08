@@ -1,4 +1,0 @@
-source;share/gcs_bringup/local_setup.bash
-source;share/gcs_bringup/local_setup.dsv
-source;share/gcs_bringup/local_setup.sh
-source;share/gcs_bringup/local_setup.zsh

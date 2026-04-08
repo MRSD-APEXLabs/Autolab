@@ -1,0 +1,7 @@
+<launch>
+    <node pkg="manipulation_executive" exec="manipulation_executive" output="screen">
+        <!-- Camera-edge WebSocket control port -->
+        <param name="camera_edge_host" value="localhost" />
+        <param name="camera_edge_port" value="8765" />
+    </node>
+</launch>

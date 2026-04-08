@@ -79,6 +79,43 @@ services:
       kibana:
         condition: service_started
 
+  # ===========================================================================
+  # UI — production (nginx, static build)
+  # ===========================================================================
+  ui:
+    profiles:
+      - ""
+      - sitl
+      - simple
+      - hitl
+      - deploy
+    build:
+      context: ../ui
+      dockerfile: Dockerfile.ui
+      target: prod
+    ports:
+      - "${UI_PORT:-80}:80"
+    networks:
+      - autolab_network
+
+  # ===========================================================================
+  # UI Dev — CRA dev server with hot reload
+  # ===========================================================================
+  ui-dev:
+    profiles:
+      - ui-dev
+    build:
+      context: ../ui
+      dockerfile: Dockerfile.ui
+      target: dev
+    ports:
+      - "${UI_DEV_PORT:-3000}:3000"
+    networks:
+      - autolab_network
+    volumes:
+      - ../ui/src:/app/src
+      - ../ui/public:/app/public
+
 volumes:
   elasticsearch-data:
     driver: local
