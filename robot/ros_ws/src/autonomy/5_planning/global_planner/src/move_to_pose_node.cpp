@@ -612,6 +612,44 @@ int main(int argc, char *argv[])
                 received_command = "idle";
             }
         }
+        else if (received_command == "plan_home_offset")
+        {
+            // TODO: Move Hardcoded values to a config file
+            geometry_msgs::msg::Point home_point;
+            home_point.x = -0.048;
+            home_point.y = 0.443;
+            home_point.z = 0.247;
+
+            // Resolve final task parameters (live > default)
+            const geometry_msgs::msg::Pose target_position =
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, home_point, 0.35));
+            const std::string task_type =
+                live_task_type.value_or(defaults::TASK_TYPE);
+            publish_target_marker(node, target_position);
+
+            if (!live_target_pose)
+                RCLCPP_WARN(node->get_logger(), "Using default target pose.");
+            if (!live_task_type)
+                RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
+
+            const double PREGRASP_Z_OFFSET = 0.00;
+            geometry_msgs::msg::Pose pregrasp_pose = target_position;
+            pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
+
+            // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            auto rrt_plan_opt = plan_and_publish_rrt(
+                task_type, pregrasp_pose,
+                arm_group, node);
+
+            if (!rrt_plan_opt.has_value())
+            {
+                RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
+            }
+            else
+            {
+                received_command = "idle";
+            }
+        }
         else
         {
             RCLCPP_INFO(node->get_logger(), "Waiting for the 'start_pick' command...");
