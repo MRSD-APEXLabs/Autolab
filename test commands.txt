@@ -1,0 +1,4 @@
+ros2 topic pub --once /behavior/lab_machine_command behavior_tree_msgs/msg/LabMachineCommand "{device: 'ot2', action: 'protocol', parameters_json: '{\"steps\": [{\"action\": \"pick_up_tips\", \"resource_name\": \"tip_rack\", \"well_indices\": [0]},{\"action\": \"aspirate\", \"resource_name\": \"water_plate\", \"well_indices\": [0], \"volumes\": [100]},{\"action\": \"dispense\", \"resource_name\": \"empty_plate\", \"well_indices\": [0, 1, 2, 3, 4], \"volumes\": [20, 20, 20, 20, 20]}, {\"action\": \"return_tips\"}]}'}"
+
+
+ros2 topic pub --once /behavior/lab_machine_command behavior_tree_msgs/msg/LabMachineCommand     "{device: 'shaker', action: 'protocol', parameters_json: '{\"pwm\": 100}'}"
