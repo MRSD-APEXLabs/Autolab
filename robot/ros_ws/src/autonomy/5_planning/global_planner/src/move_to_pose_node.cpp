@@ -516,6 +516,8 @@ int main(int argc, char *argv[])
             cmd = received_command;
         }
 
+        RCLCPP_INFO(node->get_logger(), "Received command: %s", cmd.c_str());
+
         if (cmd == "plan_april")
         {
 
