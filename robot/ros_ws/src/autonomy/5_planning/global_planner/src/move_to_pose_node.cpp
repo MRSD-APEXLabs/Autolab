@@ -636,7 +636,6 @@ int main(int argc, char *argv[])
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
-                task_type, pregrasp_pose,
                 arm_group, node);
 
             finish_plan(rrt_plan_opt);
