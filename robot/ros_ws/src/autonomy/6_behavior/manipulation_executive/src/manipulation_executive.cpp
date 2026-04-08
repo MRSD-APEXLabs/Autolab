@@ -24,14 +24,12 @@ ManipulationExecutive::ManipulationExecutive()
 {
     this->declare_parameter<std::string>("camera_edge_host",       "localhost");
     this->declare_parameter<int>        ("camera_edge_port",       8765);
-    this->declare_parameter<double>     ("planning_placeholder_s", 5.0);
 
     this->get_parameter("camera_edge_host",       camera_edge_host_);
     this->get_parameter("camera_edge_port",       camera_edge_port_);
-    this->get_parameter("planning_placeholder_s", planning_placeholder_s_);
 
-    RCLCPP_INFO(this->get_logger(), "Camera-edge: %s:%d  planning placeholder: %.1fs",
-                camera_edge_host_.c_str(), camera_edge_port_, planning_placeholder_s_);
+    RCLCPP_INFO(this->get_logger(), "Camera-edge: %s:%d",
+                camera_edge_host_.c_str(), camera_edge_port_);
 
     // BT conditions
     pick_up_condition_ = new bt::Condition("Pick Up Commanded", this);
@@ -47,6 +45,16 @@ ManipulationExecutive::ManipulationExecutive()
 
     // Phase publisher — monitor with: ros2 topic echo /behavior/manipulation_phase
     phase_pub_ = this->create_publisher<std_msgs::msg::String>("manipulation_phase", 10);
+
+    // Planning command publisher
+    planning_cmd_pub_ = this->create_publisher<std_msgs::msg::String>("/planning_command", 10);
+
+    // Planning done subscriber — sets flag read by run_planning() in its async thread
+    planning_done_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "/planning_done", 10,
+        [this](const std_msgs::msg::Bool::SharedPtr msg) {
+            planning_done_flag_ = msg->data ? 1 : 0;
+        });
 
     // Command subscription
     cmd_sub_ = this->create_subscription<behavior_tree_msgs::msg::ManipulationCommand>(
@@ -362,26 +370,65 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
 // ─────────────────────────────────────────────────────────────────────────────
 // run_planning — runs in std::async thread
 //
-// TODO: replace with actual planning service call.
-//       pose_type: "inspection" | "placement" | "safe"
-//       Uses object_type_ and target_machine_ from node state.
+// Publishes to /planning_command and polls /planning_done (via planning_done_flag_).
+// pose_type: "inspection" | "placement" | "safe"
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_planning(const std::string& pose_type)
 {
+    // Capture shared members on the calling thread before the async thread reads them
+    const std::string object_type    = object_type_;
+    const std::string target_machine = target_machine_;
+
+    // ── Map pose_type + object_type → planning command ───────────────────────
+    std::string cmd;
+    if (pose_type == "inspection") {
+        if (object_type == "well_plate") {
+            cmd = "plan_wellplate";
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                         "run_planning: unsupported object_type '%s' for inspection — aborting",
+                         object_type.c_str());
+            return false;
+        }
+    } else if (pose_type == "placement") {
+        cmd = "plan_april";
+    } else if (pose_type == "safe") {
+        cmd = "plan_home";
+    } else {
+        RCLCPP_ERROR(this->get_logger(),
+                     "run_planning: unknown pose_type '%s' — aborting",
+                     pose_type.c_str());
+        return false;
+    }
+
     RCLCPP_INFO(this->get_logger(),
-                "Planning [PLACEHOLDER] pose_type=%s object=%s target=%s — waiting %.1fs",
-                pose_type.c_str(), object_type_.c_str(), target_machine_.c_str(),
-                planning_placeholder_s_);
+                "Planning: pose_type=%s object=%s target=%s → /planning_command=%s",
+                pose_type.c_str(), object_type.c_str(), target_machine.c_str(), cmd.c_str());
 
-    // TODO: call planning service
-    //   Request: { pose_type, object_type_, target_machine_ }
-    //   Block until service returns success/failure
+    // ── Reset flag before publishing (prevents stale result from prior plan) ──
+    planning_done_flag_ = -1;
 
-    std::this_thread::sleep_for(
-        std::chrono::duration<double>(planning_placeholder_s_));
+    // ── Publish command ───────────────────────────────────────────────────────
+    std_msgs::msg::String cmd_msg;
+    cmd_msg.data = cmd;
+    planning_cmd_pub_->publish(cmd_msg);
 
-    return true;
+    // ── Poll for result (100 ms intervals, 60 s timeout) ─────────────────────
+    constexpr int TIMEOUT_MS = 60000;
+    constexpr int POLL_MS    = 100;
+    for (int elapsed = 0; elapsed < TIMEOUT_MS; elapsed += POLL_MS) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(POLL_MS));
+        int flag = planning_done_flag_.load();
+        if (flag != -1) {
+            return flag == 1;
+        }
+    }
+
+    RCLCPP_ERROR(this->get_logger(),
+                 "run_planning: 60 s timeout waiting for /planning_done (pose_type=%s)",
+                 pose_type.c_str());
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

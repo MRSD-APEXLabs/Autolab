@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <future>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 #include <behavior_tree/behavior_tree.hpp>
 #include <behavior_tree_msgs/msg/manipulation_command.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 
 class ManipulationExecutive : public rclcpp::Node {
@@ -48,11 +50,13 @@ private:
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string camera_edge_host_;
     int         camera_edge_port_;
-    double      planning_placeholder_s_;  // seconds to simulate planning
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
+    std::atomic<int> planning_done_flag_{-1}; // -1=pending, 0=failed, 1=success
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr planning_done_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -70,7 +74,8 @@ private:
     // wait_complete=true:  return true once mode returns to idle (servo — wait for finish).
     bool activate_camera_mode(const std::string& mode, bool wait_complete);
 
-    // Placeholder planning: logs intent and sleeps for planning_placeholder_s_.
+    // Publishes to /planning_command and polls /planning_done (via planning_done_flag_).
+    // pose_type: "inspection" | "placement" | "safe"
     bool run_planning(const std::string& pose_type);
 
     // ── WebSocket helper (synchronous, blocking) ───────────────────────────────

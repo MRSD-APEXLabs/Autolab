@@ -7,6 +7,7 @@
 
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -38,6 +39,7 @@
 // ── STL includes ─────────────────────────────────────────────
 #include <thread>
 #include <chrono>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <fstream>
@@ -387,10 +389,12 @@ void wellplate_callback(const visualization_msgs::msg::MarkerArray::SharedPtr ms
     }
 }
 
-std::string received_command = "plan_home";
+static std::mutex cmd_mutex;
+static std::string received_command = "idle";
 
 void command_callback(const std_msgs::msg::String::SharedPtr msg)
 {
+    std::lock_guard<std::mutex> lock(cmd_mutex);
     received_command = msg->data;
 }
 
@@ -473,6 +477,7 @@ int main(int argc, char *argv[])
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
         "/planning_command", 10, command_callback);
 
+    auto planning_done_pub = node->create_publisher<std_msgs::msg::Bool>("/planning_done", 10);
 
     // If no live obstacle cloud arrived, use the hollow-box fallback
     if (latest_obstacle_cloud)
@@ -492,13 +497,26 @@ int main(int argc, char *argv[])
     target_point.y = 0.5;
     target_point.z = 0.0;
 
+    auto finish_plan = [&](const std::optional<moveit::planning_interface::MoveGroupInterface::Plan>& opt) {
+        std_msgs::msg::Bool done_msg;
+        done_msg.data = opt.has_value();
+        planning_done_pub->publish(done_msg);
+        if (!opt.has_value())
+            RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
+        std::lock_guard<std::mutex> lock(cmd_mutex);
+        received_command = "idle";
+    };
+
     rclcpp::Rate rate(1);
     while (rclcpp::ok())
     {
+        std::string cmd;
+        {
+            std::lock_guard<std::mutex> lock(cmd_mutex);
+            cmd = received_command;
+        }
 
-        // rclcpp::spin_some(node);
-
-        if (received_command == "plan_april")
+        if (cmd == "plan_april")
         {
 
             geometry_msgs::msg::Point apriltag_point;
@@ -527,16 +545,9 @@ int main(int argc, char *argv[])
                 task_type, pregrasp_pose,
                 arm_group, node);
 
-            if (!rrt_plan_opt.has_value())
-            {
-                RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
-            }
-            else
-            {
-                received_command = "idle";
-            }
+            finish_plan(rrt_plan_opt);
         }
-        else if (received_command == "plan_wellplate")
+        else if (cmd == "plan_wellplate")
         {
 
             geometry_msgs::msg::Point wellplate_point;
@@ -565,16 +576,9 @@ int main(int argc, char *argv[])
                 task_type, pregrasp_pose,
                 arm_group, node);
 
-            if (!rrt_plan_opt.has_value())
-            {
-                RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
-            }
-            else
-            {
-                received_command = "idle";
-            }
+            finish_plan(rrt_plan_opt);
         }
-        else if (received_command == "plan_home")
+        else if (cmd == "plan_home")
         {
             // TODO: Move Hardcoded values to a config file
             geometry_msgs::msg::Point home_point;
@@ -603,16 +607,9 @@ int main(int argc, char *argv[])
                 task_type, pregrasp_pose,
                 arm_group, node);
 
-            if (!rrt_plan_opt.has_value())
-            {
-                RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
-            }
-            else
-            {
-                received_command = "idle";
-            }
+            finish_plan(rrt_plan_opt);
         }
-        else if (received_command == "plan_home_offset")
+        else if (cmd == "plan_home_offset")
         {
             // TODO: Move Hardcoded values to a config file
             geometry_msgs::msg::Point home_point;
@@ -639,16 +636,10 @@ int main(int argc, char *argv[])
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
+                task_type, pregrasp_pose,
                 arm_group, node);
 
-            if (!rrt_plan_opt.has_value())
-            {
-                RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
-            }
-            else
-            {
-                received_command = "idle";
-            }
+            finish_plan(rrt_plan_opt);
         }
         else
         {
