@@ -15,30 +15,15 @@ set -uo pipefail
 
 MANIP_TOPIC="/behavior/manipulation_command"
 LAB_TOPIC="/behavior/lab_machine_command"
-PHASE_TOPIC="/behavior/manipulation_phase"
+PICK_BASE_STATUS="/behavior/pick_base_object_status"
+PLACE_STATUS="/behavior/place_object_status"
+
 OT2_STATUS="/behavior/execute_ot2_protocol_status"
 SHAKER_STATUS="/behavior/execute_shaker_protocol_status"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 log() { echo "[$(date +%T)] $*"; }
-
-# Wait for manipulation_phase to return to IDLE.
-# Sleeps 1s first to let the phase leave IDLE after a command is sent.
-wait_manip_idle() {
-    log "  Waiting for manipulation to complete..."
-    sleep 1
-    while true; do
-        output=$(ros2 topic echo --once "$PHASE_TOPIC" 2>/dev/null || true)
-        phase=$(echo "$output" | grep "^data:" | awk '{print $2}')
-        if [ "$phase" = "IDLE" ]; then
-            log "  → IDLE"
-            return 0
-        fi
-        log "  phase=${phase:-?} — waiting..."
-        sleep 1
-    done
-}
 
 # Wait for a BT action status topic to report SUCCESS (2).
 # Exits with error on FAILURE (0).
@@ -75,12 +60,12 @@ wait_bt_success() {
 log "=== Step 1: Pick up well plate ==="
 ros2 topic pub --once "$MANIP_TOPIC" behavior_tree_msgs/msg/ManipulationCommand \
     "{'type': 'pick_base', 'object_type': 'well_plate', 'target_machine': ''}"
-wait_manip_idle
+wait_bt_success "$PICK_BASE_STATUS" "Pick base"
 
 log "=== Step 2: Place well plate in OT2 ==="
 ros2 topic pub --once "$MANIP_TOPIC" behavior_tree_msgs/msg/ManipulationCommand \
     "{'type': 'place', 'object_type': 'well_plate', 'target_machine': 'ot2'}"
-wait_manip_idle
+wait_bt_success "$PLACE_STATUS" "Place"
 
 log "=== Step 3: Activate OT2 protocol ==="
 ros2 topic pub --once "$LAB_TOPIC" behavior_tree_msgs/msg/LabMachineCommand \
