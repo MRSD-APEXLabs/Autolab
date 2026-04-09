@@ -32,16 +32,20 @@ ManipulationExecutive::ManipulationExecutive()
                 camera_edge_host_.c_str(), camera_edge_port_);
 
     // BT conditions
-    pick_up_condition_ = new bt::Condition("Pick Up Commanded", this);
-    place_condition_   = new bt::Condition("Place Commanded",   this);
+    pick_up_condition_   = new bt::Condition("Pick Up Commanded",   this);
+    place_condition_     = new bt::Condition("Place Commanded",     this);
+    pick_base_condition_ = new bt::Condition("Pick Base Commanded", this);
     conditions_.push_back(pick_up_condition_);
     conditions_.push_back(place_condition_);
+    conditions_.push_back(pick_base_condition_);
 
     // BT actions
-    pick_up_action_ = new bt::Action("Pick Up Object", this);
-    place_action_   = new bt::Action("Place Object",   this);
+    pick_up_action_   = new bt::Action("Pick Up Object",   this);
+    place_action_     = new bt::Action("Place Object",     this);
+    pick_base_action_ = new bt::Action("Pick Base Object", this);
     actions_.push_back(pick_up_action_);
     actions_.push_back(place_action_);
+    actions_.push_back(pick_base_action_);
 
     // Phase publisher — monitor with: ros2 topic echo /behavior/manipulation_phase
     phase_pub_ = this->create_publisher<std_msgs::msg::String>("manipulation_phase", 10);
@@ -93,6 +97,12 @@ void ManipulationExecutive::command_callback(
         pick_up_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received place command (object: %s → machine: %s)",
                     object_type_.c_str(), target_machine_.c_str());
+    } else if (msg->type == "pick_base") {
+        pick_base_condition_->set(true);
+        pick_up_condition_->set(false);
+        place_condition_->set(false);
+        RCLCPP_INFO(this->get_logger(), "Received pick_base command (object: %s)",
+                    object_type_.c_str());
     } else {
         RCLCPP_WARN(this->get_logger(), "Unknown manipulation type '%s' — ignoring",
                     msg->type.c_str());
@@ -117,8 +127,9 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
 
 void ManipulationExecutive::timer_callback()
 {
-    tick_manip(pick_up_action_, ManipType::PICK_UP);
-    tick_manip(place_action_,   ManipType::PLACE);
+    tick_manip(pick_up_action_,   ManipType::PICK_UP);
+    tick_manip(place_action_,     ManipType::PLACE);
+    tick_manip(pick_base_action_, ManipType::PICK_BASE);
 
     // Publish current phase for monitoring
     std_msgs::msg::String phase_msg;
@@ -145,14 +156,24 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
     // ── New activation ────────────────────────────────────────────────────────
     if (action->active_has_changed()) {
         manip_type_ = type;
-        RCLCPP_INFO(this->get_logger(), "Manipulation activated (%s)",
-                    type == ManipType::PICK_UP ? "pick_up" : "place");
+        const char* type_name = (type == ManipType::PICK_UP)   ? "pick_up"   :
+                                (type == ManipType::PLACE)      ? "place"     : "pick_base";
+        RCLCPP_INFO(this->get_logger(), "Manipulation activated (%s)", type_name);
 
-        manip_phase_ = ManipPhase::ACTIVATING_INSPECT;
-        in_flight_   = true;
-        pending_ = std::async(std::launch::async,
-                              &ManipulationExecutive::activate_camera_mode,
-                              this, "inspect", false);
+        if (type == ManipType::PICK_BASE) {
+            // pick_base: skip inspect, go straight to planning home_offset
+            manip_phase_ = ManipPhase::PLANNING;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::run_planning,
+                                  this, "home_offset");
+        } else {
+            manip_phase_ = ManipPhase::ACTIVATING_INSPECT;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::activate_camera_mode,
+                                  this, "inspect", false);
+        }
         action->set_running();
         return;
     }
@@ -199,6 +220,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
         return;
     }
 
+
     // ── ACTIVATING_SERVO ──────────────────────────────────────────────────────
     if (manip_phase_ == ManipPhase::ACTIVATING_SERVO) {
         if (pending_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
@@ -208,12 +230,21 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 fail_manip(action);
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "Servo complete — planning safe position");
-            manip_phase_ = ManipPhase::PLANNING_SAFE;
-            in_flight_   = true;
-            pending_ = std::async(std::launch::async,
-                                  &ManipulationExecutive::run_planning,
-                                  this, "safe");
+            if (manip_type_ == ManipType::PICK_BASE) {
+                // pick_base ends here — no safe-home planning needed
+                RCLCPP_INFO(this->get_logger(), "Servo complete — pick_base SUCCESS");
+                pick_base_condition_->set(false);
+                manip_phase_    = ManipPhase::IDLE;
+                manip_terminal_ = true;
+                action->set_success();
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Servo complete — planning safe position");
+                manip_phase_ = ManipPhase::PLANNING_SAFE;
+                in_flight_   = true;
+                pending_ = std::async(std::launch::async,
+                                      &ManipulationExecutive::run_planning,
+                                      this, "safe");
+            }
         }
         action->set_running();
         return;
@@ -229,8 +260,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "Manipulation complete — SUCCESS");
-            bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)
-                                  ? pick_up_condition_ : place_condition_;
+            bt::Condition* cond = (manip_type_ == ManipType::PICK_UP) ? pick_up_condition_ : place_condition_;
             cond->set(false);
             manip_phase_    = ManipPhase::IDLE;
             manip_terminal_ = true;
@@ -250,8 +280,9 @@ void ManipulationExecutive::reset_manip()
 
 void ManipulationExecutive::fail_manip(bt::Action* action)
 {
-    bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)
-                          ? pick_up_condition_ : place_condition_;
+    bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)    ? pick_up_condition_   :
+                          (manip_type_ == ManipType::PLACE)       ? place_condition_     :
+                                                                    pick_base_condition_;
     cond->set(false);
     manip_phase_    = ManipPhase::IDLE;
     manip_terminal_ = true;
@@ -395,6 +426,8 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
         cmd = "plan_april";
     } else if (pose_type == "safe") {
         cmd = "plan_home";
+    } else if (pose_type == "home_offset") {
+        cmd = "plan_home_offset";
     } else {
         RCLCPP_ERROR(this->get_logger(),
                      "run_planning: unknown pose_type '%s' — aborting",
