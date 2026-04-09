@@ -400,14 +400,14 @@ void LabMachineExecutive::tick_shaker() {
         }
 
         std::string url  = shaker_base_url_ + shaker_endpoint_;
-        std::string body = std::to_string(pwm);
+        std::string body = "pwm=" + std::to_string(pwm);
 
         RCLCPP_INFO(this->get_logger(), "Shaker: POST %s body=%s", url.c_str(), body.c_str());
 
         // Fire-and-report: single blocking call in async thread, check next tick
         pending_http_   = std::async(std::launch::async,
                                      &LabMachineExecutive::http_post,
-                                     url, body, std::string("text/plain"));
+                                     url, body, std::string("application/x-www-form-urlencoded"));
         http_in_flight_ = true;
         shaker_action_->set_running();
         return;
