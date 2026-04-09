@@ -24,9 +24,11 @@ ManipulationExecutive::ManipulationExecutive()
 {
     this->declare_parameter<std::string>("camera_edge_host",       "localhost");
     this->declare_parameter<int>        ("camera_edge_port",       8765);
+    this->declare_parameter<double>     ("place_wait_s",           10.0);
 
     this->get_parameter("camera_edge_host",       camera_edge_host_);
     this->get_parameter("camera_edge_port",       camera_edge_port_);
+    this->get_parameter("place_wait_s",           place_wait_s_);
 
     RCLCPP_INFO(this->get_logger(), "Camera-edge: %s:%d",
                 camera_edge_host_.c_str(), camera_edge_port_);
@@ -119,6 +121,7 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
         case ManipulationExecutive::ManipPhase::IDLE:               return "IDLE";
         case ManipulationExecutive::ManipPhase::ACTIVATING_INSPECT: return "ACTIVATING_INSPECT";
         case ManipulationExecutive::ManipPhase::PLANNING:           return "PLANNING";
+        case ManipulationExecutive::ManipPhase::WAITING_PLACE:      return "WAITING_PLACE";
         case ManipulationExecutive::ManipPhase::ACTIVATING_SERVO:   return "ACTIVATING_SERVO";
         case ManipulationExecutive::ManipPhase::PLANNING_SAFE:      return "PLANNING_SAFE";
         default:                                                     return "UNKNOWN";
@@ -209,12 +212,42 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 fail_manip(action);
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "Planning complete — activating servo mode");
-            manip_phase_ = ManipPhase::ACTIVATING_SERVO;
+            if (manip_type_ == ManipType::PLACE) {
+                RCLCPP_INFO(this->get_logger(),
+                            "Planning complete — waiting %.1f s before safe position",
+                            place_wait_s_);
+                manip_phase_ = ManipPhase::WAITING_PLACE;
+                in_flight_   = true;
+                const double wait_s = place_wait_s_;
+                pending_ = std::async(std::launch::async, [wait_s]() -> bool {
+                    std::this_thread::sleep_for(
+                        std::chrono::duration<double>(wait_s));
+                    return true;
+                });
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Planning complete — activating servo mode");
+                manip_phase_ = ManipPhase::ACTIVATING_SERVO;
+                in_flight_   = true;
+                pending_ = std::async(std::launch::async,
+                                      &ManipulationExecutive::activate_camera_mode,
+                                      this, "servo", true);
+            }
+        }
+        action->set_running();
+        return;
+    }
+
+    // ── WAITING_PLACE ─────────────────────────────────────────────────────────
+    if (manip_phase_ == ManipPhase::WAITING_PLACE) {
+        if (pending_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            in_flight_ = false;
+            pending_.get(); // always true
+            RCLCPP_INFO(this->get_logger(), "Wait complete — planning safe position");
+            manip_phase_ = ManipPhase::PLANNING_SAFE;
             in_flight_   = true;
             pending_ = std::async(std::launch::async,
-                                  &ManipulationExecutive::activate_camera_mode,
-                                  this, "servo", true);
+                                  &ManipulationExecutive::run_planning,
+                                  this, "safe");
         }
         action->set_running();
         return;

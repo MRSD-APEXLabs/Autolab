@@ -22,6 +22,7 @@ public:
         IDLE,
         ACTIVATING_INSPECT,
         PLANNING,
+        WAITING_PLACE,
         ACTIVATING_SERVO,
         PLANNING_SAFE,
     };
@@ -52,6 +53,7 @@ private:
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string camera_edge_host_;
     int         camera_edge_port_;
+    double      place_wait_s_;
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
