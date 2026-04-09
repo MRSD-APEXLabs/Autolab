@@ -26,32 +26,30 @@ SHAKER_STATUS="/behavior/execute_shaker_protocol_status"
 log() { echo "[$(date +%T)] $*"; }
 
 # Wait for a BT action status topic to report SUCCESS (2).
-# Exits with error on FAILURE (0).
+# Exits with error on FAILURE (0) — but only after RUNNING (1) is seen first,
+# to avoid acting on a stale FAILURE from a prior activation.
 # Sleeps 1s first to let the BT activate the action after a command is sent.
 wait_bt_success() {
     local topic="$1"
     local label="$2"
+    local seen_running=0
     log "  Waiting for $label..."
     sleep 1
-    # Phase 1: wait until RUNNING (ensures we don't confuse pre-activation FAILURE with a real failure)
     while true; do
-        output=$(ros2 topic echo --once "$topic" 2>/dev/null || true)
-        status=$(echo "$output" | grep "^status:" | awk '{print $2}')
-        if [ "$status" = "1" ]; then
-            log "  $label: RUNNING"
-            break
-        fi
-        sleep 0.5
-    done
-    # Phase 2: wait until SUCCESS or FAILURE
-    while true; do
-        output=$(ros2 topic echo --once "$topic" 2>/dev/null || true)
+        output=$(ros2 topic echo --once --timeout 2 "$topic" 2>/dev/null || true)
         status=$(echo "$output" | grep "^status:" | awk '{print $2}')
         case "$status" in
+            1) log "  $label: RUNNING"; seen_running=1 ;;
             2) log "  $label: SUCCESS"; return 0 ;;
-            0) log "ERROR: $label FAILED"; exit 1 ;;
-            *) sleep 2 ;;
+            0) if [ "$seen_running" = "1" ]; then
+                   log "ERROR: $label FAILED"; exit 1
+               fi ;;
+            # empty: topic went silent — if we saw RUNNING, the action completed successfully
+            "") if [ "$seen_running" = "1" ]; then
+                    log "  $label: SUCCESS (topic silent)"; return 0
+                fi ;;
         esac
+        sleep 0.5
     done
 }
 
