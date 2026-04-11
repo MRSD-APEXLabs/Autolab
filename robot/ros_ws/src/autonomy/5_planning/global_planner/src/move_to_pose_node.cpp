@@ -98,7 +98,7 @@ namespace defaults
         rclcpp::Node::SharedPtr node,
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub,
         const geometry_msgs::msg::Point &target_position,
-        int offset)
+        double offset)
     {
         geometry_msgs::msg::Pose p;
 
@@ -570,7 +570,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.35));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.15));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
             publish_target_marker(node, target_position);
@@ -601,7 +601,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.35));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.15));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
             publish_target_marker(node, target_position);
@@ -663,7 +663,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, home_point, 0.35));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, home_point, 0.15));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
             publish_target_marker(node, target_position);
