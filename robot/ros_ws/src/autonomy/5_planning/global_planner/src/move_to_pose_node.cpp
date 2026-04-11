@@ -44,14 +44,21 @@
 #include <string>
 #include <fstream>
 #include <iomanip>
+#include <map>
 
 static constexpr double ARM_PLANNING_TIME_SEC = 15.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
 static constexpr int MAX_PLANNING_ATTEMPTS = 100;
+static constexpr double APRIL_TAG_STALE_SEC = 1.0;
+static constexpr int APRIL_TAG_WAIT_TIMEOUT_SEC = 10;
+static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
 
-double april_tag_x = 0.0;
-double april_tag_y = 0.0;
-double april_tag_z = 0.0;
+struct AprilTagEntry {
+    geometry_msgs::msg::Point position;
+    rclcpp::Time stamp;
+};
+static std::map<int, AprilTagEntry> april_tags;
+static std::mutex april_tags_mutex;
 static int marker_id = 0;
 
 double wellplate_tag_x = 0.0;
@@ -349,24 +356,6 @@ void publish_target_marker(
                 pose.position.x, pose.position.y, pose.position.z);
 }
 
-void apriltag_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
-{
-    for (const auto &marker : msg->markers)
-    {
-        // Skip invalid or deleted markers
-        if (marker.action != visualization_msgs::msg::Marker::ADD)
-            continue;
-
-        april_tag_x = marker.pose.position.x;
-        april_tag_y = marker.pose.position.y;
-        april_tag_z = marker.pose.position.z;
-
-        // RCLCPP_INFO(this->get_logger(),
-        //             "Marker ID: %d | Position -> x: %.3f, y: %.3f, z: %.3f",
-        //             marker.id, april_tag_x, y, z);
-    }
-}
-
 void wellplate_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
 {
     for (const auto &marker : msg->markers)
@@ -453,7 +442,16 @@ int main(int argc, char *argv[])
     auto apriltag_subscription = node->create_subscription<visualization_msgs::msg::MarkerArray>(
         "/inspect/apriltags",
         qos,
-        apriltag_callback);
+        [&node](const visualization_msgs::msg::MarkerArray::SharedPtr msg)
+        {
+            std::lock_guard<std::mutex> lock(april_tags_mutex);
+            for (const auto &marker : msg->markers)
+            {
+                if (marker.action != visualization_msgs::msg::Marker::ADD)
+                    continue;
+                april_tags[marker.id] = {marker.pose.position, node->now()};
+            }
+        });
 
     // Wellplates
     auto wellplate_subscription = node->create_subscription<visualization_msgs::msg::MarkerArray>(
@@ -518,13 +516,57 @@ int main(int argc, char *argv[])
 
         RCLCPP_INFO(node->get_logger(), "Received command: %s", cmd.c_str());
 
-        if (cmd == "plan_april")
+        if (cmd.rfind("plan_april_", 0) == 0)
         {
+            // Parse tag ID from "plan_april_<id>"
+            const std::string april_prefix = "plan_april_";
+            const std::string id_str = cmd.substr(april_prefix.size());
+            if (id_str.empty()) {
+                RCLCPP_ERROR(node->get_logger(), "plan_april_ command has no tag ID: '%s'", cmd.c_str());
+                finish_plan(std::nullopt);
+                continue;
+            }
+            int tag_id = 0;
+            try {
+                std::size_t pos = 0;
+                tag_id = std::stoi(id_str, &pos);
+                if (pos != id_str.size()) throw std::invalid_argument("trailing chars");
+            } catch (...) {
+                RCLCPP_ERROR(node->get_logger(), "Could not parse tag ID from command: %s", cmd.c_str());
+                finish_plan(std::nullopt);
+                continue;
+            }
 
+            // Wait up to APRIL_TAG_WAIT_TIMEOUT_SEC for a fresh tag reading
             geometry_msgs::msg::Point apriltag_point;
-            apriltag_point.x = april_tag_x;
-            apriltag_point.y = april_tag_y;
-            apriltag_point.z = april_tag_z;
+            bool found = false;
+            for (int elapsed_ms = 0;
+                 elapsed_ms < APRIL_TAG_WAIT_TIMEOUT_SEC * 1000;
+                 elapsed_ms += APRIL_TAG_WAIT_STEP_MS)
+            {
+                {
+                    const rclcpp::Time now = node->now();
+                    std::lock_guard<std::mutex> lock(april_tags_mutex);
+                    auto it = april_tags.find(tag_id);
+                    if (it != april_tags.end() &&
+                        (now - it->second.stamp).seconds() <= APRIL_TAG_STALE_SEC)
+                    {
+                        apriltag_point = it->second.position;
+                        found = true;
+                    }
+                }
+                if (found) break;
+                rclcpp::sleep_for(std::chrono::milliseconds(APRIL_TAG_WAIT_STEP_MS));
+            }
+
+            if (!found)
+            {
+                RCLCPP_ERROR(node->get_logger(),
+                             "April tag ID %d not found or stale after %ds — aborting.",
+                             tag_id, APRIL_TAG_WAIT_TIMEOUT_SEC);
+                finish_plan(std::nullopt);
+                continue;
+            }
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
