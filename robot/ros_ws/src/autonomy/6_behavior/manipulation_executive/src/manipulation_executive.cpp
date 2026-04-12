@@ -456,7 +456,17 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
             return false;
         }
     } else if (pose_type == "placement") {
-        cmd = "plan_april";
+        if (target_machine == "ot2") {
+            cmd = "plan_april_0";
+        } else if (target_machine == "shaker") {
+            cmd = "plan_april_1";
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                         "run_planning: target_machine '%s' does not exist - aborting.",
+                         target_machine.c_str());
+            return false;
+        }
+
     } else if (pose_type == "safe") {
         cmd = "plan_home";
     } else if (pose_type == "home_offset") {
