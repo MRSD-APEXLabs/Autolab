@@ -14,13 +14,23 @@ STEPS = {
         ),
         'watch_topic': 'behavior/pick_base_object_status',
     },
-    'place': {
+    'place_ot2': {
+            'msg_type': 'manipulation',
+            'publish_topic': 'behavior/manipulation_command',
+            'make_msg': lambda: ManipulationCommand(
+                type='place',
+                object_type='well_plate',
+                target_machine='ot2',
+            ),
+            'watch_topic': 'behavior/place_object_status',
+    },
+    'place_shaker': {
         'msg_type': 'manipulation',
         'publish_topic': 'behavior/manipulation_command',
         'make_msg': lambda: ManipulationCommand(
             type='place',
             object_type='well_plate',
-            target_machine='ot2',
+            target_machine='shaker',
         ),
         'watch_topic': 'behavior/place_object_status',
     },
