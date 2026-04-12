@@ -20,6 +20,7 @@ find_package(visualization_msgs REQUIRED)
 find_package(shape_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
 
 # Executable
 add_executable(move_to_pose_node src/move_to_pose_node.cpp)
@@ -45,6 +46,7 @@ ament_target_dependencies(move_to_pose_node
   shape_msgs
   tf2
   tf2_geometry_msgs
+  controller_manager_msgs
 )
 
 # Install target
