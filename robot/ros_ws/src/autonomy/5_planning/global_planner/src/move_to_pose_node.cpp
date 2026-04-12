@@ -606,16 +606,25 @@ int main(int argc, char *argv[])
                 live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.15));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
-            publish_target_marker(node, target_position);
 
             if (!live_target_pose)
                 RCLCPP_WARN(node->get_logger(), "Using default target pose.");
             if (!live_task_type)
                 RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
 
-            const double PREGRASP_Z_OFFSET = 0.00;
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
+
+            const double PREGRASP_Z_OFFSET = 0.00;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
+
+            const double PREGRASP_Y_OFFSET = 0.1;
+            pregrasp_pose.position.y += PREGRASP_Y_OFFSET
+
+            const double PREGRASP_X_OFFSET = 0.1;
+            pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
+
+
+            publish_target_marker(node, pregrasp_pose);
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
