@@ -37,6 +37,8 @@
 #include <tf2/exceptions.h>
 #include <geometry_msgs/msg/point_stamped.hpp>
 // ── STL includes ─────────────────────────────────────────────
+#include <std_srvs/srv/empty.hpp>
+#include <atomic>
 #include <thread>
 #include <chrono>
 #include <mutex>
@@ -464,13 +466,36 @@ int main(int argc, char *argv[])
     pointcloud_qos.best_effort();
     pointcloud_qos.durability_volatile();
 
+    std::atomic<int> clouds_since_clear{0};
+
     auto sub_obstacle_cloud = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/zed_pointcloud", // <-- Put your actual topic name here
-        pointcloud_qos,    // <-- Inject your custom QoS here
-        [&latest_obstacle_cloud](const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+        "/zed_pointcloud",
+        pointcloud_qos,
+        [&latest_obstacle_cloud, &clouds_since_clear](const sensor_msgs::msg::PointCloud2::SharedPtr msg)
         {
             latest_obstacle_cloud = msg;
+            clouds_since_clear.fetch_add(1, std::memory_order_relaxed);
         });
+
+    // ── Octomap refresh: clear phantoms then wait for fresh frames ──
+    auto clear_octomap_client = node->create_client<std_srvs::srv::Empty>("/clear_octomap");
+    static constexpr int OCTOMAP_REFRESH_FRAMES = 5;
+
+    auto refresh_octomap = [&]()
+    {
+        if (!clear_octomap_client->service_is_ready()) {
+            RCLCPP_WARN(node->get_logger(), "clear_octomap service not available — skipping refresh.");
+            return;
+        }
+        clear_octomap_client->async_send_request(std::make_shared<std_srvs::srv::Empty::Request>());
+        clouds_since_clear.store(0);
+        RCLCPP_INFO(node->get_logger(),
+            "Octomap cleared — waiting for %d fresh point cloud frames...", OCTOMAP_REFRESH_FRAMES);
+        while (clouds_since_clear.load() < OCTOMAP_REFRESH_FRAMES) {
+            rclcpp::sleep_for(std::chrono::milliseconds(20));
+        }
+        RCLCPP_INFO(node->get_logger(), "Octomap refreshed — phantom voxels cleared.");
+    };
 
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
         "/planning_command", 10, command_callback);
@@ -585,6 +610,7 @@ int main(int argc, char *argv[])
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            refresh_octomap();
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
                 arm_group, node);
@@ -616,6 +642,7 @@ int main(int argc, char *argv[])
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            refresh_octomap();
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
                 arm_group, node);
@@ -647,6 +674,7 @@ int main(int argc, char *argv[])
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            refresh_octomap();
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
                 arm_group, node);
@@ -678,6 +706,7 @@ int main(int argc, char *argv[])
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            refresh_octomap();
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
                 arm_group, node);
