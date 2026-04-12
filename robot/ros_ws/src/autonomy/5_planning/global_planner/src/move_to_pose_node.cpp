@@ -603,7 +603,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.15));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.25));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
 
