@@ -36,9 +36,6 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2/exceptions.h>
 #include <geometry_msgs/msg/point_stamped.hpp>
-// ── Controller manager includes ───────────────────────────────
-#include <controller_manager_msgs/srv/list_controllers.hpp>
-#include <controller_manager_msgs/srv/switch_controller.hpp>
 // ── STL includes ─────────────────────────────────────────────
 #include <thread>
 #include <chrono>
@@ -55,90 +52,6 @@ static constexpr int MAX_PLANNING_ATTEMPTS = 100;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
 static constexpr int APRIL_TAG_WAIT_TIMEOUT_SEC = 10;
 static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
-static constexpr const char* ARM_CONTROLLER_NAME = "xarm6_traj_controller";
-
-// Returns true if the controller is already active or was successfully activated.
-bool ensure_controller_active(rclcpp::Node::SharedPtr node,
-                               const std::string &controller_name,
-                               int timeout_sec = 5)
-{
-    using ListControllers  = controller_manager_msgs::srv::ListControllers;
-    using SwitchController = controller_manager_msgs::srv::SwitchController;
-
-    auto list_client   = node->create_client<ListControllers>("/controller_manager/list_controllers");
-    auto switch_client = node->create_client<SwitchController>("/controller_manager/switch_controller");
-
-    // ── Wait for list_controllers service ────────────────────
-    if (!list_client->wait_for_service(std::chrono::seconds(timeout_sec)))
-    {
-        RCLCPP_ERROR(node->get_logger(),
-                     "[Controller] /controller_manager/list_controllers not available.");
-        return false;
-    }
-
-    // ── Query current controller states ──────────────────────
-    auto list_req = std::make_shared<ListControllers::Request>();
-    auto list_fut = list_client->async_send_request(list_req);
-    if (rclcpp::spin_until_future_complete(node, list_fut, std::chrono::seconds(timeout_sec))
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[Controller] list_controllers call timed out.");
-        return false;
-    }
-
-    const auto &controllers = list_fut.get()->controller;
-    for (const auto &c : controllers)
-    {
-        if (c.name == controller_name)
-        {
-            if (c.state == "active")
-            {
-                RCLCPP_INFO(node->get_logger(),
-                            "[Controller] '%s' is already active.", controller_name.c_str());
-                return true;
-            }
-
-            RCLCPP_WARN(node->get_logger(),
-                        "[Controller] '%s' is '%s' — attempting to activate...",
-                        controller_name.c_str(), c.state.c_str());
-            break;
-        }
-    }
-
-    // ── Activate the controller ───────────────────────────────
-    if (!switch_client->wait_for_service(std::chrono::seconds(timeout_sec)))
-    {
-        RCLCPP_ERROR(node->get_logger(),
-                     "[Controller] /controller_manager/switch_controller not available.");
-        return false;
-    }
-
-    auto switch_req = std::make_shared<SwitchController::Request>();
-    switch_req->activate_controllers   = {controller_name};
-    switch_req->deactivate_controllers = {};
-    switch_req->strictness             = SwitchController::Request::BEST_EFFORT;
-    switch_req->activate_asap          = true;
-    switch_req->timeout                = rclcpp::Duration::from_seconds(timeout_sec);
-
-    auto switch_fut = switch_client->async_send_request(switch_req);
-    if (rclcpp::spin_until_future_complete(node, switch_fut, std::chrono::seconds(timeout_sec))
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[Controller] switch_controller call timed out.");
-        return false;
-    }
-
-    if (!switch_fut.get()->ok)
-    {
-        RCLCPP_ERROR(node->get_logger(),
-                     "[Controller] Failed to activate '%s'.", controller_name.c_str());
-        return false;
-    }
-
-    RCLCPP_INFO(node->get_logger(),
-                "[Controller] '%s' activated successfully.", controller_name.c_str());
-    return true;
-}
 
 struct AprilTagEntry {
     geometry_msgs::msg::Point position;
@@ -673,16 +586,6 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            // ── Ensure controller is active before planning ───────
-            if (!ensure_controller_active(node, ARM_CONTROLLER_NAME))
-            {
-                RCLCPP_ERROR(node->get_logger(),
-                             "[Controller] Cannot plan — controller '%s' not active.",
-                             ARM_CONTROLLER_NAME);
-                finish_plan(std::nullopt);
-                continue;
-            }
-
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
@@ -723,16 +626,6 @@ int main(int argc, char *argv[])
 
             publish_target_marker(node, pregrasp_pose);
 
-            // ── Ensure controller is active before planning ───────
-            if (!ensure_controller_active(node, ARM_CONTROLLER_NAME))
-            {
-                RCLCPP_ERROR(node->get_logger(),
-                             "[Controller] Cannot plan — controller '%s' not active.",
-                             ARM_CONTROLLER_NAME);
-                finish_plan(std::nullopt);
-                continue;
-            }
-
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
@@ -764,16 +657,6 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            // ── Ensure controller is active before planning ───────
-            if (!ensure_controller_active(node, ARM_CONTROLLER_NAME))
-            {
-                RCLCPP_ERROR(node->get_logger(),
-                             "[Controller] Cannot plan — controller '%s' not active.",
-                             ARM_CONTROLLER_NAME);
-                finish_plan(std::nullopt);
-                continue;
-            }
-
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
@@ -804,16 +687,6 @@ int main(int argc, char *argv[])
             const double PREGRASP_Z_OFFSET = 0.00;
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
-
-            // ── Ensure controller is active before planning ───────
-            if (!ensure_controller_active(node, ARM_CONTROLLER_NAME))
-            {
-                RCLCPP_ERROR(node->get_logger(),
-                             "[Controller] Cannot plan — controller '%s' not active.",
-                             ARM_CONTROLLER_NAME);
-                finish_plan(std::nullopt);
-                continue;
-            }
 
             // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
             auto rrt_plan_opt = plan_and_publish_rrt(
