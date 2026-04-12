@@ -618,7 +618,7 @@ int main(int argc, char *argv[])
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             const double PREGRASP_Y_OFFSET = 0.1;
-            pregrasp_pose.position.y += PREGRASP_Y_OFFSET
+            pregrasp_pose.position.y += PREGRASP_Y_OFFSET;
 
             const double PREGRASP_X_OFFSET = 0.1;
             pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
