@@ -24,7 +24,7 @@ import sensor_msgs_py.point_cloud2 as pc2
 #WS_URI = "ws://192.168.10.7:8766"
 WS_URI = "ws://192.168.1.38:8766"
 FRAME_ID = "top_camera"
-PC_AVG_COUNT = 100
+PC_COUNT = 25
 
 
 class WSVisualizer(Node):
@@ -40,7 +40,7 @@ class WSVisualizer(Node):
         self.bridge = CvBridge()
 
         self._pc_buffer: List[np.ndarray] = []
-        self._pc_avg: Optional[np.ndarray] = None
+        self._pcs: Optional[np.ndarray] = None
 
         # Servo topics
         self.servo_image_pub = self.create_publisher(Image, "/servo/image", qos)
@@ -410,20 +410,20 @@ class WSVisualizer(Node):
             data.get("pointcloud_shape", [0, 0]),
             data.get("pointcloud_dtype", "float32"),
         )
-        if pc is not None and self._pc_avg is None:
+        if pc is not None and self._pcs is None:
             self._pc_buffer.append(pc)
             self.get_logger().info(
-                f"Buffering point clouds: {len(self._pc_buffer)}/{PC_AVG_COUNT}"
+                f"Buffering point clouds: {len(self._pc_buffer)}/{PC_COUNT}"
             )
-            if len(self._pc_buffer) >= PC_AVG_COUNT:
-                self._pc_avg = np.vstack(self._pc_buffer)
+            if len(self._pc_buffer) >= PC_COUNT:
+                self._pcs = np.vstack(self._pc_buffer)
                 self._pc_buffer.clear()
                 self.get_logger().info(
-                    f"Point cloud accumulated: {self._pc_avg.shape[0]} points."
+                    f"Point cloud accumulated: {self._pcs.shape[0]} points."
                 )
 
-        if self._pc_avg is not None:
-            self.inspect_pc_pub.publish(self.create_pc2(self._pc_avg))
+        if self._pcs is not None:
+            self.inspect_pc_pub.publish(self.create_pc2(self._pcs))
 
         self.inspect_wp_pub.publish(self.wellplates_to_markers(data.get("wellplates", [])))
         self.inspect_tag_pub.publish(self.apriltags_to_markers(data.get("apriltags", [])))
