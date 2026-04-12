@@ -48,7 +48,7 @@
 #include <iomanip>
 #include <map>
 
-static constexpr double ARM_PLANNING_TIME_SEC = 15.0;
+static constexpr double ARM_PLANNING_TIME_SEC = 40.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
 static constexpr int MAX_PLANNING_ATTEMPTS = 100;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
@@ -215,9 +215,9 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
 
     // ── Configure planner ────────────────────────────────────
     arm_group.setPlanningPipelineId("ompl");
-    arm_group.setPlannerId("RRTstar");
+    arm_group.setPlannerId("PRMkConfigDefault");
     arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
-    arm_group.setNumPlanningAttempts(10);
+    arm_group.setNumPlanningAttempts(50);
     arm_group.setPoseReferenceFrame("world");
     arm_group.setPathConstraints(make_ee_down_constraint());
     arm_group.setStartStateToCurrentState();
@@ -225,7 +225,9 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     arm_group.setWorkspace(
         -0.04, -1.5, 0.074,
         1, 1.5, 1.5);
-    arm_group.allowReplanning(true);
+    arm_group.setGoalPositionTolerance(0.01);
+    arm_group.setGoalOrientationTolerance(0.05);
+    // arm_group.allowReplanning(true);
 
     // Adjust speed based on task type
     double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
