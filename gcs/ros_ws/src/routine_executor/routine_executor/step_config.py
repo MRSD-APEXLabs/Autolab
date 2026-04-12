@@ -50,7 +50,7 @@ STEPS = {
         'make_msg': lambda: LabMachineCommand(
             device='shaker',
             action='protocol',
-            parameters_json='{}',
+            parameters_json='{"pwm": 125}',
         ),
         'watch_topic': 'behavior/execute_shaker_protocol_status',
     },
