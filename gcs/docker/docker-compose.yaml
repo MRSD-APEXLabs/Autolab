@@ -10,7 +10,8 @@ services:
     networks:
       - autolab_network
     ports:
-      - 2222:22 # for ssh
+      - 2222:22   # ssh
+      - 9001:9001 # mosquitto websocket (for UI)
 
   # ===================================================================================================================
   # for running on a real world laptop on the local network, set network mode to host
