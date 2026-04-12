@@ -348,6 +348,7 @@ void LabMachineExecutive::tick_ot2() {
             ot2_condition_->set(false);
             ot2_terminal_ = true;
             ot2_action_->set_success();
+            return;
         }
         ot2_action_->set_running();
         return;

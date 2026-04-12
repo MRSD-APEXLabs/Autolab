@@ -270,6 +270,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 manip_phase_    = ManipPhase::IDLE;
                 manip_terminal_ = true;
                 action->set_success();
+                return;
             } else {
                 RCLCPP_INFO(this->get_logger(), "Servo complete — planning safe position");
                 manip_phase_ = ManipPhase::PLANNING_SAFE;
@@ -298,6 +299,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             manip_phase_    = ManipPhase::IDLE;
             manip_terminal_ = true;
             action->set_success();
+            return;
         }
         action->set_running();
         return;
