@@ -416,12 +416,11 @@ class WSVisualizer(Node):
                 f"Buffering point clouds: {len(self._pc_buffer)}/{PC_AVG_COUNT}"
             )
             if len(self._pc_buffer) >= PC_AVG_COUNT:
-                min_len = min(c.shape[0] for c in self._pc_buffer)
-                self._pc_avg = np.mean(
-                    [c[:min_len] for c in self._pc_buffer], axis=0
-                )
+                self._pc_avg = np.vstack(self._pc_buffer)
                 self._pc_buffer.clear()
-                self.get_logger().info("Point cloud average computed.")
+                self.get_logger().info(
+                    f"Point cloud accumulated: {self._pc_avg.shape[0]} points."
+                )
 
         if self._pc_avg is not None:
             self.inspect_pc_pub.publish(self.create_pc2(self._pc_avg))
