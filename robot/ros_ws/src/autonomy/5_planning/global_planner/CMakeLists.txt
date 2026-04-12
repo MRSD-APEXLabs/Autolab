@@ -13,6 +13,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
@@ -37,6 +38,7 @@ ament_target_dependencies(move_to_pose_node
   nav_msgs
   sensor_msgs
   std_msgs
+  std_srvs
   moveit_msgs
   trajectory_msgs
   visualization_msgs
