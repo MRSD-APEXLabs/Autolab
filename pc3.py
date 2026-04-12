@@ -411,20 +411,17 @@ class WSVisualizer(Node):
             data.get("pointcloud_dtype", "float32"),
         )
         if pc is not None and self._pc_avg is None:
-            if len(self._pc_buffer) == 0 or pc.shape == self._pc_buffer[0].shape:
-                self._pc_buffer.append(pc)
-                self.get_logger().info(
-                    f"Buffering point clouds: {len(self._pc_buffer)}/{PC_AVG_COUNT}"
+            self._pc_buffer.append(pc)
+            self.get_logger().info(
+                f"Buffering point clouds: {len(self._pc_buffer)}/{PC_AVG_COUNT}"
+            )
+            if len(self._pc_buffer) >= PC_AVG_COUNT:
+                min_len = min(c.shape[0] for c in self._pc_buffer)
+                self._pc_avg = np.mean(
+                    [c[:min_len] for c in self._pc_buffer], axis=0
                 )
-                if len(self._pc_buffer) >= PC_AVG_COUNT:
-                    self._pc_avg = np.mean(self._pc_buffer, axis=0)
-                    self._pc_buffer.clear()
-                    self.get_logger().info("Point cloud average computed.")
-            else:
-                self.get_logger().warn(
-                    f"Skipping cloud with mismatched shape {pc.shape} "
-                    f"(expected {self._pc_buffer[0].shape})"
-                )
+                self._pc_buffer.clear()
+                self.get_logger().info("Point cloud average computed.")
 
         if self._pc_avg is not None:
             self.inspect_pc_pub.publish(self.create_pc2(self._pc_avg))
