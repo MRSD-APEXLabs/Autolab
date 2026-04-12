@@ -1,6 +1,6 @@
 <launch>
     <group>
-        <push-ros-namespace namespace="behavior" />
+        <push-ros-namespace namespace="$(env ROBOT_NAME)/behavior" />
 
         <!-- Behavior Tree -->
         <node pkg="behavior_tree" exec="behavior_tree_implementation">
