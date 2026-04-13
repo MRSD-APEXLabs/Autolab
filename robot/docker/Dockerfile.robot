@@ -105,7 +105,7 @@ RUN apt update -y && apt install -y \
   # ros-humble-robot-localization \
   # ros-humble-backward-ros \
   # ros-humble-zed-msgs \
-  ros-humble-moveit-pros-perception
+  ros-humble-moveit-ros-perception \
   libcgal-dev \
   python3-colcon-common-extensions \
   libcurl4-openssl-dev \
