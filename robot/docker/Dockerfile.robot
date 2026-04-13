@@ -105,6 +105,7 @@ RUN apt update -y && apt install -y \
   # ros-humble-robot-localization \
   # ros-humble-backward-ros \
   # ros-humble-zed-msgs \
+  ros-humble-moveit-pros-perception
   libcgal-dev \
   python3-colcon-common-extensions \
   libcurl4-openssl-dev \
@@ -163,7 +164,8 @@ RUN pip3 install \
   typeguard==2.13.3 \
   onnx \
   tensorrt \
-  opencv-python
+  opencv-python \
+  websockets
 
 # Override install newer openvdb 9.1.0 for compatibility with Ubuntu 22.04  https://bugs.launchpad.net/bugs/1970108
 RUN apt remove -y libopenvdb*; \
