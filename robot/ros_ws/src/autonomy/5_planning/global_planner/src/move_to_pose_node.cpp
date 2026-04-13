@@ -2,12 +2,15 @@
 // │  SUBSCRIBED TOPICS                                          │
 // │  /task_planner/task_type         std_msgs/String            │
 // │  /joint_states                   sensor_msgs/JointState     │
+// │  /planning_command               std_msgs/String            │
 // │                                                             │
+// │  PUBLISHED TOPICS                                           │
+// │  /planning_state                 std_msgs/String            │
+// │    Values: IDLE | PLANNING | EXECUTING | SUCCESS | ERROR    │
 // └─────────────────────────────────────────────────────────────┘
 
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -205,7 +208,8 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
     moveit::planning_interface::MoveGroupInterface &arm_group,
-    rclcpp::Node::SharedPtr node)
+    rclcpp::Node::SharedPtr node,
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub)
 {
     RCLCPP_INFO(node->get_logger(), "[Path planning] Task: %s  target=(%.3f, %.3f, %.3f)",
                 task_type.c_str(),
@@ -271,7 +275,11 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Plan published to RViz.");
 
         // ── Execute ──────────────────────────────────────────────
-
+        {
+            std_msgs::msg::String s;
+            s.data = "EXECUTING";
+            state_pub->publish(s);
+        }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
         if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
         {
@@ -451,6 +459,7 @@ int main(int argc, char *argv[])
             {
                 if (marker.action != visualization_msgs::msg::Marker::ADD)
                     continue;
+                // TODO: Investigate this. marker.id appears to actually be 0 indexed.
                 april_tags[marker.id] = {marker.pose.position, node->now()};
             }
         });
@@ -477,7 +486,13 @@ int main(int argc, char *argv[])
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
         "/planning_command", 10, command_callback);
 
-    auto planning_done_pub = node->create_publisher<std_msgs::msg::Bool>("/planning_done", 10);
+    auto planning_state_pub = node->create_publisher<std_msgs::msg::String>("/planning_state", 10);
+
+    auto publish_state = [&](const std::string& state) {
+        std_msgs::msg::String s;
+        s.data = state;
+        planning_state_pub->publish(s);
+    };
 
     // If no live obstacle cloud arrived, use the hollow-box fallback
     if (latest_obstacle_cloud)
@@ -498,11 +513,12 @@ int main(int argc, char *argv[])
     target_point.z = 0.0;
 
     auto finish_plan = [&](const std::optional<moveit::planning_interface::MoveGroupInterface::Plan>& opt) {
-        std_msgs::msg::Bool done_msg;
-        done_msg.data = opt.has_value();
-        planning_done_pub->publish(done_msg);
-        if (!opt.has_value())
+        if (opt.has_value()) {
+            publish_state("SUCCESS");
+        } else {
             RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
+            publish_state("ERROR");
+        }
         std::lock_guard<std::mutex> lock(cmd_mutex);
         received_command = "idle";
     };
@@ -586,10 +602,10 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            publish_state("PLANNING");
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
-                arm_group, node);
+                arm_group, node, planning_state_pub);
 
             finish_plan(rrt_plan_opt);
         }
@@ -626,10 +642,10 @@ int main(int argc, char *argv[])
 
             publish_target_marker(node, pregrasp_pose);
 
-            // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            publish_state("PLANNING");
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
-                arm_group, node);
+                arm_group, node, planning_state_pub);
 
             finish_plan(rrt_plan_opt);
         }
@@ -657,10 +673,10 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            publish_state("PLANNING");
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
-                arm_group, node);
+                arm_group, node, planning_state_pub);
 
             finish_plan(rrt_plan_opt);
         }
@@ -688,16 +704,16 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            // ── Stage 1: RRT* → pre-grasp pose (offset above target) ─
+            publish_state("PLANNING");
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
-                arm_group, node);
+                arm_group, node, planning_state_pub);
 
             finish_plan(rrt_plan_opt);
         }
         else
         {
-            RCLCPP_INFO(node->get_logger(), "Waiting for the 'start_pick' command...");
+            publish_state("IDLE");
         }
         rate.sleep();
     }

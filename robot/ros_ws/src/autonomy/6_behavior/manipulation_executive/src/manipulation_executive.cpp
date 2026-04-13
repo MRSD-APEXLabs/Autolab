@@ -55,11 +55,13 @@ ManipulationExecutive::ManipulationExecutive()
     // Planning command publisher
     planning_cmd_pub_ = this->create_publisher<std_msgs::msg::String>("/planning_command", 10);
 
-    // Planning done subscriber — sets flag read by run_planning() in its async thread
-    planning_done_sub_ = this->create_subscription<std_msgs::msg::Bool>(
-        "/planning_done", 10,
-        [this](const std_msgs::msg::Bool::SharedPtr msg) {
-            planning_done_flag_ = msg->data ? 1 : 0;
+    // Planning state subscriber — sets result flag read by run_planning() in its async thread.
+    // Only SUCCESS and ERROR update the flag; IDLE/PLANNING/EXECUTING are ignored.
+    planning_state_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "/planning_state", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+            if      (msg->data == "SUCCESS") planning_result_.store(1);
+            else if (msg->data == "ERROR")   planning_result_.store(2);
         });
 
     // Command subscription
@@ -436,8 +438,11 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
 // ─────────────────────────────────────────────────────────────────────────────
 // run_planning — runs in std::async thread
 //
-// Publishes to /planning_command and polls /planning_done (via planning_done_flag_).
-// pose_type: "inspection" | "placement" | "safe"
+// Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
+// The planner publishes PLANNING then EXECUTING as intermediate states, and either
+// SUCCESS or ERROR as terminal states. No timeout is applied — the planner is
+// expected to always emit a terminal state.
+// pose_type: "inspection" | "placement" | "safe" | "home_offset"
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_planning(const std::string& pose_type)
@@ -468,7 +473,6 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
                          target_machine.c_str());
             return false;
         }
-
     } else if (pose_type == "safe") {
         cmd = "plan_home";
     } else if (pose_type == "home_offset") {
@@ -484,29 +488,26 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
                 "Planning: pose_type=%s object=%s target=%s → /planning_command=%s",
                 pose_type.c_str(), object_type.c_str(), target_machine.c_str(), cmd.c_str());
 
-    // ── Reset flag before publishing (prevents stale result from prior plan) ──
-    planning_done_flag_ = -1;
+    // ── Reset result before publishing (prevents stale result from prior plan) ─
+    planning_result_.store(0);
 
     // ── Publish command ───────────────────────────────────────────────────────
     std_msgs::msg::String cmd_msg;
     cmd_msg.data = cmd;
     planning_cmd_pub_->publish(cmd_msg);
 
-    // ── Poll for result (100 ms intervals, 60 s timeout) ─────────────────────
-    constexpr int TIMEOUT_MS = 60000;
-    constexpr int POLL_MS    = 100;
-    for (int elapsed = 0; elapsed < TIMEOUT_MS; elapsed += POLL_MS) {
+    // ── Wait for terminal state (SUCCESS=1 or ERROR=2) ────────────────────────
+    // The planner publishes PLANNING → EXECUTING → SUCCESS|ERROR. We wait here
+    // with no timeout; the planner always emits a terminal state.
+    constexpr int POLL_MS = 100;
+    while (rclcpp::ok()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(POLL_MS));
-        int flag = planning_done_flag_.load();
-        if (flag != -1) {
-            return flag == 1;
-        }
+        int result = planning_result_.load();
+        if (result == 1) return true;   // SUCCESS
+        if (result == 2) return false;  // ERROR
     }
 
-    RCLCPP_ERROR(this->get_logger(),
-                 "run_planning: 60 s timeout waiting for /planning_done (pose_type=%s)",
-                 pose_type.c_str());
-    return false;
+    return false;  // rclcpp shutdown
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

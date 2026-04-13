@@ -10,7 +10,6 @@
 #include <behavior_tree/behavior_tree.hpp>
 #include <behavior_tree_msgs/msg/manipulation_command.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 
 class ManipulationExecutive : public rclcpp::Node {
@@ -59,8 +58,9 @@ private:
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
-    std::atomic<int> planning_done_flag_{-1}; // -1=pending, 0=failed, 1=success
-    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr planning_done_sub_;
+    // 0=unknown/waiting, 1=SUCCESS, 2=ERROR
+    std::atomic<int> planning_result_{0};
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr planning_state_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -78,8 +78,8 @@ private:
     // wait_complete=true:  return true once mode returns to idle (servo — wait for finish).
     bool activate_camera_mode(const std::string& mode, bool wait_complete);
 
-    // Publishes to /planning_command and polls /planning_done (via planning_done_flag_).
-    // pose_type: "inspection" | "placement" | "safe"
+    // Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
+    // pose_type: "inspection" | "placement" | "safe" | "home_offset"
     bool run_planning(const std::string& pose_type);
 
     // ── WebSocket helper (synchronous, blocking) ───────────────────────────────
