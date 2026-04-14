@@ -44,5 +44,5 @@ ros2 bag record -o "${OUTPUT}" \
     "/${ROBOT}/behavior/active_actions" \
     \
     "/planning_command" \
-    "/planning_done" \
+    "/planning_state" \
     "/routine_executor/status"
