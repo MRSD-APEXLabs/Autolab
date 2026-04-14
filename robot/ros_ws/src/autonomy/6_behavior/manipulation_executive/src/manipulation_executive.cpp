@@ -464,9 +464,9 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
         }
     } else if (pose_type == "placement") {
         if (target_machine == "ot2") {
-            cmd = "plan_april_0";
-        } else if (target_machine == "shaker") {
             cmd = "plan_april_1";
+        } else if (target_machine == "shaker") {
+            cmd = "plan_april_2";
         } else {
             RCLCPP_ERROR(this->get_logger(),
                          "run_planning: target_machine '%s' does not exist - aborting.",
