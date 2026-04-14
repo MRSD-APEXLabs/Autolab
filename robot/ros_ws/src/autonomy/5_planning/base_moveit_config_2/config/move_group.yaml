@@ -1,6 +1,6 @@
 /move_group:
   ros__parameters:
-    default_robot_padding: 0.05
+    default_robot_padding: 0.1
     default_robot_scale: 1.0
     allow_trajectory_execution: true
     capabilities: ''
