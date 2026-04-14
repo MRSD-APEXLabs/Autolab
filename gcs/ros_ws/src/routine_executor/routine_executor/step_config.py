@@ -54,7 +54,7 @@ STEPS = {
                             '{"action": "pick_up_tips", "resource_name": "tip_rack", "well_indices": [0]}, '
                             '{"action": "aspirate", "resource_name": "tube_rack", "well_indices": [0], "volumes": [50]}, '
                             '{"action": "dispense", "resource_name": "empty_plate", "well_indices": [0, 1, 2, 3, 4], "volumes": [10, 10, 10, 10, 10]}, '
-                            '{"action": "return_tips"}]}}',
+                            '{"action": "return_tips"}]}',
         ),
         'watch_topic': 'behavior/execute_ot2_protocol_status',
     },
