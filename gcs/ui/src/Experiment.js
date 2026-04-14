@@ -25,7 +25,10 @@ export default function ExperimentSequence() {
 
     client.on("message", (_topic, payload) => {
       try {
-        setStatus(JSON.parse(payload.toString()));
+        const outer = JSON.parse(payload.toString());
+        // Real system wraps the status JSON in a { data: "<json>" } envelope
+        const parsed = typeof outer?.data === "string" ? JSON.parse(outer.data) : outer;
+        setStatus(parsed);
       } catch {
         // ignore malformed payloads
       }
