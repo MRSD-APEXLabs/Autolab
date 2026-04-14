@@ -296,7 +296,7 @@ class WSVisualizer(Node):
             m = Marker()
             m.header = self.header()
             m.ns = "apriltags"
-            m.id = i
+            m.id = t.get("id")
             m.type = Marker.SPHERE
             m.action = Marker.ADD
 
