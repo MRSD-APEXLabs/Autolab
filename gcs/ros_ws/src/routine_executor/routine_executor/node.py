@@ -130,6 +130,8 @@ class RoutineExecutorNode(Node):
         if msg.status == Status.SUCCESS:
             self.get_logger().info(f'Step "{step_name}" succeeded')
             self._sm.on_success()
+            self._listening = False
+            self._seen_running = False
         elif msg.status == Status.RUNNING:
             self._seen_running = True
         elif msg.status == Status.FAILURE and self._seen_running:
