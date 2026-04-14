@@ -22,7 +22,8 @@ class RoutineExecutorNode(Node):
 
         self._sm = RoutineStateMachine([])
         self._robot = 'robot_1'
-        self._listening = False  # ignore status msgs until after command is published
+        self._listening = False    # ignore status msgs until after command is published
+        self._seen_running = False  # ignore FAILURE until action has reported RUNNING
         self._listen_timer = None
 
         # Input topics
@@ -129,7 +130,9 @@ class RoutineExecutorNode(Node):
         if msg.status == Status.SUCCESS:
             self.get_logger().info(f'Step "{step_name}" succeeded')
             self._sm.on_success()
-        elif msg.status == Status.FAILURE:
+        elif msg.status == Status.RUNNING:
+            self._seen_running = True
+        elif msg.status == Status.FAILURE and self._seen_running:
             self._sm.on_failure()
             self.get_logger().warn(
                 f'Step "{step_name}" failed '
@@ -161,6 +164,7 @@ class RoutineExecutorNode(Node):
         pub.publish(msg)
 
         self._listening = False
+        self._seen_running = False
         self._sm.acknowledge_dispatch()
 
         # One-shot timer: enable listening after 100ms
