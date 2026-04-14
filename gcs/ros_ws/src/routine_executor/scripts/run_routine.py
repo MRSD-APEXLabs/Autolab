@@ -128,7 +128,8 @@ class RoutineCLI(Node):
         elif state == 'success' and self._last_state != 'success':
             steps = d.get('steps', [])
             total_steps = len(steps)
-            last_step = steps[-1].get('name', '?') if steps else '?'
+            last = steps[-1] if steps else None
+            last_step = last.get('name', '?') if isinstance(last, dict) else (last or '?')
             label = f'[{total_steps}/{total_steps}] {last_step}'
             print(f'{label:<30} SUCCESS')
             print('Routine complete.')
