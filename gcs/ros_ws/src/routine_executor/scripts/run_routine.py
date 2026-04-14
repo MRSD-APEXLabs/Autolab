@@ -31,6 +31,7 @@ class RoutineCLI(Node):
         self._last_step_idx = -1
         self._last_retry_count = 0
         self._last_state = None
+        self._command_sent = False
 
         self._pub = self.create_publisher(String, '/routine_executor/start_routine_cmd', 10)
         self.create_subscription(String, '/routine_executor/status', self._on_status, 10)
@@ -49,6 +50,7 @@ class RoutineCLI(Node):
         msg = String()
         msg.data = payload
         self._pub.publish(msg)
+        self._command_sent = True
         self.get_logger().debug(f'Sent routine: {payload}')
         self._send_timer.cancel()  # one-shot: don't re-publish
 
@@ -56,6 +58,9 @@ class RoutineCLI(Node):
         try:
             d = json.loads(msg.data)
         except json.JSONDecodeError:
+            return
+
+        if not self._command_sent:
             return
 
         state = d.get('state', 'idle')
