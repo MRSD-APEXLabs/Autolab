@@ -22,9 +22,9 @@ import sensor_msgs_py.point_cloud2 as pc2
 
 
 #WS_URI = "ws://192.168.10.7:8766"
-WS_URI = "ws://192.168.1.38:8766"
+WS_URI = "ws://192.168.1.101:8766"
 FRAME_ID = "top_camera"
-PC_COUNT = 25
+PC_COUNT = 10
 
 
 class WSVisualizer(Node):
