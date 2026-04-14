@@ -2,7 +2,7 @@ class RoutineStateMachine:
     """Pure state machine — no ROS2 dependency. Tracks routine execution progress."""
 
     def __init__(self, steps: list, max_retries: int = 3):
-        self.steps = list(steps)
+        self.steps = list(steps)  # list[dict], each dict has at least {'name': str}
         self.max_retries = max_retries
         self.state = 'idle'          # idle | running | success | failed
         self.current_step_idx = 0
@@ -19,10 +19,13 @@ class RoutineStateMachine:
         self.error = None
         self.needs_dispatch = True
 
-    def current_step_name(self) -> str:
+    def current_step(self) -> dict:
         if self.current_step_idx >= len(self.steps):
-            return ''
+            return {}
         return self.steps[self.current_step_idx]
+
+    def current_step_name(self) -> str:
+        return self.current_step().get('name', '')
 
     def on_success(self):
         if self.state != 'running':

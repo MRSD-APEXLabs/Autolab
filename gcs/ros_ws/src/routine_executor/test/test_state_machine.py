@@ -3,7 +3,11 @@ from routine_executor.state_machine import RoutineStateMachine
 
 
 def make_sm(steps=None, max_retries=2):
-    return RoutineStateMachine(steps or ['pick_base', 'place'], max_retries=max_retries)
+    steps = steps or [
+        {'name': 'pick_base'},
+        {'name': 'place', 'target_machine': 'ot2'},
+    ]
+    return RoutineStateMachine(steps, max_retries=max_retries)
 
 
 def test_initial_state_is_idle():
@@ -18,19 +22,26 @@ def test_start_sets_state_to_running():
 
 
 def test_start_sets_current_step_to_zero():
-    sm = make_sm(['pick_base', 'place', 'pick_up'])
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick_up'}])
     sm.start()
     assert sm.current_step_idx == 0
 
 
 def test_current_step_name_returns_correct_step():
-    sm = make_sm(['pick_base', 'place'])
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}])
     sm.start()
     assert sm.current_step_name() == 'pick_base'
 
 
+def test_current_step_returns_full_dict():
+    step = {'name': 'place', 'target_machine': 'ot2'}
+    sm = RoutineStateMachine([step], max_retries=2)
+    sm.start()
+    assert sm.current_step() == step
+
+
 def test_on_success_advances_to_next_step():
-    sm = make_sm(['pick_base', 'place'])
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}])
     sm.start()
     sm.on_success()
     assert sm.current_step_idx == 1
@@ -38,7 +49,7 @@ def test_on_success_advances_to_next_step():
 
 
 def test_on_success_last_step_sets_success_state():
-    sm = make_sm(['pick_base'])
+    sm = make_sm([{'name': 'pick_base'}])
     sm.start()
     sm.on_success()
     assert sm.state == 'success'
@@ -69,7 +80,7 @@ def test_on_failure_exceeds_retries_sets_failed():
 
 
 def test_retry_count_resets_on_new_step():
-    sm = make_sm(['pick_base', 'place'], max_retries=3)
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}], max_retries=3)
     sm.start()
     sm.on_failure()  # pick_base retry 1
     sm.on_success()  # pick_base done
@@ -92,11 +103,12 @@ def test_start_while_running_is_rejected():
 
 
 def test_to_dict_contains_required_keys():
-    sm = make_sm(['pick_base', 'place'], max_retries=3)
+    steps = [{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}]
+    sm = RoutineStateMachine(steps, max_retries=3)
     sm.start()
     d = sm.to_dict()
     assert d['state'] == 'running'
-    assert d['steps'] == ['pick_base', 'place']
+    assert d['steps'] == steps
     assert d['current_step'] == 0
     assert d['current_step_name'] == 'pick_base'
     assert d['retry_count'] == 0
@@ -126,7 +138,7 @@ def test_needs_dispatch_true_after_retry():
 
 
 def test_on_success_in_terminal_state_is_noop():
-    sm = make_sm(['pick_base'])
+    sm = make_sm([{'name': 'pick_base'}])
     sm.start()
     sm.on_success()  # transitions to 'success'
     sm.on_success()  # should be a no-op, not raise
@@ -134,7 +146,7 @@ def test_on_success_in_terminal_state_is_noop():
 
 
 def test_on_failure_in_terminal_state_is_noop():
-    sm = make_sm(['pick_base'], max_retries=1)
+    sm = make_sm([{'name': 'pick_base'}], max_retries=1)
     sm.start()
     sm.on_failure()  # transitions to 'failed'
     sm.on_failure()  # should be a no-op, not raise
@@ -142,7 +154,7 @@ def test_on_failure_in_terminal_state_is_noop():
 
 
 def test_cancel_in_terminal_state_is_noop():
-    sm = make_sm(['pick_base'])
+    sm = make_sm([{'name': 'pick_base'}])
     sm.start()
     sm.on_success()  # transitions to 'success'
     sm.cancel()      # should be a no-op
@@ -150,7 +162,14 @@ def test_cancel_in_terminal_state_is_noop():
 
 
 def test_current_step_name_safe_after_completion():
-    sm = make_sm(['pick_base'])
+    sm = make_sm([{'name': 'pick_base'}])
     sm.start()
     sm.on_success()
     assert sm.current_step_name() == ''  # no IndexError
+
+
+def test_current_step_safe_after_completion():
+    sm = make_sm([{'name': 'pick_base'}])
+    sm.start()
+    sm.on_success()
+    assert sm.current_step() == {}  # no IndexError

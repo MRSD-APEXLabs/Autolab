@@ -5,9 +5,15 @@ CLI for sending a routine to the RoutineExecutorNode and monitoring progress.
 Usage:
     python3 run_routine.py [--robot ROBOT] [--retries N] STEP [STEP ...]
 
+Steps accept parameters using colon-separated key=value pairs:
+    pick_base
+    place:target_machine=ot2
+    shaker:pwm=200
+    ot2:parameters_json='{"steps":[]}'
+
 Examples:
-    python3 run_routine.py pick_base place ot2 pick_up shaker
-    python3 run_routine.py --robot robot_1 --retries 3 pick_base place
+    python3 run_routine.py pick_base "place:target_machine=ot2" ot2 pick_up "shaker:pwm=200"
+    python3 run_routine.py --robot robot_1 --retries 3 pick_base "place:target_machine=shaker"
 """
 
 import argparse
@@ -18,13 +24,47 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-from routine_executor.step_config import KNOWN_STEPS
+from routine_executor.step_config import STEPS, KNOWN_STEPS
+
+
+def parse_step(arg: str) -> dict:
+    """Parse 'name' or 'name:key=val,key2=val2' into a step dict."""
+    if ':' not in arg:
+        return {'name': arg}
+    name, params_str = arg.split(':', 1)
+    params = {'name': name}
+    for pair in params_str.split(','):
+        if '=' not in pair:
+            raise ValueError(f"Invalid param '{pair}' in step arg '{arg}': expected key=value")
+        k, v = pair.split('=', 1)
+        k = k.strip()
+        v = v.strip()
+        # auto-cast to int or float when possible
+        try:
+            v = int(v)
+        except ValueError:
+            try:
+                v = float(v)
+            except ValueError:
+                pass
+        params[k] = v
+    return params
+
+
+def format_step(step: dict) -> str:
+    """Format a step dict as a human-readable string."""
+    name = step['name']
+    extras = {k: v for k, v in step.items() if k != 'name'}
+    if not extras:
+        return name
+    param_str = ','.join(f'{k}={v}' for k, v in extras.items())
+    return f'{name}({param_str})'
 
 
 class RoutineCLI(Node):
     def __init__(self, robot: str, steps: list, max_retries: int):
         super().__init__('routine_cli')
-        self._steps = steps
+        self._steps = steps  # list[dict]
         self._done = False
         self._exit_code = 0
 
@@ -88,7 +128,7 @@ class RoutineCLI(Node):
         elif state == 'success' and self._last_state != 'success':
             steps = d.get('steps', [])
             total_steps = len(steps)
-            last_step = steps[-1] if steps else '?'
+            last_step = steps[-1].get('name', '?') if steps else '?'
             label = f'[{total_steps}/{total_steps}] {last_step}'
             print(f'{label:<30} SUCCESS')
             print('Routine complete.')
@@ -107,22 +147,50 @@ class RoutineCLI(Node):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run a robot routine via the behavior tree')
-    parser.add_argument('steps', nargs='+', help=f'Ordered steps. Known: {KNOWN_STEPS}')
+    parser = argparse.ArgumentParser(
+        description='Run a robot routine via the behavior tree',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            'Step format: name or name:key=value,key2=value2\n'
+            f'Known steps: {KNOWN_STEPS}\n'
+            'Examples:\n'
+            '  pick_base "place:target_machine=ot2" "shaker:pwm=200" ot2\n'
+        ),
+    )
+    parser.add_argument('steps', nargs='+', help='Ordered steps with optional params')
     parser.add_argument('--robot', default='robot_1', help='Robot namespace (default: robot_1)')
     parser.add_argument('--retries', type=int, default=3, help='Max retries per step (default: 3)')
     args = parser.parse_args()
 
-    unknown = [s for s in args.steps if s not in KNOWN_STEPS]
+    # Parse each step arg into a dict
+    parsed_steps = []
+    for arg in args.steps:
+        try:
+            parsed_steps.append(parse_step(arg))
+        except ValueError as e:
+            print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(1)
+
+    # Validate step names
+    unknown = [s['name'] for s in parsed_steps if s['name'] not in KNOWN_STEPS]
     if unknown:
         print(f'ERROR: Unknown steps: {unknown}', file=sys.stderr)
         print(f'Known steps: {KNOWN_STEPS}', file=sys.stderr)
         sys.exit(1)
 
-    rclpy.init()
-    node = RoutineCLI(robot=args.robot, steps=args.steps, max_retries=args.retries)
+    # Validate required params before connecting to ROS2
+    for step in parsed_steps:
+        config = STEPS[step['name']]
+        missing = [p for p in config['required_params'] if p not in step]
+        if missing:
+            print(f'ERROR: Step "{step["name"]}" missing required params: {missing}', file=sys.stderr)
+            sys.exit(1)
 
-    print(f'Running routine: {" -> ".join(args.steps)}')
+    rclpy.init()
+    node = RoutineCLI(robot=args.robot, steps=parsed_steps, max_retries=args.retries)
+
+    step_summary = ' -> '.join(format_step(s) for s in parsed_steps)
+    print(f'Running routine: {step_summary}')
     print(f'Robot: {args.robot}  |  Max retries: {args.retries}')
     print()
 

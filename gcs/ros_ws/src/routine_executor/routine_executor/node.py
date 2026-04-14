@@ -92,10 +92,22 @@ class RoutineExecutorNode(Node):
         max_retries = int(payload.get('max_retries', 3))
         robot = payload.get('robot', 'robot_1')
 
-        unknown = [s for s in steps if s not in KNOWN_STEPS]
+        # Validate step names
+        unknown = [s.get('name') for s in steps if s.get('name') not in KNOWN_STEPS]
         if unknown:
             self.get_logger().error(f'Unknown steps: {unknown}. Known: {KNOWN_STEPS}')
             return
+
+        # Validate required params per step
+        for step in steps:
+            name = step['name']
+            config = STEPS[name]
+            missing = [p for p in config['required_params'] if p not in step]
+            if missing:
+                self.get_logger().error(
+                    f'Step "{name}" missing required params: {missing}'
+                )
+                return
 
         # Re-subscribe if robot changed
         if robot != self._robot:
@@ -107,6 +119,7 @@ class RoutineExecutorNode(Node):
 
         self._sm = RoutineStateMachine(steps, max_retries=max_retries)
         self._listening = False
+        self._seen_running = False
         self._sm.start()
         self.get_logger().info(f'Starting routine: {steps} (robot={robot}, retries={max_retries})')
 
@@ -155,10 +168,11 @@ class RoutineExecutorNode(Node):
             self._dispatch_current_step()
 
     def _dispatch_current_step(self) -> None:
-        step_name = self._sm.current_step_name()
+        step = self._sm.current_step()
+        step_name = step['name']
         config = STEPS[step_name]
 
-        msg = config['make_msg']()
+        msg = config['make_msg'](step)
         topic_suffix = config['publish_topic']
         msg_type = ManipulationCommand if config['msg_type'] == 'manipulation' else LabMachineCommand
 
