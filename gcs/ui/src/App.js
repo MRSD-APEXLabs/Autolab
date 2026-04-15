@@ -2,11 +2,57 @@
 import './App.css';
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import mqtt from 'mqtt';
 import LoaderPage from "./LoaderPage";
 import CameraPanel from './CameraPanel';
 
+const BROKER_URL = `ws://${window.location.hostname}:9001`;
+const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
+
+const DEFAULT_ROUTINE = JSON.stringify(
+  {
+    steps: [
+      { name: 'pick_base' },
+      { name: 'place', target_machine: 'ot2' },
+      { name: 'ot2', parameters_json: {steps: [
+                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [0]},
+                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [50]},
+                  {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 1, 2, 3, 4], volumes: [10, 10, 10, 10, 10]},
+                  {action: 'return_tips'}
+                  ]}
+      },
+      { name: 'pick_up' },
+      { name: 'place', target_machine: 'shaker' },
+      { name: 'shaker', pwm: 100 },
+      { name: 'wait', 'time_s': 10 },
+      { name: 'shaker', pwm: 0 },
+      { name: 'pick_up' },
+    ],
+    max_retries: 3,
+    robot: 'robot_1',
+  },
+  null,
+  2
+);
+
 export default function App() {
   const [started, setStarted] = useState(false);
+  const [routineJson, setRoutineJson] = useState(DEFAULT_ROUTINE);
+
+  function handleContinue() {
+    const client = mqtt.connect(BROKER_URL);
+    client.on('connect', () => {
+      client.publish(START_CMD_TOPIC, routineJson, {}, () => {
+        client.end();
+        setStarted('loader');
+      });
+    });
+    // If broker is unreachable, still navigate so the UI doesn't freeze
+    client.on('error', () => {
+      client.end();
+      setStarted('loader');
+    });
+  }
 
   return (
     <>
@@ -91,14 +137,15 @@ export default function App() {
             </div>
 
             <div className="mb-6">
-              <label className="block text-gray-700 font-medium mb-2">Experiment Description</label>
+              <label className="block text-gray-700 font-medium mb-2">Routine Command (JSON)</label>
               <textarea
-                placeholder="For each of my 3 samples, carry out a 10x serial dilution from..."
-                rows="4"
-                className="w-full border-2 border-orange-300 focus:border-orange-500 rounded-lg p-3 outline-none text-gray-800"
-              ></textarea>
+                value={routineJson}
+                onChange={(e) => setRoutineJson(e.target.value)}
+                rows="12"
+                className="w-full border-2 border-orange-300 focus:border-orange-500 rounded-lg p-3 outline-none text-gray-800 font-mono text-sm"
+              />
               <p className="text-sm text-gray-500 mt-1">
-                Be specific about what substances to manipulate and what procedures to perform.
+                Edit the JSON directly to customise steps and parameters before sending.
               </p>
             </div>
 
@@ -110,7 +157,7 @@ export default function App() {
                 ← Back
               </button>
               <button
-                onClick={() => setStarted('loader')}
+                onClick={handleContinue}
                 className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg"
               >
                 Continue →

@@ -1,8 +1,24 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import mqtt from "mqtt";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
+const CANCEL_TOPIC = "cmd/routine_executor/cancel";
+
+// Mirror of step_config.py display_topics.
+// Keys are step names; values are absolute ROS2 topic paths.
+// MQTT topic = "ros2" + ros2_path  (e.g. /behavior/manipulation_phase → ros2/behavior/manipulation_phase)
+const STEP_DISPLAY_TOPICS = {
+  pick_base: ["/behavior/manipulation_phase", "/planning_status"],
+};
+
+const ALL_DISPLAY_MQTT_TOPICS = [
+  ...new Set(
+    Object.values(STEP_DISPLAY_TOPICS)
+      .flat()
+      .map((t) => `ros2${t}`)
+  ),
+];
 
 const STATE_STYLE = {
   idle:    { label: "Idle",    badge: "bg-gray-200 text-gray-600",     text: "text-gray-500" },
@@ -11,26 +27,51 @@ const STATE_STYLE = {
   failed:  { label: "Failed",  badge: "bg-red-100 text-red-600",       text: "text-red-600" },
 };
 
+function formatExecPayload(payload) {
+  if (payload === null || payload === undefined) return "—";
+  if (typeof payload === "string") return payload;
+  // String ROS2 message: { data: "..." }
+  if (payload.data !== undefined) return String(payload.data);
+  return JSON.stringify(payload);
+}
+
 export default function ExperimentSequence() {
   const [status, setStatus] = useState(null);
   const [connected, setConnected] = useState(false);
+  const [executorStatus, setExecutorStatus] = useState({});
+  const clientRef = useRef(null);
+
+  function handleCancel() {
+    clientRef.current?.publish(CANCEL_TOPIC, '');
+  }
 
   useEffect(() => {
     const client = mqtt.connect(BROKER_URL);
+    clientRef.current = client;
 
     client.on("connect", () => {
       setConnected(true);
       client.subscribe(STATUS_TOPIC);
+      ALL_DISPLAY_MQTT_TOPICS.forEach((t) => client.subscribe(t));
     });
 
-    client.on("message", (_topic, payload) => {
-      try {
-        const outer = JSON.parse(payload.toString());
-        // Real system wraps the status JSON in a { data: "<json>" } envelope
-        const parsed = typeof outer?.data === "string" ? JSON.parse(outer.data) : outer;
-        setStatus(parsed);
-      } catch {
-        // ignore malformed payloads
+    client.on("message", (topic, payload) => {
+      const raw = payload.toString();
+      if (topic === STATUS_TOPIC) {
+        try {
+          const outer = JSON.parse(raw);
+          // Real system wraps the status JSON in a { data: "<json>" } envelope
+          const parsed = typeof outer?.data === "string" ? JSON.parse(outer.data) : outer;
+          setStatus(parsed);
+        } catch {
+          // ignore malformed payloads
+        }
+      } else if (ALL_DISPLAY_MQTT_TOPICS.includes(topic)) {
+        try {
+          setExecutorStatus((prev) => ({ ...prev, [topic]: JSON.parse(raw) }));
+        } catch {
+          setExecutorStatus((prev) => ({ ...prev, [topic]: raw }));
+        }
       }
     });
 
@@ -48,19 +89,31 @@ export default function ExperimentSequence() {
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
 
+  const currentStepName = status?.current_step_name ?? null;
+  const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       {/* Header */}
       <div className="flex items-center gap-2 mb-6">
         <div className="w-6 h-6 rounded-full bg-gray-800" />
         <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-        <span
-          className={`ml-auto text-xs px-2 py-1 rounded-full ${
-            connected ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
-          }`}
-        >
-          {connected ? "Connected" : "Disconnected"}
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleCancel}
+            className="text-xs px-3 py-1 rounded-full bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-40"
+            disabled={state !== "running"}
+          >
+            Cancel
+          </button>
+          <span
+            className={`text-xs px-2 py-1 rounded-full ${
+              connected ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
+            }`}
+          >
+            {connected ? "Connected" : "Disconnected"}
+          </span>
+        </div>
       </div>
 
       {/* Title */}
@@ -163,6 +216,31 @@ export default function ExperimentSequence() {
             <p className="text-sm text-amber-600">
               Retry {status.retry_count} of {status.max_retries}
             </p>
+          )}
+
+          {/* Executor status for this step */}
+          {displayTopics.length > 0 && (
+            <div className="mt-4 border-t pt-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Executor Status
+              </p>
+              <div className="space-y-2">
+                {displayTopics.map((ros2Topic) => {
+                  const mqttTopic = `ros2${ros2Topic}`;
+                  const val = executorStatus[mqttTopic];
+                  return (
+                    <div key={ros2Topic} className="flex items-center justify-between gap-4">
+                      <span className="text-xs text-gray-400 font-mono truncate">
+                        {ros2Topic}
+                      </span>
+                      <span className="text-xs text-gray-700 font-medium shrink-0">
+                        {formatExecPayload(val)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       )}

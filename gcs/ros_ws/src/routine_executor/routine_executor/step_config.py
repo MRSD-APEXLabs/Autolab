@@ -57,6 +57,13 @@ STEPS = {
         ),
         'watch_topic': 'behavior/execute_ot2_protocol_status',
     },
+    'wait': {
+        'msg_type': 'wait',
+        'publish_topic': None,
+        'required_params': ['time_s'],
+        'make_msg': None,
+        'watch_topic': None,
+    },
 }
 
 KNOWN_STEPS = list(STEPS.keys())

@@ -25,6 +25,7 @@ class RoutineExecutorNode(Node):
         self._listening = False    # ignore status msgs until after command is published
         self._seen_running = False  # ignore FAILURE until action has reported RUNNING
         self._listen_timer = None
+        self._wait_timer = None
 
         # Input topics
         self.create_subscription(String, '/routine_executor/start_routine_cmd',
@@ -54,6 +55,8 @@ class RoutineExecutorNode(Node):
     def _setup_status_subscriptions(self, robot: str) -> None:
         """Subscribe to all known action status topics for the given robot."""
         for step_name, config in STEPS.items():
+            if config['watch_topic'] is None:
+                continue
             topic = f'/{robot}/{config["watch_topic"]}'
             sub = self.create_subscription(
                 Status, topic,
@@ -127,6 +130,9 @@ class RoutineExecutorNode(Node):
         if self._sm.state == 'running':
             if self._listen_timer is not None and not self._listen_timer.is_canceled():
                 self._listen_timer.cancel()
+            if self._wait_timer is not None and not self._wait_timer.is_canceled():
+                self._wait_timer.cancel()
+                self._wait_timer = None
             self._sm.cancel()
             self.get_logger().info('Routine cancelled')
         else:
@@ -172,6 +178,15 @@ class RoutineExecutorNode(Node):
         step_name = step['name']
         config = STEPS[step_name]
 
+        if config['msg_type'] == 'wait':
+            time_s = float(step.get('time_s', 0))
+            self._sm.acknowledge_dispatch()
+            if self._wait_timer is not None and not self._wait_timer.is_canceled():
+                self._wait_timer.cancel()
+            self._wait_timer = self.create_timer(time_s, self._on_wait_complete)
+            self.get_logger().info(f'Waiting {time_s}s for step "{step_name}"')
+            return
+
         msg = config['make_msg'](step)
         topic_suffix = config['publish_topic']
         msg_type = ManipulationCommand if config['msg_type'] == 'manipulation' else LabMachineCommand
@@ -192,6 +207,12 @@ class RoutineExecutorNode(Node):
             f'Dispatched step "{step_name}" '
             f'(retry {self._sm.retry_count}/{self._sm.max_retries})'
         )
+
+    def _on_wait_complete(self) -> None:
+        self._wait_timer.cancel()
+        self._wait_timer = None
+        self.get_logger().info('Wait step complete')
+        self._sm.on_success()
 
     def _enable_listening_once(self) -> None:
         self._listening = True
