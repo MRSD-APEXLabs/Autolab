@@ -53,7 +53,7 @@ STEPS = {
         'make_msg': lambda params: LabMachineCommand(
             device='ot2',
             action='protocol',
-            parameters_json=params['parameters_json'],
+            parameters_json=params['parameters_json'] if isinstance(params['parameters_json'], str) else json.dumps(params['parameters_json']),
         ),
         'watch_topic': 'behavior/execute_ot2_protocol_status',
     },
