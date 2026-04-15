@@ -428,23 +428,33 @@ class WSVisualizer(Node):
         self.inspect_wp_pub.publish(self.wellplates_to_markers(data.get("wellplates", [])))
         self.inspect_tag_pub.publish(self.apriltags_to_markers(data.get("apriltags", [])))
 
+    def _handle_message(self, raw: str):
+        try:
+            data = json.loads(raw)
+            msg_type = data.get("type", "")
+            if msg_type == "servo_frame":
+                self.publish_servo(data)
+            elif msg_type == "inspect_frame":
+                self.publish_inspect(data)
+            elif msg_type == "idle":
+                pass
+            else:
+                self.get_logger().debug(f"Unknown message type: {msg_type}")
+        except Exception as e:
+            self.get_logger().error(f"Message handling error: {e}")
+
     async def run(self):
+        loop = asyncio.get_running_loop()
         while rclpy.ok():
             try:
-                async with websockets.connect(WS_URI, max_size=None) as ws:
+                async with websockets.connect(
+                    WS_URI,
+                    max_size=None,
+                    ping_interval=None,
+                ) as ws:
                     self.get_logger().info(f"Connected to {WS_URI}")
                     async for msg in ws:
-                        data = json.loads(msg)
-                        msg_type = data.get("type", "")
-
-                        if msg_type == "servo_frame":
-                            self.publish_servo(data)
-                        elif msg_type == "inspect_frame":
-                            self.publish_inspect(data)
-                        elif msg_type == "idle":
-                            self.get_logger().debug("Server idle")
-                        else:
-                            self.get_logger().debug(f"Unknown message type: {msg_type}")
+                        loop.run_in_executor(None, self._handle_message, msg)
 
             except (websockets.ConnectionClosedError, websockets.InvalidStatusCode) as e:
                 self.get_logger().warn(f"WebSocket connection error, retrying: {e}")
