@@ -39,6 +39,15 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 DISCOVERY_INTERVAL = float(os.environ.get("ROS2MQTT_DISCOVERY_INTERVAL", "10.0"))
 
+# Message types that carry large binary blobs — serialising them to JSON is
+# extremely slow and floods the executor.  Skip them entirely.
+_SKIP_MSG_TYPES = {
+    "sensor_msgs/msg/Image",
+    "sensor_msgs/msg/CompressedImage",
+    "sensor_msgs/msg/PointCloud2",
+    "sensor_msgs/msg/PointCloud",
+}
+
 
 class Ros2MqttBridge(Node):
     def __init__(self, mqtt_client: mqtt.Client) -> None:
@@ -71,6 +80,9 @@ class Ros2MqttBridge(Node):
                 continue
 
             msg_type_str = type_list[0]
+            if msg_type_str in _SKIP_MSG_TYPES:
+                continue
+
             try:
                 msg_type = get_message(msg_type_str)
             except Exception as exc:
