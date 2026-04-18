@@ -24,29 +24,45 @@ ManipulationExecutive::ManipulationExecutive()
 {
     this->declare_parameter<std::string>("camera_edge_host",       "localhost");
     this->declare_parameter<int>        ("camera_edge_port",       8765);
-    this->declare_parameter<double>     ("planning_placeholder_s", 5.0);
+    this->declare_parameter<double>     ("place_wait_s",           10.0);
 
     this->get_parameter("camera_edge_host",       camera_edge_host_);
     this->get_parameter("camera_edge_port",       camera_edge_port_);
-    this->get_parameter("planning_placeholder_s", planning_placeholder_s_);
+    this->get_parameter("place_wait_s",           place_wait_s_);
 
-    RCLCPP_INFO(this->get_logger(), "Camera-edge: %s:%d  planning placeholder: %.1fs",
-                camera_edge_host_.c_str(), camera_edge_port_, planning_placeholder_s_);
+    RCLCPP_INFO(this->get_logger(), "Camera-edge: %s:%d",
+                camera_edge_host_.c_str(), camera_edge_port_);
 
     // BT conditions
-    pick_up_condition_ = new bt::Condition("Pick Up Commanded", this);
-    place_condition_   = new bt::Condition("Place Commanded",   this);
+    pick_up_condition_   = new bt::Condition("Pick Up Commanded",   this);
+    place_condition_     = new bt::Condition("Place Commanded",     this);
+    pick_base_condition_ = new bt::Condition("Pick Base Commanded", this);
     conditions_.push_back(pick_up_condition_);
     conditions_.push_back(place_condition_);
+    conditions_.push_back(pick_base_condition_);
 
     // BT actions
-    pick_up_action_ = new bt::Action("Pick Up Object", this);
-    place_action_   = new bt::Action("Place Object",   this);
+    pick_up_action_   = new bt::Action("Pick Up Object",   this);
+    place_action_     = new bt::Action("Place Object",     this);
+    pick_base_action_ = new bt::Action("Pick Base Object", this);
     actions_.push_back(pick_up_action_);
     actions_.push_back(place_action_);
+    actions_.push_back(pick_base_action_);
 
     // Phase publisher — monitor with: ros2 topic echo /behavior/manipulation_phase
     phase_pub_ = this->create_publisher<std_msgs::msg::String>("manipulation_phase", 10);
+
+    // Planning command publisher
+    planning_cmd_pub_ = this->create_publisher<std_msgs::msg::String>("/planning_command", 10);
+
+    // Planning state subscriber — sets result flag read by run_planning() in its async thread.
+    // Only SUCCESS and ERROR update the flag; IDLE/PLANNING/EXECUTING are ignored.
+    planning_state_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "/planning_state", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+            if      (msg->data == "SUCCESS") planning_result_.store(1);
+            else if (msg->data == "ERROR")   planning_result_.store(2);
+        });
 
     // Command subscription
     cmd_sub_ = this->create_subscription<behavior_tree_msgs::msg::ManipulationCommand>(
@@ -85,6 +101,12 @@ void ManipulationExecutive::command_callback(
         pick_up_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received place command (object: %s → machine: %s)",
                     object_type_.c_str(), target_machine_.c_str());
+    } else if (msg->type == "pick_base") {
+        pick_base_condition_->set(true);
+        pick_up_condition_->set(false);
+        place_condition_->set(false);
+        RCLCPP_INFO(this->get_logger(), "Received pick_base command (object: %s)",
+                    object_type_.c_str());
     } else {
         RCLCPP_WARN(this->get_logger(), "Unknown manipulation type '%s' — ignoring",
                     msg->type.c_str());
@@ -101,6 +123,7 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
         case ManipulationExecutive::ManipPhase::IDLE:               return "IDLE";
         case ManipulationExecutive::ManipPhase::ACTIVATING_INSPECT: return "ACTIVATING_INSPECT";
         case ManipulationExecutive::ManipPhase::PLANNING:           return "PLANNING";
+        case ManipulationExecutive::ManipPhase::WAITING_PLACE:      return "WAITING_PLACE";
         case ManipulationExecutive::ManipPhase::ACTIVATING_SERVO:   return "ACTIVATING_SERVO";
         case ManipulationExecutive::ManipPhase::PLANNING_SAFE:      return "PLANNING_SAFE";
         default:                                                     return "UNKNOWN";
@@ -109,8 +132,9 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
 
 void ManipulationExecutive::timer_callback()
 {
-    tick_manip(pick_up_action_, ManipType::PICK_UP);
-    tick_manip(place_action_,   ManipType::PLACE);
+    tick_manip(pick_up_action_,   ManipType::PICK_UP);
+    tick_manip(place_action_,     ManipType::PLACE);
+    tick_manip(pick_base_action_, ManipType::PICK_BASE);
 
     // Publish current phase for monitoring
     std_msgs::msg::String phase_msg;
@@ -137,14 +161,24 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
     // ── New activation ────────────────────────────────────────────────────────
     if (action->active_has_changed()) {
         manip_type_ = type;
-        RCLCPP_INFO(this->get_logger(), "Manipulation activated (%s)",
-                    type == ManipType::PICK_UP ? "pick_up" : "place");
+        const char* type_name = (type == ManipType::PICK_UP)   ? "pick_up"   :
+                                (type == ManipType::PLACE)      ? "place"     : "pick_base";
+        RCLCPP_INFO(this->get_logger(), "Manipulation activated (%s)", type_name);
 
-        manip_phase_ = ManipPhase::ACTIVATING_INSPECT;
-        in_flight_   = true;
-        pending_ = std::async(std::launch::async,
-                              &ManipulationExecutive::activate_camera_mode,
-                              this, "inspect", false);
+        if (type == ManipType::PICK_BASE) {
+            // pick_base: skip inspect, go straight to planning home_offset
+            manip_phase_ = ManipPhase::PLANNING;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::run_planning,
+                                  this, "home_offset");
+        } else {
+            manip_phase_ = ManipPhase::ACTIVATING_INSPECT;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::activate_camera_mode,
+                                  this, "inspect", false);
+        }
         action->set_running();
         return;
     }
@@ -180,16 +214,47 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 fail_manip(action);
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "Planning complete — activating servo mode");
-            manip_phase_ = ManipPhase::ACTIVATING_SERVO;
-            in_flight_   = true;
-            pending_ = std::async(std::launch::async,
-                                  &ManipulationExecutive::activate_camera_mode,
-                                  this, "servo", true);
+            if (manip_type_ == ManipType::PLACE) {
+                RCLCPP_INFO(this->get_logger(),
+                            "Planning complete — waiting %.1f s before safe position",
+                            place_wait_s_);
+                manip_phase_ = ManipPhase::WAITING_PLACE;
+                in_flight_   = true;
+                const double wait_s = place_wait_s_;
+                pending_ = std::async(std::launch::async, [wait_s]() -> bool {
+                    std::this_thread::sleep_for(
+                        std::chrono::duration<double>(wait_s));
+                    return true;
+                });
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Planning complete — activating servo mode");
+                manip_phase_ = ManipPhase::ACTIVATING_SERVO;
+                in_flight_   = true;
+                pending_ = std::async(std::launch::async,
+                                      &ManipulationExecutive::activate_camera_mode,
+                                      this, "servo", true);
+            }
         }
         action->set_running();
         return;
     }
+
+    // ── WAITING_PLACE ─────────────────────────────────────────────────────────
+    if (manip_phase_ == ManipPhase::WAITING_PLACE) {
+        if (pending_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            in_flight_ = false;
+            pending_.get(); // always true
+            RCLCPP_INFO(this->get_logger(), "Wait complete — planning safe position");
+            manip_phase_ = ManipPhase::PLANNING_SAFE;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::run_planning,
+                                  this, "safe");
+        }
+        action->set_running();
+        return;
+    }
+
 
     // ── ACTIVATING_SERVO ──────────────────────────────────────────────────────
     if (manip_phase_ == ManipPhase::ACTIVATING_SERVO) {
@@ -200,12 +265,22 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 fail_manip(action);
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "Servo complete — planning safe position");
-            manip_phase_ = ManipPhase::PLANNING_SAFE;
-            in_flight_   = true;
-            pending_ = std::async(std::launch::async,
-                                  &ManipulationExecutive::run_planning,
-                                  this, "safe");
+            if (manip_type_ == ManipType::PICK_BASE) {
+                // pick_base ends here — no safe-home planning needed
+                RCLCPP_INFO(this->get_logger(), "Servo complete — pick_base SUCCESS");
+                pick_base_condition_->set(false);
+                manip_phase_    = ManipPhase::IDLE;
+                manip_terminal_ = true;
+                action->set_success();
+                return;
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Servo complete — planning safe position");
+                manip_phase_ = ManipPhase::PLANNING_SAFE;
+                in_flight_   = true;
+                pending_ = std::async(std::launch::async,
+                                      &ManipulationExecutive::run_planning,
+                                      this, "safe");
+            }
         }
         action->set_running();
         return;
@@ -221,12 +296,12 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "Manipulation complete — SUCCESS");
-            bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)
-                                  ? pick_up_condition_ : place_condition_;
+            bt::Condition* cond = (manip_type_ == ManipType::PICK_UP) ? pick_up_condition_ : place_condition_;
             cond->set(false);
             manip_phase_    = ManipPhase::IDLE;
             manip_terminal_ = true;
             action->set_success();
+            return;
         }
         action->set_running();
         return;
@@ -242,8 +317,9 @@ void ManipulationExecutive::reset_manip()
 
 void ManipulationExecutive::fail_manip(bt::Action* action)
 {
-    bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)
-                          ? pick_up_condition_ : place_condition_;
+    bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)    ? pick_up_condition_   :
+                          (manip_type_ == ManipType::PLACE)       ? place_condition_     :
+                                                                    pick_base_condition_;
     cond->set(false);
     manip_phase_    = ManipPhase::IDLE;
     manip_terminal_ = true;
@@ -307,7 +383,7 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
     nlohmann::json set_cmd    = {{"cmd", "mode"},   {"mode", mode}};
     nlohmann::json status_cmd = {{"cmd", "status"}};
 
-    constexpr int MAX_POLLS        = 60;   // 60 × 500 ms = 30 s timeout
+    constexpr int MAX_POLLS        = 120;   // 60 × 500 ms = 30 s timeout
     constexpr int POLL_INTERVAL_MS = 500;
 
     ws_round_trip(set_cmd.dump());  // fire mode command; confirm via status polls
@@ -362,26 +438,76 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
 // ─────────────────────────────────────────────────────────────────────────────
 // run_planning — runs in std::async thread
 //
-// TODO: replace with actual planning service call.
-//       pose_type: "inspection" | "placement" | "safe"
-//       Uses object_type_ and target_machine_ from node state.
+// Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
+// The planner publishes PLANNING then EXECUTING as intermediate states, and either
+// SUCCESS or ERROR as terminal states. No timeout is applied — the planner is
+// expected to always emit a terminal state.
+// pose_type: "inspection" | "placement" | "safe" | "home_offset"
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_planning(const std::string& pose_type)
 {
+    // Capture shared members on the calling thread before the async thread reads them
+    const std::string object_type    = object_type_;
+    const std::string target_machine = target_machine_;
+
+    // ── Map pose_type + object_type → planning command ───────────────────────
+    std::string cmd;
+    if (pose_type == "inspection") {
+        if (object_type == "well_plate") {
+            cmd = "plan_wellplate";
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                         "run_planning: unsupported object_type '%s' for inspection — aborting",
+                         object_type.c_str());
+            return false;
+        }
+    } else if (pose_type == "placement") {
+        if (target_machine == "ot2") {
+            cmd = "plan_april_1";
+        } else if (target_machine == "shaker") {
+            cmd = "plan_april_2";
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                         "run_planning: target_machine '%s' does not exist - aborting.",
+                         target_machine.c_str());
+            return false;
+        }
+    } else if (pose_type == "safe") {
+        cmd = "plan_home";
+    } else if (pose_type == "home_offset") {
+        cmd = "plan_home_offset";
+    } else {
+        RCLCPP_ERROR(this->get_logger(),
+                     "run_planning: unknown pose_type '%s' — aborting",
+                     pose_type.c_str());
+        return false;
+    }
+
     RCLCPP_INFO(this->get_logger(),
-                "Planning [PLACEHOLDER] pose_type=%s object=%s target=%s — waiting %.1fs",
-                pose_type.c_str(), object_type_.c_str(), target_machine_.c_str(),
-                planning_placeholder_s_);
+                "Planning: pose_type=%s object=%s target=%s → /planning_command=%s",
+                pose_type.c_str(), object_type.c_str(), target_machine.c_str(), cmd.c_str());
 
-    // TODO: call planning service
-    //   Request: { pose_type, object_type_, target_machine_ }
-    //   Block until service returns success/failure
+    // ── Reset result before publishing (prevents stale result from prior plan) ─
+    planning_result_.store(0);
 
-    std::this_thread::sleep_for(
-        std::chrono::duration<double>(planning_placeholder_s_));
+    // ── Publish command ───────────────────────────────────────────────────────
+    std_msgs::msg::String cmd_msg;
+    cmd_msg.data = cmd;
+    planning_cmd_pub_->publish(cmd_msg);
 
-    return true;
+    // ── Wait for terminal state (SUCCESS=1 or ERROR=2) ────────────────────────
+    // The planner publishes PLANNING → EXECUTING → SUCCESS|ERROR. We wait here
+    // with no timeout; the planner always emits a terminal state.
+    constexpr int POLL_MS = 100;
+    while (rclcpp::ok()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(POLL_MS));
+        int result = planning_result_.load();
+        if (result == 1) return true;   // SUCCESS
+        if (result == 2) return false;  // ERROR
+    }
+
+    return false;  // rclcpp shutdown
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

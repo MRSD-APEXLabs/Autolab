@@ -1,6 +1,0 @@
-msg/Odometry.idl
-msg/Odometry.msg
-msg/TrajectoryXYZVYaw.idl
-msg/TrajectoryXYZVYaw.msg
-msg/WaypointXYZVYaw.idl
-msg/WaypointXYZVYaw.msg

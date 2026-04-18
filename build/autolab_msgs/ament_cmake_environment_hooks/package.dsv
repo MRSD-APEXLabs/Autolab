@@ -1,4 +1,0 @@
-source;share/autolab_msgs/local_setup.bash
-source;share/autolab_msgs/local_setup.dsv
-source;share/autolab_msgs/local_setup.sh
-source;share/autolab_msgs/local_setup.zsh
