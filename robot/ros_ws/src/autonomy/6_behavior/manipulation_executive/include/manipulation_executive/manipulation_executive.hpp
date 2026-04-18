@@ -16,7 +16,7 @@ class ManipulationExecutive : public rclcpp::Node {
 public:
     ManipulationExecutive();
 
-    enum class ManipType  { PICK_UP, PLACE, PICK_BASE };
+    enum class ManipType  { PICK_UP, PLACE, PICK_BASE, PICK_WELLPLATE };
     enum class ManipPhase {
         IDLE,
         ACTIVATING_INSPECT,
@@ -31,11 +31,13 @@ private:
     bt::Condition* pick_up_condition_;
     bt::Condition* place_condition_;
     bt::Condition* pick_base_condition_;
+    bt::Condition* pick_wellplate_condition_;
     std::vector<bt::Condition*> conditions_;
 
     bt::Action* pick_up_action_;
     bt::Action* place_action_;
     bt::Action* pick_base_action_;
+    bt::Action* pick_wellplate_action_;
     std::vector<bt::Action*> actions_;
 
     // ── Manipulation state (shared; only one action active at a time) ──────────
