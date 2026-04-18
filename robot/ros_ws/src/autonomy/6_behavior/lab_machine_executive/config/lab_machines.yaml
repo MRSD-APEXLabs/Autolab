@@ -1,6 +1,8 @@
-lab_machine_executive:
-  ros__parameters:
-    ot2_base_url: "http://192.168.1.100:8000"
-    ot2_host: "192.168.1.100"
-    shaker_base_url: "http://shaker.autolab"
-    shaker_endpoint: "/pwm_control/"
+robot_1:
+  behavior:
+    lab_machine_executive:
+      ros__parameters:
+        ot2_base_url: "http://192.168.10.4:8000"
+        ot2_host: "192.168.10.9"
+        shaker_base_url: "http://192.168.10.14"
+        shaker_endpoint: "/pwm_control/"

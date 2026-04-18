@@ -34,8 +34,9 @@ services:
       fi;
       sleep infinity"
     # assumes you're connected to work internet, so creates a network to isolate from other developers on your work internet
-    networks:
-      - autolab_network
+#    networks:
+#      - autolab_network
+    network_mode: host
     # allow scaling multiple robots on the same machine
     ports:
       # for ssh, starting from 2223-2243 on the host port all map to 22 in the container. Assumes no more than 21 robots

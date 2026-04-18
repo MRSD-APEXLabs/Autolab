@@ -71,7 +71,8 @@ source /opt/ros/humble/setup.bash
 sws # source the ROS2 workspace by default
 
 # https://wiki.psuter.ch/doku.php?id=get_docker_container_name_from_within_the_container
-container_name=$(host $(host $(hostname) | awk '{print $NF}') | awk '{print $NF}' | awk -F . '{print $1}')
+container_name="robot-1"
+#$(host $(host $(hostname) | awk '{print $NF}') | awk '{print $NF}' | awk -F . '{print $1}')
 
 # remove the prefix and convert dashes to underscores
 export ROBOT_NAME=$(echo "$container_name" | sed 's/.*\(robot-[0-9]*\)$/\1/' | sed 's#-#_#')
