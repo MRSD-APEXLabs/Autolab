@@ -34,20 +34,24 @@ ManipulationExecutive::ManipulationExecutive()
                 camera_edge_host_.c_str(), camera_edge_port_);
 
     // BT conditions
-    pick_up_condition_   = new bt::Condition("Pick Up Commanded",   this);
-    place_condition_     = new bt::Condition("Place Commanded",     this);
-    pick_base_condition_ = new bt::Condition("Pick Base Commanded", this);
+    pick_up_condition_       = new bt::Condition("Pick Up Commanded",        this);
+    place_condition_         = new bt::Condition("Place Commanded",          this);
+    pick_base_condition_     = new bt::Condition("Pick Base Commanded",      this);
+    pick_wellplate_condition_= new bt::Condition("Pick Wellplate Commanded", this);
     conditions_.push_back(pick_up_condition_);
     conditions_.push_back(place_condition_);
     conditions_.push_back(pick_base_condition_);
+    conditions_.push_back(pick_wellplate_condition_);
 
     // BT actions
-    pick_up_action_   = new bt::Action("Pick Up Object",   this);
-    place_action_     = new bt::Action("Place Object",     this);
-    pick_base_action_ = new bt::Action("Pick Base Object", this);
+    pick_up_action_        = new bt::Action("Pick Up Object",    this);
+    place_action_          = new bt::Action("Place Object",      this);
+    pick_base_action_      = new bt::Action("Pick Base Object",  this);
+    pick_wellplate_action_ = new bt::Action("Pick Wellplate",    this);
     actions_.push_back(pick_up_action_);
     actions_.push_back(place_action_);
     actions_.push_back(pick_base_action_);
+    actions_.push_back(pick_wellplate_action_);
 
     // Phase publisher — monitor with: ros2 topic echo /behavior/manipulation_phase
     phase_pub_ = this->create_publisher<std_msgs::msg::String>("manipulation_phase", 10);
@@ -94,19 +98,31 @@ void ManipulationExecutive::command_callback(
     if (msg->type == "pick_up") {
         pick_up_condition_->set(true);
         place_condition_->set(false);
+        pick_base_condition_->set(false);
+        pick_wellplate_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received pick_up command (object: %s)",
                     object_type_.c_str());
     } else if (msg->type == "place") {
         place_condition_->set(true);
         pick_up_condition_->set(false);
+        pick_base_condition_->set(false);
+        pick_wellplate_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received place command (object: %s → machine: %s)",
                     object_type_.c_str(), target_machine_.c_str());
     } else if (msg->type == "pick_base") {
         pick_base_condition_->set(true);
         pick_up_condition_->set(false);
         place_condition_->set(false);
+        pick_wellplate_condition_->set(false);
         RCLCPP_INFO(this->get_logger(), "Received pick_base command (object: %s)",
                     object_type_.c_str());
+    } else if (msg->type == "pick_wellplate") {
+        pick_wellplate_condition_->set(true);
+        pick_up_condition_->set(false);
+        place_condition_->set(false);
+        pick_base_condition_->set(false);
+        RCLCPP_INFO(this->get_logger(), "Received pick_wellplate command (machine: %s)",
+                    target_machine_.c_str());
     } else {
         RCLCPP_WARN(this->get_logger(), "Unknown manipulation type '%s' — ignoring",
                     msg->type.c_str());
@@ -132,9 +148,10 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
 
 void ManipulationExecutive::timer_callback()
 {
-    tick_manip(pick_up_action_,   ManipType::PICK_UP);
-    tick_manip(place_action_,     ManipType::PLACE);
-    tick_manip(pick_base_action_, ManipType::PICK_BASE);
+    tick_manip(pick_up_action_,        ManipType::PICK_UP);
+    tick_manip(place_action_,          ManipType::PLACE);
+    tick_manip(pick_base_action_,      ManipType::PICK_BASE);
+    tick_manip(pick_wellplate_action_, ManipType::PICK_WELLPLATE);
 
     // Publish current phase for monitoring
     std_msgs::msg::String phase_msg;
@@ -161,8 +178,11 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
     // ── New activation ────────────────────────────────────────────────────────
     if (action->active_has_changed()) {
         manip_type_ = type;
-        const char* type_name = (type == ManipType::PICK_UP)   ? "pick_up"   :
-                                (type == ManipType::PLACE)      ? "place"     : "pick_base";
+        const char* type_name =
+            (type == ManipType::PICK_UP)        ? "pick_up"        :
+            (type == ManipType::PLACE)          ? "place"          :
+            (type == ManipType::PICK_BASE)      ? "pick_base"      :
+                                                  "pick_wellplate";
         RCLCPP_INFO(this->get_logger(), "Manipulation activated (%s)", type_name);
 
         if (type == ManipType::PICK_BASE) {
@@ -172,6 +192,13 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::run_planning,
                                   this, "home_offset");
+        } else if (type == ManipType::PICK_WELLPLATE) {
+            // pick_wellplate: plan to april tag (via target_machine), then servo, then safe home
+            manip_phase_ = ManipPhase::PLANNING;
+            in_flight_   = true;
+            pending_ = std::async(std::launch::async,
+                                  &ManipulationExecutive::run_planning,
+                                  this, "wellplate_placement");
         } else {
             manip_phase_ = ManipPhase::ACTIVATING_INSPECT;
             in_flight_   = true;
@@ -296,7 +323,11 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "Manipulation complete — SUCCESS");
-            bt::Condition* cond = (manip_type_ == ManipType::PICK_UP) ? pick_up_condition_ : place_condition_;
+            bt::Condition* cond =
+                (manip_type_ == ManipType::PICK_UP)         ? pick_up_condition_       :
+                (manip_type_ == ManipType::PLACE)            ? place_condition_         :
+                (manip_type_ == ManipType::PICK_WELLPLATE)   ? pick_wellplate_condition_:
+                                                               pick_base_condition_;
             cond->set(false);
             manip_phase_    = ManipPhase::IDLE;
             manip_terminal_ = true;
@@ -317,9 +348,11 @@ void ManipulationExecutive::reset_manip()
 
 void ManipulationExecutive::fail_manip(bt::Action* action)
 {
-    bt::Condition* cond = (manip_type_ == ManipType::PICK_UP)    ? pick_up_condition_   :
-                          (manip_type_ == ManipType::PLACE)       ? place_condition_     :
-                                                                    pick_base_condition_;
+    bt::Condition* cond =
+        (manip_type_ == ManipType::PICK_UP)       ? pick_up_condition_       :
+        (manip_type_ == ManipType::PLACE)          ? place_condition_         :
+        (manip_type_ == ManipType::PICK_BASE)      ? pick_base_condition_     :
+                                                     pick_wellplate_condition_;
     cond->set(false);
     manip_phase_    = ManipPhase::IDLE;
     manip_terminal_ = true;
@@ -470,6 +503,17 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
         } else {
             RCLCPP_ERROR(this->get_logger(),
                          "run_planning: target_machine '%s' does not exist - aborting.",
+                         target_machine.c_str());
+            return false;
+        }
+    } else if (pose_type == "wellplate_placement") {
+        if (target_machine == "ot2") {
+            cmd = "plan_april_1";
+        } else if (target_machine == "shaker") {
+            cmd = "plan_april_2";
+        } else {
+            RCLCPP_ERROR(this->get_logger(),
+                         "run_planning: target_machine '%s' does not exist for wellplate_placement — aborting",
                          target_machine.c_str());
             return false;
         }
