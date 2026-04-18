@@ -98,6 +98,22 @@ RUN apt update -y && apt install -y \
   ros-humble-rosbag2-storage-mcap \
   ros-humble-xacro \
   ros-humble-diagnostic-updater \
+  ros-humble-rosidl-default-generators \
+  ros-humble-ament-lint-auto \
+  libilmbase-dev \
+  libopencv-dev \
+  ros-humble-navigation2 \
+  ros-humble-nav2-bringup \
+  libpcl-dev \
+  ros-humble-image-geometry \
+  ros-humble-pcl-conversions \
+  ros-humble-pcl-ros \
+  ros-humble-ros2cli \
+  ros-humble-ros2launch \
+  ros-humble-ros2topic \
+  ros-humble-joint-state-publisher \
+  ros-humble-robot-state-publisher \
+  ros-humble-moveit-ros-planning \
   # ros-humble-rtabmap-ros \
   ros-humble-vision-msgs \
   # ros-humble-nmea-msgs \
@@ -105,6 +121,7 @@ RUN apt update -y && apt install -y \
   # ros-humble-robot-localization \
   # ros-humble-backward-ros \
   # ros-humble-zed-msgs \
+  ros-humble-moveit-ros-perception \
   libcgal-dev \
   python3-colcon-common-extensions \
   libcurl4-openssl-dev \
@@ -163,7 +180,8 @@ RUN pip3 install \
   typeguard==2.13.3 \
   onnx \
   tensorrt \
-  opencv-python
+  opencv-python \
+  websockets
 
 # Override install newer openvdb 9.1.0 for compatibility with Ubuntu 22.04  https://bugs.launchpad.net/bugs/1970108
 RUN apt remove -y libopenvdb*; \

@@ -44,6 +44,9 @@
 			(Place Commanded)
 			[Place Object]
 		->
+			(Pick Base Commanded)
+			[Pick Base Object]
+		->
 			(Autonomously Explore Commanded)
 			->
 				<!>

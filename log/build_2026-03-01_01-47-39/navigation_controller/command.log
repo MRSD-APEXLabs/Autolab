@@ -1,1 +1,0 @@
-Invoking command in '/home/ksriniv2/Autolab/build/navigation_controller': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy DEBUGINFOD_URLS=https://debuginfod.ubuntu.com /usr/bin/cmake /home/ksriniv2/Autolab/robot/ros_ws/src/autonomy/1_navigation/navigation_controller -DCMAKE_INSTALL_PREFIX=/home/ksriniv2/Autolab/install/navigation_controller

@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <future>
 #include <string>
 #include <vector>
@@ -15,11 +16,12 @@ class ManipulationExecutive : public rclcpp::Node {
 public:
     ManipulationExecutive();
 
-    enum class ManipType  { PICK_UP, PLACE };
+    enum class ManipType  { PICK_UP, PLACE, PICK_BASE };
     enum class ManipPhase {
         IDLE,
         ACTIVATING_INSPECT,
         PLANNING,
+        WAITING_PLACE,
         ACTIVATING_SERVO,
         PLANNING_SAFE,
     };
@@ -28,10 +30,12 @@ private:
     // ── BT nodes ──────────────────────────────────────────────────────────────
     bt::Condition* pick_up_condition_;
     bt::Condition* place_condition_;
+    bt::Condition* pick_base_condition_;
     std::vector<bt::Condition*> conditions_;
 
     bt::Action* pick_up_action_;
     bt::Action* place_action_;
+    bt::Action* pick_base_action_;
     std::vector<bt::Action*> actions_;
 
     // ── Manipulation state (shared; only one action active at a time) ──────────
@@ -48,11 +52,15 @@ private:
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string camera_edge_host_;
     int         camera_edge_port_;
-    double      planning_placeholder_s_;  // seconds to simulate planning
+    double      place_wait_s_;
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
+    // 0=unknown/waiting, 1=SUCCESS, 2=ERROR
+    std::atomic<int> planning_result_{0};
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr planning_state_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -70,7 +78,8 @@ private:
     // wait_complete=true:  return true once mode returns to idle (servo — wait for finish).
     bool activate_camera_mode(const std::string& mode, bool wait_complete);
 
-    // Placeholder planning: logs intent and sleeps for planning_placeholder_s_.
+    // Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
+    // pose_type: "inspection" | "placement" | "safe" | "home_offset"
     bool run_planning(const std::string& pose_type);
 
     // ── WebSocket helper (synchronous, blocking) ───────────────────────────────

@@ -75,7 +75,24 @@ container_name=$(host $(host $(hostname) | awk '{print $NF}') | awk '{print $NF}
 
 # remove the prefix and convert dashes to underscores
 export ROBOT_NAME=$(echo "$container_name" | sed 's/.*\(robot-[0-9]*\)$/\1/' | sed 's#-#_#')
+
+# fallback: DNS lookup chain failed — derive from hostname directly
+if [ -z "$ROBOT_NAME" ]; then
+    _num=$(hostname | awk -F'-' '{print $2}')
+    _num=$((_num + 0)) 2>/dev/null || _num=0
+    if [[ "$_num" -gt 0 ]]; then
+        export ROBOT_NAME="robot_$_num"
+    else
+        export ROBOT_NAME=$(hostname)
+    fi
+    unset _num
+fi
+
 export ROS_DOMAIN_ID=$(echo "$ROBOT_NAME" | awk -F'_' '{print $NF}')
+# if ROS_DOMAIN_ID is not a number (e.g. hostname like "autolab"), default to 0
+if ! [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]]; then
+    export ROS_DOMAIN_ID=0
+fi
 
 # case: will be null on real world robot
 if [ "$ROBOT_NAME" == "null" ] || echo "$ROBOT_NAME" | grep -q "refused"; then

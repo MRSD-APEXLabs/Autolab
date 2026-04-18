@@ -39,6 +39,31 @@ MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 DISCOVERY_INTERVAL = float(os.environ.get("ROS2MQTT_DISCOVERY_INTERVAL", "10.0"))
 
+# Message types to never forward — either large binary blobs (serialising them
+# to JSON is extremely slow) or high-frequency control-path types whose DDS
+# delivery overhead interferes with the real consumers.
+_SKIP_MSG_TYPES = {
+    # Large binary payloads
+    "sensor_msgs/msg/Image",
+    "sensor_msgs/msg/CompressedImage",
+    "sensor_msgs/msg/PointCloud2",
+    "sensor_msgs/msg/PointCloud",
+    # High-frequency sensor / control streams
+    "sensor_msgs/msg/JointState",
+    "sensor_msgs/msg/LaserScan",
+    "sensor_msgs/msg/Imu",
+    "sensor_msgs/msg/MagneticField",
+    "sensor_msgs/msg/NavSatFix",
+    "nav_msgs/msg/Odometry",
+    # TF trees — very high frequency, large, never useful over MQTT
+    "tf2_msgs/msg/TFMessage",
+    # Trajectory / path types that flood at control rate
+    "trajectory_msgs/msg/JointTrajectory",
+    "trajectory_msgs/msg/JointTrajectoryPoint",
+    "control_msgs/msg/JointTrajectoryControllerState",
+    "control_msgs/msg/FollowJointTrajectoryActionFeedback",
+}
+
 
 class Ros2MqttBridge(Node):
     def __init__(self, mqtt_client: mqtt.Client) -> None:
@@ -64,13 +89,18 @@ class Ros2MqttBridge(Node):
     def _discover_and_subscribe(self) -> None:
         for topic_name, type_list in self.get_topic_names_and_types():
             with self._lock:
-                if topic_name in self._sub_map or "stereo" in topic_name:
+                if topic_name in self._sub_map:
                     continue
+            if "stereo" in topic_name or topic_name in ("/tf", "/tf_static"):
+                continue
 
             if not type_list:
                 continue
 
             msg_type_str = type_list[0]
+            if msg_type_str in _SKIP_MSG_TYPES:
+                continue
+
             try:
                 msg_type = get_message(msg_type_str)
             except Exception as exc:

@@ -1,0 +1,17 @@
+/**:
+  ros__parameters:
+    path_constraints:
+      - name: "pointing_down"
+        orientation_constraints:
+          - header:
+              frame_id: "world"       # 1. CHANGE THIS to your fixed base frame name
+            link_name: "end_effector_p4_1"          # 2. CHANGE THIS to your end-effector frame name
+            orientation:
+              x: 0.0                      # Represents a perfectly vertical down tilt (W=1) 
+              y: 0.0                      # OR map it via quaternion to match your actual URDF
+              z: 1.0                      # orientation if your EE's rest state is different.
+              w: 0.0
+            absolute_x_axis_tolerance: 0.1 # Strictly limits Roll (X tilt)
+            absolute_y_axis_tolerance: 0.1 # Strictly limits Pitch (Y tilt)
+            absolute_z_axis_tolerance: M_PI # Allows free Yaw (spinning around the vertical axis)
+            weight: 1.0

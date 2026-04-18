@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <xacro:arg name="robot_ip" default=""/>
+    <xacro:arg name="ros2_control_plugin" default="uf_robot_hardware/UFRobotSystemHardware"/>
+
+    <xacro:include filename="$(find xarm_description)/urdf/xarm6/xarm6.ros2_control.xacro" />
+
+    <xacro:xarm6_ros2_control 
+        prefix="" 
+        robot_ip="$(arg robot_ip)" 
+        ros2_control_plugin="$(arg ros2_control_plugin)" />
+</robot>

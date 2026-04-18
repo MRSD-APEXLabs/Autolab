@@ -1,0 +1,60 @@
+xarm6:
+  default_planner_config: RRTConnect
+  planner_configs:
+    - SBL
+    - EST
+    - LBKPIECE
+    - BKPIECE
+    - KPIECE
+    - RRT
+    - RRTConnect
+    - RRTstar
+    - TRRT
+    - PRM
+    - PRMstar
+    - FMT
+    - BFMT
+    - PDST
+    - STRIDE
+    - BiTRRT
+    - LBTRRT
+    - BiEST
+    - ProjEST
+    - LazyPRM
+    - LazyPRMstar
+    - SPARS
+    - SPARStwo
+
+demo_arm_bot:
+  default_planner_config: RRTConnect
+  publish_planning_samples: true
+  planner_configs:
+    - SBL
+    - EST
+    - LBKPIECE
+    - BKPIECE
+    - KPIECE
+    - RRT
+    - RRTConnect
+    - RRTstar
+    - TRRT
+    - PRM
+    - PRMstar
+    - BITstar
+    - InformedRRTstar 
+  RRTConnect:
+    type: geometric::RRTConnect
+    range: 0.015
+    num_planning_attempts: 100
+    goal_bias: 0.3
+    seed: 42
+  ## Any planning path longer than this (relative to world) will be checked for collisions
+  # Update this in your yaml
+  longest_valid_segment_fraction: 0.002  # Make this smaller for tighter spaces
+  # ## Used for projection-based planners like KPIECE
+  # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11, Revolute_12)  # Example: project to 3D space of these joints
+  enforce_joint_model_state_space: true # Helps with constraints
+  enforce_constrained_state_space: true
+  # enforce_constrained_state_space: true  
+  simplify_solutions: true
+  interpolation_type: open_rave # Keeps it human-like
