@@ -49,7 +49,7 @@
 #include <iomanip>
 #include <map>
 
-static constexpr double ARM_PLANNING_TIME_SEC = 40.0;
+static constexpr double ARM_PLANNING_TIME_SEC = 80.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
 static constexpr int MAX_PLANNING_ATTEMPTS = 100;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
@@ -217,16 +217,16 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
 
     // ── Configure planner ────────────────────────────────────
     arm_group.setPlanningPipelineId("ompl");
-    arm_group.setPlannerId("PRMkConfigDefault");
+    arm_group.setPlannerId("RRTConnect");
     arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
-    arm_group.setNumPlanningAttempts(50);
+    arm_group.setNumPlanningAttempts(40);
     arm_group.setPoseReferenceFrame("world");
     arm_group.setPathConstraints(make_ee_down_constraint());
     arm_group.setStartStateToCurrentState();
     arm_group.setPoseTarget(target_pose);
-    arm_group.setWorkspace(
-        -0.04, -1.5, 0.074,
-        1, 1.5, 1.5);
+    // arm_group.setWorkspace(
+    //     0.0, 0.0, 1.0,
+    //     1, 1.5, 1.5);
     arm_group.setGoalPositionTolerance(0.01);
     arm_group.setGoalOrientationTolerance(0.05);
     // arm_group.allowReplanning(true);
@@ -512,6 +512,26 @@ int main(int argc, char *argv[])
     target_point.y = 0.5;
     target_point.z = 0.0;
 
+    // arm_group.setPlanningPipelineId("ompl");
+    // arm_group.setPlannerId("RRTConnect");
+    // arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
+    // arm_group.setNumPlanningAttempts(40);
+    // arm_group.setPoseReferenceFrame("world");
+    // arm_group.setPathConstraints(make_ee_down_constraint());
+    // arm_group.setStartStateToCurrentState();
+    // // arm_group.setPoseTarget(target_pose);
+    // arm_group.setWorkspace(
+    //     0.0, 0.0, 1.0,
+    //     1, 1.5, 1.5);
+    // arm_group.setGoalPositionTolerance(0.01);
+    // arm_group.setGoalOrientationTolerance(0.05);
+    // arm_group.allowReplanning(true);
+
+    // Adjust speed based on task type
+    // double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
+    // arm_group.setMaxVelocityScalingFactor(velocity_scaling);
+    // arm_group.setMaxAccelerationScalingFactor(velocity_scaling);
+
     auto finish_plan = [&](const std::optional<moveit::planning_interface::MoveGroupInterface::Plan>& opt) {
         if (opt.has_value()) {
             publish_state("SUCCESS");
@@ -588,7 +608,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.15));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.25));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
             publish_target_marker(node, target_position);

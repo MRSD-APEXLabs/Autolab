@@ -37,7 +37,7 @@ planner_configs:
   RRTstar:
       type: geometric::RRTstar
       range: 0.05            # Smaller step size for better precision
-      goal_bias: 0.1         # Increase focus on the goal
+      goal_bias: 0.15         # Increase focus on the goal
       # delay_collision_checking: 1
       # Add these for optimization:
       optimization_objective: PathLength # Forces RRT* to minimize distance
@@ -83,11 +83,13 @@ demo_arm_bot:
     - InformedRRTstar 
   ## Any planning path longer than this (relative to world) will be checked for collisions
   # Update this in your yaml
-  longest_valid_segment_fraction: 0.001  # Make this smaller for tighter spaces
+  longest_valid_segment_fraction: 0.005  # Make this smaller for tighter spaces
   # ## Used for projection-based planners like KPIECE
-  # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11, Revolute_12)  # Example: project to 3D space of these joints
-  enforce_joint_model_state_space: true # Helps with constraints
+  # projection_evaluator: joints(Revolute_9,Revolute_10)  # Example: project to 3D space of these joints
+  # enforce_joint_model_state_space: true # Helps with constraints
+  # constraint_approximation_method: PROJECT 
   enforce_constrained_state_space: true
   # enforce_constrained_state_space: true  
   simplify_solutions: true
+  projection_evaluator: joints(Revolute_9,Revolute_10) 
   interpolation_type: open_rave # Keeps it human-like
