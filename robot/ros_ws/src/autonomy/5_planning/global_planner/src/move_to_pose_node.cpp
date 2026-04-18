@@ -55,6 +55,9 @@ static constexpr int MAX_PLANNING_ATTEMPTS = 100;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
 static constexpr int APRIL_TAG_WAIT_TIMEOUT_SEC = 10;
 static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
+static constexpr double WELLPLATE_STALE_SEC = 1.0;
+static constexpr int WELLPLATE_WAIT_TIMEOUT_SEC = 10;
+static constexpr int WELLPLATE_WAIT_STEP_MS = 100;
 
 struct AprilTagEntry {
     geometry_msgs::msg::Point position;
@@ -64,9 +67,12 @@ static std::map<int, AprilTagEntry> april_tags;
 static std::mutex april_tags_mutex;
 static int marker_id = 0;
 
-double wellplate_tag_x = 0.0;
-double wellplate_tag_y = 0.0;
-double wellplate_tag_z = 0.0;
+struct WellplateEntry {
+    geometry_msgs::msg::Point position;
+    rclcpp::Time stamp;
+};
+static std::optional<WellplateEntry> wellplate_detection;
+static std::mutex wellplate_mutex;
 
 namespace defaults
 {
@@ -366,27 +372,6 @@ void publish_target_marker(
                 pose.position.x, pose.position.y, pose.position.z);
 }
 
-void wellplate_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
-{
-    for (const auto &marker : msg->markers)
-    {
-        // Skip markers that are not being added
-        if (marker.action != visualization_msgs::msg::Marker::ADD)
-            continue;
-
-        // Process wellplate markers
-        if (marker.ns == "wellplates")
-        {
-            wellplate_tag_x = marker.pose.position.x;
-            wellplate_tag_y = marker.pose.position.y;
-            wellplate_tag_z = marker.pose.position.z;
-
-            // RCLCPP_INFO(this->get_logger(),
-            //             "Wellplate Marker ID: %d | Position -> x: %.3f, y: %.3f, z: %.3f",
-            //             marker.id, wellplate_tag_x, wellplate_tag_y, wellplate_tag_z);
-        }
-    }
-}
 
 static std::mutex cmd_mutex;
 static std::string received_command = "idle";
@@ -459,7 +444,6 @@ int main(int argc, char *argv[])
             {
                 if (marker.action != visualization_msgs::msg::Marker::ADD)
                     continue;
-                // TODO: Investigate this. marker.id appears to actually be 0 indexed.
                 april_tags[marker.id] = {marker.pose.position, node->now()};
             }
         });
@@ -468,7 +452,17 @@ int main(int argc, char *argv[])
     auto wellplate_subscription = node->create_subscription<visualization_msgs::msg::MarkerArray>(
         "/inspect/wellplates",
         qos,
-        wellplate_callback);
+        [&node](const visualization_msgs::msg::MarkerArray::SharedPtr msg)
+        {
+            std::lock_guard<std::mutex> lock(wellplate_mutex);
+            for (const auto &marker : msg->markers)
+            {
+                if (marker.action != visualization_msgs::msg::Marker::ADD)
+                    continue;
+                if (marker.ns == "wellplates")
+                    wellplate_detection = WellplateEntry{marker.pose.position, node->now()};
+            }
+        });
 
     // 1. Define your custom QoS profile
     rclcpp::QoS pointcloud_qos(1);
@@ -631,11 +625,35 @@ int main(int argc, char *argv[])
         }
         else if (cmd == "plan_wellplate")
         {
-
+            // Wait up to WELLPLATE_WAIT_TIMEOUT_SEC for a fresh detection
             geometry_msgs::msg::Point wellplate_point;
-            wellplate_point.x = wellplate_tag_x;
-            wellplate_point.y = wellplate_tag_y;
-            wellplate_point.z = wellplate_tag_z;
+            bool found = false;
+            for (int elapsed_ms = 0;
+                 elapsed_ms < WELLPLATE_WAIT_TIMEOUT_SEC * 1000;
+                 elapsed_ms += WELLPLATE_WAIT_STEP_MS)
+            {
+                {
+                    const rclcpp::Time now = node->now();
+                    std::lock_guard<std::mutex> lock(wellplate_mutex);
+                    if (wellplate_detection.has_value() &&
+                        (now - wellplate_detection->stamp).seconds() <= WELLPLATE_STALE_SEC)
+                    {
+                        wellplate_point = wellplate_detection->position;
+                        found = true;
+                    }
+                }
+                if (found) break;
+                rclcpp::sleep_for(std::chrono::milliseconds(WELLPLATE_WAIT_STEP_MS));
+            }
+
+            if (!found)
+            {
+                RCLCPP_ERROR(node->get_logger(),
+                             "Wellplate not found or stale after %ds — aborting.",
+                             WELLPLATE_WAIT_TIMEOUT_SEC);
+                finish_plan(std::nullopt);
+                continue;
+            }
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
