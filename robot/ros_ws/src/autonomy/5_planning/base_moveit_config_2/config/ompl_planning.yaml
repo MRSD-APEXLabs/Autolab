@@ -34,10 +34,14 @@ planner_configs:
     type: geometric::RRTConnect
     range: 0.05  # Max step size in joint space (approx 0.05 rad)
     solve_constrained_states: true
+    goal_bias: 0.5
+    constraint_approximation_method: PROJECT
+     # delay_collision_checking: 1  # Check collisions only after reaching goal, for speed (optional)
+     # Add these for better handling of constraints:
   RRTstar:
       type: geometric::RRTstar
       range: 0.05            # Smaller step size for better precision
-      goal_bias: 0.15         # Increase focus on the goal
+      goal_bias: 0.5         # Increase focus on the goal
       # delay_collision_checking: 1
       # Add these for optimization:
       optimization_objective: PathLength # Forces RRT* to minimize distance
@@ -48,8 +52,12 @@ planner_configs:
   PRM:
     type: geometric::PRM
     max_nearest_neighbors: 10
+    seed: 42            # Forces the same random samples every time
+    multi_query: true   # Keeps the roadmap for the next plan
   PRMstar:
     type: geometric::PRMstar
+    seed: 42            # Keep seed consistent across planners
+    multi_query: true
   FMT:
     type: geometric::FMT
     num_samples: 1000
@@ -65,7 +73,7 @@ planner_configs:
 
 # Replacement for your specific robot group
 demo_arm_bot:
-  default_planner_config: RRTConnect
+  default_planner_config: RRTstar
   publish_planning_samples: true
   planner_configs:
     - SBL
@@ -81,15 +89,15 @@ demo_arm_bot:
     - PRMstar
     - BITstar
     - InformedRRTstar 
+    - BiTRRT
   ## Any planning path longer than this (relative to world) will be checked for collisions
   # Update this in your yaml
-  longest_valid_segment_fraction: 0.005  # Make this smaller for tighter spaces
-  # ## Used for projection-based planners like KPIECE
-  # projection_evaluator: joints(Revolute_9,Revolute_10)  # Example: project to 3D space of these joints
-  # enforce_joint_model_state_space: true # Helps with constraints
+  # longest_valid_segment_fraction: 0.005 # Make this smaller for tighter spaces
+  # # # ## Used for projection-based planners like KPIECE
+  # # # projection_evaluator: joints(Revolute_9,Revolute_10)  # Example: project to 3D space of these joints
+  # # # enforce_joint_model_state_space: true # Helps with constraints
   # constraint_approximation_method: PROJECT 
-  enforce_constrained_state_space: true
-  # enforce_constrained_state_space: true  
-  simplify_solutions: true
-  projection_evaluator: joints(Revolute_9,Revolute_10) 
-  interpolation_type: open_rave # Keeps it human-like
+  # enforce_constrained_state_space: true
+  # simplify_solutions: true
+  # projection_evaluator: joints(joint1,joint2) 
+  # interpolation_type: open_rave # Keeps it human-like

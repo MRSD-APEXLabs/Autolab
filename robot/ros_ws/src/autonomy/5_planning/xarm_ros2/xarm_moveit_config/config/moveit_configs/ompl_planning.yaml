@@ -8,3 +8,9 @@ request_adapters: >-
     default_planner_request_adapters/FixStartStateBounds
     default_planner_request_adapters/FixStartStateCollision
     default_planner_request_adapters/FixStartStatePathConstraints
+longest_valid_segment_fraction: 0.002  # Make this smaller for tighter spaces
+# ## Used for projection-based planners like KPIECE
+# projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11, Revolute_12)  # Example: project to 3D space of these joints
+# enforce_joint_model_state_space: true # Helps with constraints
+enforce_constrained_state_space: true
+constraint_approximation_method: PROJECT 

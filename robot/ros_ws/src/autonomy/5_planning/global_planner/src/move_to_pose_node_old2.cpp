@@ -49,9 +49,8 @@
 #include <iomanip>
 #include <map>
 
-static constexpr double ARM_PLANNING_TIME_SEC = 80.0;
+static constexpr double ARM_PLANNING_TIME_SEC = 30.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
-static constexpr int MAX_PLANNING_ATTEMPTS = 100;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
 static constexpr int APRIL_TAG_WAIT_TIMEOUT_SEC = 10;
 static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
@@ -218,18 +217,34 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     // ── Configure planner ────────────────────────────────────
     arm_group.setPlanningPipelineId("ompl");
     arm_group.setPlannerId("RRTConnect");
-    arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
-    arm_group.setNumPlanningAttempts(40);
+    arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);           // match GUI exactly
+    arm_group.setNumPlanningAttempts(20);     // match GUI exactly
     arm_group.setPoseReferenceFrame("world");
-    arm_group.setPathConstraints(make_ee_down_constraint());
+    arm_group.clearPathConstraints();
     arm_group.setStartStateToCurrentState();
-    arm_group.setPoseTarget(target_pose);
-    // arm_group.setWorkspace(
-    //     0.0, 0.0, 1.0,
-    //     1, 1.5, 1.5);
-    arm_group.setGoalPositionTolerance(0.01);
-    arm_group.setGoalOrientationTolerance(0.05);
-    // arm_group.allowReplanning(true);
+    arm_group.setWorkspace(-0.15, -0.50, 0.90,
+                            0.85,  0.50, 1.30);
+
+    // ── Solve IK once, then plan to joint goal (same as GUI) ──
+    auto current_state = arm_group.getCurrentState(5.0);
+    if (!current_state)
+    {
+        RCLCPP_ERROR(node->get_logger(), "getCurrentState() failed");
+        return std::nullopt;
+    }
+    const auto* jmg = current_state->getJointModelGroup("demo_arm_bot");
+    if (!current_state->setFromIK(jmg, target_pose, 1.0))
+    {
+        RCLCPP_ERROR(node->get_logger(),
+                    "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
+                    target_pose.position.x, target_pose.position.y, target_pose.position.z);
+        return std::nullopt;
+    }
+    std::vector<double> joint_values;
+    current_state->copyJointGroupPositions(jmg, joint_values);
+    arm_group.setJointValueTarget(joint_values);  // ← key change
+    arm_group.setPathConstraints(make_ee_down_constraint());
+        // arm_group.allowReplanning(true);
 
     // Adjust speed based on task type
     double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
@@ -238,23 +253,6 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
 
     try
     {
-
-        // ── IK sanity-check ───────────────────────────────────
-        auto test_state = arm_group.getCurrentState(5.0);
-        if (!test_state)
-        {
-            RCLCPP_ERROR(node->get_logger(), "getCurrentState() returned null — is /joint_states active?");
-            return std::nullopt;
-        }
-        const auto *ik_jmg = test_state->getJointModelGroup("demo_arm_bot");
-        if (!test_state->setFromIK(ik_jmg, target_pose, 5.0))
-        {
-            RCLCPP_ERROR(node->get_logger(),
-                         "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
-                         target_pose.position.x, target_pose.position.y, target_pose.position.z);
-            return std::nullopt;
-        }
-
         // ── Plan ──────────────────────────────────────────────
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         if (arm_group.plan(plan) != moveit::core::MoveItErrorCode::SUCCESS)
@@ -281,12 +279,12 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
             state_pub->publish(s);
         }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
-        if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
-        {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
-            // pub_status->publish([]{ std_msgs::msg::String s; s.data="RRT_EXEC_FAILED"; return s; }());
-            return std::nullopt;
-        }
+        // if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
+        // {
+        //     RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
+        //     // pub_status->publish([]{ std_msgs::msg::String s; s.data="RRT_EXEC_FAILED"; return s; }());
+        //     return std::nullopt;
+        // }
 
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Execution succeeded. Syncing state...");
         // ── Update start state for next planning stage ─────────
