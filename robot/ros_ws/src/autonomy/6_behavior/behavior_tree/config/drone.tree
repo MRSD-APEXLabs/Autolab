@@ -46,7 +46,7 @@
 		->
 			(Pick Base Commanded)
 			[Pick Base Object]
-        -> (Pick Wellplate Commanded)
+        ->  (Pick Wellplate Commanded)
             [Pick Wellplate]
 		->
 			(Autonomously Explore Commanded)
