@@ -13,6 +13,7 @@
 
 #pragma once
 #include "crrt_prm.hpp"
+static const JointVec best_mid = {0.0611, -0.0977, -0.2164, -0.0436, 0.3159, 0.1012};
 static std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
 prm_plan_from_to(
     moveit::planning_interface::MoveGroupInterface& arm_group,
@@ -55,7 +56,7 @@ prm_plan_from_to(
     roadmap.push_back({q_from, {}});
     roadmap.push_back({q_to,   {}});
 
-    const int K_HOOK = 10;
+    const int K_HOOK = 50;
     for (int hook_id : {START_ID, GOAL_ID}) {
         std::vector<std::pair<double,int>> dists;
         for (int i = 0; i < N; ++i)
@@ -101,6 +102,16 @@ prm_plan_from_to(
     std::vector<JointVec> full_path;
     for (int cur = GOAL_ID; cur != -1; cur = prev[cur])
         full_path.push_back(roadmap[cur].q);
+
+    // Normalize joint wrapping across the path
+    for (size_t i = 1; i < full_path.size(); ++i) {
+        for (size_t j = 0; j < full_path[i].size(); ++j) {
+            double diff = full_path[i][j] - full_path[i-1][j];
+            while (diff >  M_PI) diff -= 2*M_PI;
+            while (diff < -M_PI) diff += 2*M_PI;
+            full_path[i][j] = full_path[i-1][j] + diff;
+        }
+    }
     std::reverse(full_path.begin(), full_path.end());
     full_path = densify_path(full_path, 0.01);
 
@@ -186,7 +197,7 @@ prm_plan(
     roadmap.push_back({q_start, {}});
     roadmap.push_back({q_goal,  {}});
 
-    const int K_HOOK = 10;
+    const int K_HOOK = 50;
 
     for (int hook_id : {START_ID, GOAL_ID}) {
         std::vector<std::pair<double,int>> dists;
@@ -204,7 +215,7 @@ prm_plan(
             JointVec cur = roadmap[hook_id].q;
             while (joint_dist(cur, roadmap[i].q) > crrt_cfg::STEP_SIZE) {
                 cur = steer(cur, roadmap[i].q, crrt_cfg::STEP_SIZE);
-                bool ok = is_valid(cur, rs, jmg, scene_snapshot);
+                bool ok = is_collision_free(cur, rs, jmg, scene_snapshot);
                 if (!ok) { edge_ok = false; break; }
             }
             if (edge_ok) {
@@ -251,34 +262,9 @@ prm_plan(
 
     if (dist[GOAL_ID] == std::numeric_limits<double>::max()) {
         RCLCPP_WARN(node->get_logger(),
-            "[PRM] Dijkstra found no direct path — trying bottleneck midpoint fallback...");
+            "[PRM] Dijkstra found no direct path — trying hardcoded midpoint fallback...");
 
-        std::ifstream bf("/home/robot/AutoLab/robot/bottleneck_waypoints.json");
-        if (!bf) {
-            RCLCPP_ERROR(node->get_logger(), "[PRM] No bottleneck file found — aborting.");
-            return std::nullopt;
-        }
-        nlohmann::json bj;
-        bf >> bj;
 
-        JointVec q_mid_ideal(q_start.size());
-        for (size_t i = 0; i < q_start.size(); ++i)
-            q_mid_ideal[i] = 0.5 * (q_start[i] + q_goal[i]);
-
-        JointVec best_mid;
-        double best_d = std::numeric_limits<double>::max();
-        for (const auto& wp : bj) {
-            auto arr = wp["angles_rad"].get<std::vector<double>>();
-            if (arr.size() < dof) continue;
-            JointVec q(arr.begin(), arr.begin() + dof);
-            double d = joint_dist(q, q_mid_ideal);
-            if (d < best_d) { best_d = d; best_mid = q; }
-        }
-
-        if (best_mid.empty()) {
-            RCLCPP_ERROR(node->get_logger(), "[PRM] No valid midpoint found.");
-            return std::nullopt;
-        }
 
         RCLCPP_INFO(node->get_logger(), "[PRM] Stage 1: start -> midpoint...");
         auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
@@ -295,21 +281,25 @@ prm_plan(
         }
 
         // Stitch trajectories
-        auto& traj1 = plan1->trajectory_.joint_trajectory;
-        auto& traj2 = plan2->trajectory_.joint_trajectory;
-        double t_offset =
-            traj1.points.back().time_from_start.sec +
-            traj1.points.back().time_from_start.nanosec * 1e-9;
-        for (auto& pt : traj2.points) {
-            double t_pt = pt.time_from_start.sec +
-                          pt.time_from_start.nanosec * 1e-9;
-            pt.time_from_start = rclcpp::Duration::from_seconds(t_offset + t_pt);
-            traj1.points.push_back(pt);
-        }
+        // Smooth and restitch
+        std::vector<JointVec> stitched_wps;
+        for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+            stitched_wps.push_back(pt.positions);
+        for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
+            stitched_wps.push_back(pt.positions);
 
-        plan1->planning_time_ = std::chrono::duration<double>(
+        // moveit::core::RobotState rs_smooth(robot_model);
+        // rs_smooth.setToDefaultValues();
+        // stitched_wps = smooth_path(stitched_wps, rs_smooth, jmg, scene_snapshot);
+        // stitched_wps = densify_path(stitched_wps, 0.01);
+
+        auto stitched_plan = build_plan(
+            stitched_wps,
+            std::vector<std::string>(joint_names.begin(), joint_names.end()),
+            arm_group);
+        stitched_plan.planning_time_ = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - t0).count();
-        return plan1;
+        return stitched_plan;
     }
     
 
@@ -318,14 +308,39 @@ prm_plan(
         full_path.push_back(roadmap[cur].q);
     std::reverse(full_path.begin(), full_path.end());
 
+    // Normalize joint wrapping across the path
+    for (size_t i = 1; i < full_path.size(); ++i) {
+        for (size_t j = 0; j < full_path[i].size(); ++j) {
+            double diff = full_path[i][j] - full_path[i-1][j];
+            while (diff >  M_PI) diff -= 2*M_PI;
+            while (diff < -M_PI) diff += 2*M_PI;
+            full_path[i][j] = full_path[i-1][j] + diff;
+        }
+    }
+
 
     // moveit::core::RobotState rs_smooth(robot_model);
     // rs_smooth.setToDefaultValues();
     // full_path = smooth_path(full_path, rs_smooth, jmg, scene_snapshot);
-
-
     moveit::core::RobotState rs_check(robot_model);
     rs_check.setToDefaultValues();
+    std::mt19937 rng(42);
+    for (int i = 0; i < 200; ++i) {
+        if (full_path.size() < 3) break;
+        std::uniform_int_distribution<int> dist(0, full_path.size()-1);
+        int a = dist(rng), b = dist(rng);
+        if (a > b) std::swap(a, b);
+        if (b - a < 2) continue;
+        
+        bool ok = true;
+        JointVec cur = full_path[a];
+        while (joint_dist(cur, full_path[b]) > crrt_cfg::STEP_SIZE) {
+            cur = steer(cur, full_path[b], crrt_cfg::STEP_SIZE);
+            if (!is_valid(cur, rs_check, jmg, scene_snapshot)) { ok = false; break; }
+        }
+        if (ok) full_path.erase(full_path.begin()+a+1, full_path.begin()+b);
+    }
+
 
     
     int wp_idx = 0;
@@ -368,8 +383,44 @@ prm_plan(
         std::chrono::steady_clock::now() - t0).count();
     RCLCPP_INFO(node->get_logger(),
         "[PRM] Path found: %zu waypoints in %.2f s.", full_path.size(), elapsed);
+    // moveit::core::RobotState rs_smooth(robot_model);
+    // rs_smooth.setToDefaultValues();
+    // full_path = smooth_path(full_path, rs_smooth, jmg, scene_snapshot);
+    // RCLCPP_INFO(node->get_logger(), "[CRRT] Smoothed path: %zu waypoints.", full_path.size());
+    // full_path = densify_path(full_path, 0.01);
+    // After building full_path, before build_plan
+    
+    double path_length = 0.0;
+    for (size_t i = 1; i < full_path.size(); ++i)
+        path_length += joint_dist(full_path[i], full_path[i-1]);
 
-    full_path = densify_path(full_path, 0.01);
+    double direct_dist = joint_dist(q_start, q_goal);
+    double ratio = path_length / (direct_dist + 1e-6);
+
+    RCLCPP_INFO(node->get_logger(),
+        "[PRM] Path length: %.3f  Direct: %.3f  Ratio: %.2f",
+        path_length, direct_dist, ratio);
+
+    if (ratio > 3.0) {  // tune this threshold
+        RCLCPP_WARN(node->get_logger(),
+            "[PRM] Path looks suspicious (ratio %.2f) — trying midpoint fallback...");
+        
+        auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
+        if (!plan1) return std::nullopt;
+        auto plan2 = prm_plan_from_to(arm_group, node, best_mid, q_goal);
+        if (!plan2) return std::nullopt;
+
+        // stitch as before
+        std::vector<JointVec> stitched;
+        for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+            stitched.push_back(pt.positions);
+        for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
+            stitched.push_back(pt.positions);
+        return build_plan(
+            stitched,
+            std::vector<std::string>(joint_names.begin(), joint_names.end()),
+            arm_group);
+    }
 
     auto plan = build_plan(
         full_path,
@@ -508,7 +559,7 @@ crrt_plan_from_to(
     for (const auto& q : full_path)
         if (!is_valid(q, rs_check, jmg, scene_snapshot)) return std::nullopt;
 
-    full_path = densify_path(full_path, 0.01);
+    // full_path = densify_path(full_path, 0.01);
     auto plan = build_plan(
         full_path,
         std::vector<std::string>(joint_names.begin(), joint_names.end()),
@@ -690,7 +741,7 @@ crrt_plan(
     }
 
     RCLCPP_INFO(node->get_logger(), "[CRRT] Raw path: %zu waypoints.", full_path.size());
-    full_path = densify_path(full_path, 0.01);
+    // full_path = densify_path(full_path, 0.01);
     auto plan = build_plan(
         full_path,
         std::vector<std::string>(joint_names.begin(), joint_names.end()),

@@ -14,6 +14,9 @@
 #include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+// Add this include at top of crrt_types.hpp
+#include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+#include <moveit/robot_trajectory/robot_trajectory.h>
 
 #include <vector>
 #include <optional>
@@ -45,7 +48,7 @@ static constexpr double EE_PITCH_TOL = 0.2;   // rad
 // RRT-Connect tuning
 static constexpr int    MAX_ITER     = 5000;
 static constexpr double MAX_TIME_SEC = 12.0;
-static constexpr double STEP_SIZE    = 0.02;  // rad per step
+static constexpr double STEP_SIZE    = 0.05;  // rad per step
 static constexpr double GOAL_BIAS    = 0.3;  // 10 % samples toward goal
 static constexpr double CONNECT_TOL  = 0.02;  // rad — trees considered joined
 

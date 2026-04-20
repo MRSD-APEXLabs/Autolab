@@ -47,7 +47,7 @@ demo_arm_bot:
     type: geometric::RRTstar
     range: 0.015
     num_planning_attempts: 100
-    goal_bias: 0.5
+    goal_bias: 0.8
     seed: 42
   ## Any planning path longer than this (relative to world) will be checked for collisions
   # Update this in your yaml

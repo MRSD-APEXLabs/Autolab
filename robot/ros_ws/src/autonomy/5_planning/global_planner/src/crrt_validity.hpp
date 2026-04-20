@@ -295,47 +295,53 @@ build_plan(const std::vector<JointVec>& waypoints,
     auto cs = arm_group.getCurrentState(5.0);
     moveit::core::robotStateToRobotStateMsg(*cs, plan.start_state_);
 
-    trajectory_msgs::msg::JointTrajectory jt;
-    jt.joint_names = joint_names;
+    // Build a RobotTrajectory with positions only, uniform dt placeholder
+    auto robot_model = arm_group.getRobotModel();
+    const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
 
-    // TO:
-    const double MAX_JOINT_VEL = 0.5;
-    const double vel_scale     = 0.2;
-    const double MIN_DT_PER_WP = 0.02;
-    double t = 0.0;
+    robot_trajectory::RobotTrajectory rt(robot_model, crrt_cfg::GROUP_NAME);
 
+    moveit::core::RobotState rs(*cs);
     for (size_t i = 0; i < waypoints.size(); ++i) {
-        trajectory_msgs::msg::JointTrajectoryPoint pt;
-        pt.positions     = waypoints[i];
-        pt.velocities.resize(waypoints[i].size(), 0.0);
-        pt.accelerations.resize(waypoints[i].size(), 0.0);
-
-        // if (i > 0 && i < waypoints.size() - 1) {
-        //     for (size_t j = 0; j < waypoints[i].size(); ++j) {
-        //         double v_in  = waypoints[i][j]   - waypoints[i-1][j];
-        //         double v_out = waypoints[i+1][j] - waypoints[i][j];
-        //         if (std::signbit(v_in) == std::signbit(v_out))
-        //             pt.velocities[j] = 0.5 * (v_in + v_out) / MIN_DT_PER_WP;
-        //         else
-        //             pt.velocities[j] = 0.0;
-        //     }
-        // }
-
-        if (i > 0) {
-            double max_delta = 0.0;
-            for (size_t j = 0; j < waypoints[i].size(); ++j)
-                max_delta = std::max(max_delta,
-                    std::abs(waypoints[i][j] - waypoints[i-1][j]));
-            
-            double dt = max_delta / (MAX_JOINT_VEL * vel_scale);
-            t += std::max(dt, MIN_DT_PER_WP);
-        }
-        pt.time_from_start = rclcpp::Duration::from_seconds(t);
-        jt.points.push_back(pt);
+        rs.setJointGroupPositions(jmg, waypoints[i]);
+        rs.update();
+        // dt=0.1 is just a placeholder — TOTG will overwrite all timestamps
+        rt.addSuffixWayPoint(rs, (i == 0) ? 0.0 : 0.1);
     }
 
-    moveit_msgs::msg::RobotTrajectory rt;
-    rt.joint_trajectory = jt;
-    plan.trajectory_    = rt;
+    // Retime with TOTG — this is where smoothness actually comes from
+    trajectory_processing::TimeOptimalTrajectoryGeneration totg(
+        0.01,  // path tolerance (smaller = more faithful to waypoints)
+        0.05   // resample_dt (output waypoint spacing in seconds)
+    );
+
+    const double vel_scale   = 0.08;  // was 0.15
+    const double accel_scale = 0.05;  // was 0.10
+
+    if (!totg.computeTimeStamps(rt, vel_scale, accel_scale)) {
+        RCLCPP_ERROR(rclcpp::get_logger("build_plan"),
+            "[build_plan] TOTG retiming failed — falling back to naive timing.");
+        // fallback: build naive timed plan rather than returning empty
+        trajectory_msgs::msg::JointTrajectory jt;
+        jt.joint_names = joint_names;
+        double t = 0.0;
+        for (size_t i = 0; i < waypoints.size(); ++i) {
+            trajectory_msgs::msg::JointTrajectoryPoint pt;
+            pt.positions = waypoints[i];
+            pt.velocities.resize(waypoints[i].size(), 0.0);
+            pt.accelerations.resize(waypoints[i].size(), 0.0);
+            if (i > 0) t += 0.05;
+            pt.time_from_start = rclcpp::Duration::from_seconds(t);
+            jt.points.push_back(pt);
+        }
+        moveit_msgs::msg::RobotTrajectory rt_msg;
+        rt_msg.joint_trajectory = jt;
+        plan.trajectory_ = rt_msg;
+        return plan;
+    }
+
+    moveit_msgs::msg::RobotTrajectory rt_msg;
+    rt.getRobotTrajectoryMsg(rt_msg);
+    plan.trajectory_ = rt_msg;
     return plan;
 }

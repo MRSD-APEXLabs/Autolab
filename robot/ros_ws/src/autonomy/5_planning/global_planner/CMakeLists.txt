@@ -56,6 +56,8 @@ target_link_libraries(move_to_pose_node
   moveit_ros_planning::moveit_planning_scene_monitor
   ${moveit_core_LIBRARIES}
   nlohmann_json::nlohmann_json
+  moveit_core::moveit_trajectory_processing
+  moveit_core::moveit_robot_trajectory
 )
 # Install target
 install(TARGETS

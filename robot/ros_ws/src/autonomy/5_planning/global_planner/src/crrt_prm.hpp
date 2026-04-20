@@ -488,3 +488,92 @@ void build_prm_roadmap(
         "[PRM] Saved: %zu nodes (%d manual, %d local, %d random) → %s",
         n, mw_ok, local_added, (int)n - mw_ok - local_added, PRM_ROADMAP_FILE.c_str());
 }
+
+void inject_waypoints_into_roadmap(
+    moveit::planning_interface::MoveGroupInterface& arm_group,
+    rclcpp::Node::SharedPtr node,
+    const std::vector<JointVec>& new_waypoints,
+    int k_neighbors = 15)
+{
+    auto robot_model = arm_group.getRobotModel();
+    const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
+    const size_t dof = jmg->getVariableNames().size();
+
+    // Load existing roadmap
+    std::vector<PRMNode> roadmap = load_prm_roadmap(node, dof);
+    if (roadmap.empty()) {
+        RCLCPP_ERROR(node->get_logger(), "[INJECT] No roadmap to inject into.");
+        return;
+    }
+
+    // Get scene snapshot for edge validation
+    auto& psm_holder = crrt_internal::get_psm(node);
+    planning_scene::PlanningScenePtr scene_snapshot;
+    {
+        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
+        scene_snapshot = planning_scene::PlanningScene::clone(
+            psm_holder.psm->getPlanningScene());
+    }
+
+    moveit::core::RobotState rs(robot_model);
+    rs.setToDefaultValues();
+
+    for (const auto& q_new : new_waypoints)
+    {
+        // You said you trust these satisfy constraints — skip constraint check
+        // Just do a quick collision check to be safe
+        rs.setJointGroupPositions(jmg, q_new);
+        rs.updateLinkTransforms();
+        collision_detection::CollisionRequest req;
+        collision_detection::CollisionResult  res;
+        req.group_name = crrt_cfg::GROUP_NAME;
+        scene_snapshot->checkCollision(req, res, rs);
+        if (res.collision) {
+            RCLCPP_WARN(node->get_logger(), "[INJECT] New waypoint in collision — skipping.");
+            continue;
+        }
+
+        const int new_idx = (int)roadmap.size();
+        PRMNode new_node; new_node.q = q_new;
+
+        // Connect to K nearest existing nodes
+        std::vector<std::pair<double,int>> dists;
+        for (int i = 0; i < (int)roadmap.size(); ++i)
+            dists.push_back({joint_dist(q_new, roadmap[i].q), i});
+        std::sort(dists.begin(), dists.end());
+
+        for (auto& [d, i] : dists) {
+            if ((int)new_node.neighbors.size() >= k_neighbors) break;
+            bool edge_ok = true;
+            JointVec cur = q_new;
+            while (joint_dist(cur, roadmap[i].q) > crrt_cfg::STEP_SIZE) {
+                cur = steer(cur, roadmap[i].q, crrt_cfg::STEP_SIZE);
+                if (!is_valid(cur, rs, jmg, scene_snapshot)) { edge_ok = false; break; }
+            }
+            if (edge_ok) {
+                new_node.neighbors.push_back(i);
+                roadmap[i].neighbors.push_back(new_idx);
+            }
+        }
+
+        RCLCPP_INFO(node->get_logger(),
+            "[INJECT] Added node %d with %zu edges.",
+            new_idx, new_node.neighbors.size());
+        roadmap.push_back(std::move(new_node));
+    }
+
+    // Save back to same file
+    std::ofstream file(PRM_ROADMAP_FILE, std::ios::binary);
+    size_t n = roadmap.size(), dof_out = dof;
+    file.write(reinterpret_cast<const char*>(&n),       sizeof(n));
+    file.write(reinterpret_cast<const char*>(&dof_out), sizeof(dof_out));
+    for (const auto& np : roadmap) {
+        file.write(reinterpret_cast<const char*>(np.q.data()), dof * sizeof(double));
+        size_t nn = np.neighbors.size();
+        file.write(reinterpret_cast<const char*>(&nn), sizeof(nn));
+        file.write(reinterpret_cast<const char*>(np.neighbors.data()), nn * sizeof(int));
+    }
+
+    RCLCPP_INFO(node->get_logger(),
+        "[INJECT] Roadmap updated: %zu total nodes saved.", roadmap.size());
+}

@@ -211,7 +211,6 @@ visualization_msgs::msg::Marker make_path_marker(
     }
     return marker;
 }
-
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -226,99 +225,128 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     // ── Configure planner ────────────────────────────────────
     arm_group.setPlanningPipelineId("ompl");
     arm_group.setPlannerId("RRTConnect");
-    arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);           // match GUI exactly
-    arm_group.setNumPlanningAttempts(20);     // match GUI exactly
+    arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
+    arm_group.setNumPlanningAttempts(20);
     arm_group.setPoseReferenceFrame("world");
     arm_group.setPathConstraints(make_ee_down_constraint());
     arm_group.setStartStateToCurrentState();
-    arm_group.setWorkspace(-0.15, -0.50, 0.90,
-                            0.85,  0.50, 1.30);
+    arm_group.setWorkspace(-0.15, -0.50, 0.90, 0.85, 0.50, 1.30);
+    arm_group.allowReplanning(true);
 
-    // ── Solve IK once, then plan to joint goal (same as GUI) ──
-    auto current_state = arm_group.getCurrentState(5.0);
-    if (!current_state)
-    {
-        RCLCPP_ERROR(node->get_logger(), "getCurrentState() failed");
-        return std::nullopt;
-    }
-    const auto* jmg = current_state->getJointModelGroup("demo_arm_bot");
-    if (!current_state->setFromIK(jmg, target_pose, 1.0))
-    {
-        RCLCPP_ERROR(node->get_logger(),
-                    "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
-                    target_pose.position.x, target_pose.position.y, target_pose.position.z);
-        return std::nullopt;
-    }
-    std::vector<double> joint_values;
-    current_state->copyJointGroupPositions(jmg, joint_values);
-    arm_group.setJointValueTarget(joint_values);  // ← key change
-    
-    RCLCPP_INFO(node->get_logger(),
-        "Constraints: %zu",
-        arm_group.getPathConstraints().orientation_constraints.size());
-        arm_group.allowReplanning(true);
-
-    // Adjust speed based on task type
     double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
     arm_group.setMaxVelocityScalingFactor(velocity_scaling);
     arm_group.setMaxAccelerationScalingFactor(velocity_scaling);
 
-    try
-    {
-        // ── Plan ──────────────────────────────────────────────
-        moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto crrt_opt = prm_plan(arm_group, node, joint_values);
-        if (!crrt_opt)
-        {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] CRRT planning failed.");
-            return std::nullopt;
-        }
-        plan = std::move(*crrt_opt);
-
-        // ── Publish to RViz (like MoveIt Plan button) ─────────
-        auto display_pub = node->create_publisher<moveit_msgs::msg::DisplayTrajectory>(
-            "/display_planned_path", 10);
-
-        moveit_msgs::msg::DisplayTrajectory display_msg;
-        display_msg.model_id = arm_group.getRobotModel()->getName();
-        display_msg.trajectory_start = plan.start_state_;
-        display_msg.trajectory.push_back(plan.trajectory_);
-        display_pub->publish(display_msg);
-        RCLCPP_INFO(node->get_logger(), "[Path Planning] Plan published to RViz.");
-
-        // ── Execute ──────────────────────────────────────────────
-        {
-            std_msgs::msg::String s;
-            s.data = "EXECUTING";
-            state_pub->publish(s);
-        }
-        RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
-        if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
-        {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
-            // pub_status->publish([]{ std_msgs::msg::String s; s.data="RRT_EXEC_FAILED"; return s; }());
-            return std::nullopt;
-        }
-
-        RCLCPP_INFO(node->get_logger(), "[Path Planning] Execution succeeded. Syncing state...");
-        // ── Update start state for next planning stage ─────────
-        rclcpp::sleep_for(std::chrono::milliseconds(500));
-        arm_group.setStartStateToCurrentState();
-
-        return plan;
-    }
-    catch (const std::exception &e)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[Path Planning] Exception: %s", e.what());
+    // ── Solve IK for goal ────────────────────────────────────
+    auto current_state = arm_group.getCurrentState(5.0);
+    if (!current_state) {
+        RCLCPP_ERROR(node->get_logger(), "getCurrentState() failed");
         return std::nullopt;
     }
-    catch (...)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[Path Planning] Unknown exception occurred.");
+    const auto* jmg = current_state->getJointModelGroup("demo_arm_bot");
+    if (!current_state->setFromIK(jmg, target_pose, 1.0)) {
+        RCLCPP_ERROR(node->get_logger(),
+            "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
+            target_pose.position.x, target_pose.position.y, target_pose.position.z);
         return std::nullopt;
     }
+    std::vector<double> joint_values;
+    current_state->copyJointGroupPositions(jmg, joint_values);
+
+    // ── Get current start joints ─────────────────────────────
+    std::vector<double> q_start;
+    arm_group.getCurrentState(5.0)->copyJointGroupPositions(jmg, q_start);
+
+    // ── Midpoint fallback config ─────────────────────────────
+    static const std::vector<double> q_mid = {0.0611, -0.0977, -0.2164, -0.0436, 0.3159, 0.1012};
+
+    // ── Helper: plan one segment from q_from to q_to ─────────
+    auto plan_segment = [&](const std::vector<double>& q_from,
+                             const std::vector<double>& q_to)
+        -> std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
+    {
+        auto from_state = arm_group.getCurrentState(5.0);
+        from_state->setJointGroupPositions(jmg, q_from);
+        moveit_msgs::msg::RobotState from_state_msg;
+        moveit::core::robotStateToRobotStateMsg(*from_state, from_state_msg);
+        arm_group.setStartState(from_state_msg);
+        arm_group.setJointValueTarget(q_to);
+
+        moveit::planning_interface::MoveGroupInterface::Plan p;
+        if (arm_group.plan(p) == moveit::core::MoveItErrorCode::SUCCESS)
+            return p;
+        return std::nullopt;
+    };
+
+    // ── Try direct plan first ────────────────────────────────
+    arm_group.setStartStateToCurrentState();
+    arm_group.setJointValueTarget(joint_values);
+    moveit::planning_interface::MoveGroupInterface::Plan direct_plan;
+    bool direct_ok = (arm_group.plan(direct_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+
+    std::optional<moveit::planning_interface::MoveGroupInterface::Plan> final_plan;
+
+    if (direct_ok) {
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Direct plan succeeded.");
+        final_plan = direct_plan;
+    } else {
+        // ── Fallback: source -> midpoint -> goal ─────────────
+        RCLCPP_WARN(node->get_logger(), "[Path Planning] Direct plan failed — trying midpoint fallback...");
+
+        auto plan1 = plan_segment(q_start, q_mid);
+        if (!plan1) {
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Midpoint Stage 1 failed.");
+            return std::nullopt;
+        }
+
+        auto plan2 = plan_segment(q_mid, joint_values);
+        if (!plan2) {
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Midpoint Stage 2 failed.");
+            return std::nullopt;
+        }
+
+        // Stitch trajectories
+        auto& traj1 = plan1->trajectory_.joint_trajectory;
+        auto& traj2 = plan2->trajectory_.joint_trajectory;
+        double t_offset = traj1.points.back().time_from_start.sec +
+                          traj1.points.back().time_from_start.nanosec * 1e-9;
+        for (auto& pt : traj2.points) {
+            double t_pt = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9;
+            pt.time_from_start = rclcpp::Duration::from_seconds(t_offset + t_pt);
+            traj1.points.push_back(pt);
+        }
+
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Midpoint fallback succeeded.");
+        final_plan = plan1;
+    }
+
+    // ── Publish to RViz ──────────────────────────────────────
+    auto display_pub = node->create_publisher<moveit_msgs::msg::DisplayTrajectory>(
+        "/display_planned_path", 10);
+    moveit_msgs::msg::DisplayTrajectory display_msg;
+    display_msg.model_id = arm_group.getRobotModel()->getName();
+    display_msg.trajectory_start = final_plan->start_state_;
+    display_msg.trajectory.push_back(final_plan->trajectory_);
+    display_pub->publish(display_msg);
+    RCLCPP_INFO(node->get_logger(), "[Path Planning] Plan published to RViz.");
+
+    {
+        std_msgs::msg::String s;
+        s.data = "EXECUTING";
+        state_pub->publish(s);
+    }
+    RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
+
+    if (arm_group.execute(*final_plan) != moveit::core::MoveItErrorCode::SUCCESS)
+    {
+        RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
+        return std::nullopt;
+    }
+
+    rclcpp::sleep_for(std::chrono::milliseconds(500));
+    arm_group.setStartStateToCurrentState();
+    return final_plan;
 }
-
 void publish_target_marker(
     rclcpp::Node::SharedPtr node,
     const geometry_msgs::msg::Pose &pose)
@@ -697,18 +725,33 @@ int main(int argc, char *argv[])
         }
         else if (cmd == "plan_home_offset")
         {
-            const JointVec home_offset_joints = {1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284};
+            // TODO: Move Hardcoded values to a config file
+            geometry_msgs::msg::Point home_point;
+            home_point.x = -0.048;
+            home_point.y = 0.443;
+            home_point.z = 0.247;
+
+            // Resolve final task parameters (live > default)
+            const geometry_msgs::msg::Pose target_position =
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, home_point, 0.15));
+            const std::string task_type =
+                live_task_type.value_or(defaults::TASK_TYPE);
+            publish_target_marker(node, target_position);
+
+            if (!live_target_pose)
+                RCLCPP_WARN(node->get_logger(), "Using default target pose.");
+            if (!live_task_type)
+                RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
+
+            const double PREGRASP_Z_OFFSET = 0.00;
+            geometry_msgs::msg::Pose pregrasp_pose = target_position;
+            pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             publish_state("PLANNING");
-            auto rrt_plan_opt = prm_plan(arm_group, node, home_offset_joints);
+            auto rrt_plan_opt = plan_and_publish_rrt(
+                task_type, pregrasp_pose,
+                arm_group, node, planning_state_pub);
 
-            if (rrt_plan_opt) {
-                publish_state("EXECUTING");
-                if (arm_group.execute(*rrt_plan_opt) != moveit::core::MoveItErrorCode::SUCCESS) {
-                    finish_plan(std::nullopt);
-                    continue;
-                }
-            }
             finish_plan(rrt_plan_opt);
         }
         else
