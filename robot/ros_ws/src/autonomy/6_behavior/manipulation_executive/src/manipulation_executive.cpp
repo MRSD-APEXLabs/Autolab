@@ -518,7 +518,7 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
             return false;
         }
     } else if (pose_type == "safe") {
-        cmd = "plan_home";
+        cmd = "plan_home_offset";
     } else if (pose_type == "home_offset") {
         cmd = "plan_home_offset";
     } else {
