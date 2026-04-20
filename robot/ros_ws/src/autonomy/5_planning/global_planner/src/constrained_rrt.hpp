@@ -63,6 +63,13 @@ static constexpr double MAX_TIME_SEC = 12.0;
 static constexpr double STEP_SIZE    = 0.02;  // rad per step
 static constexpr double GOAL_BIAS    = 0.10;  // 10% samples toward goal
 static constexpr double CONNECT_TOL  = 0.02;  // rad — trees considered joined
+// Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
+static constexpr double WS_X_MIN = -0.15;
+static constexpr double WS_X_MAX =  0.85;
+static constexpr double WS_Y_MIN = -0.50;
+static constexpr double WS_Y_MAX =  0.50;
+static constexpr double WS_Z_MIN =  0.90;
+static constexpr double WS_Z_MAX =  1.30;
 
 } // namespace crrt_cfg
 
@@ -285,6 +292,30 @@ static bool project_to_ee_down_sample(moveit::core::RobotState& rs,
     return rs.setFromIK(jmg, projected_pose, 0.005);  // more time, no drift check
 }
 
+static double halton(int index, int base)
+{
+    double result = 0.0, f = 1.0;
+    while (index > 0) {
+        f /= base;
+        result += f * (index % base);
+        index /= base;
+    }
+    return result;
+}
+static bool is_collision_free(const JointVec& q,
+                               moveit::core::RobotState& rs,
+                               const moveit::core::JointModelGroup* jmg,
+                               const planning_scene::PlanningScenePtr& scene)
+{
+    rs.setJointGroupPositions(jmg, q);
+    rs.updateLinkTransforms();
+    collision_detection::CollisionRequest req;
+    collision_detection::CollisionResult  res;
+    req.group_name = crrt_cfg::GROUP_NAME;
+    req.contacts   = false;
+    scene->checkCollision(req, res, rs);
+    return !res.collision;
+}
 static int extend_greedy_with_projection(std::vector<RRTNode>& tree,
                                          const JointVec& q_target,
                                          moveit::core::RobotState& rs,
@@ -444,8 +475,8 @@ struct PRMNode {
 void build_prm_roadmap(
     moveit::planning_interface::MoveGroupInterface& arm_group,
     rclcpp::Node::SharedPtr node,
-    int num_samples = 5000,
-    int k_neighbors = 10)
+    int num_samples = 20000,
+    int k_neighbors = 8)
 {
     auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
@@ -477,114 +508,112 @@ void build_prm_roadmap(
         "[PRM] Sampling %d valid configurations...", num_samples);
 
     int attempts = 0;
-    int fail_ik = 0, fail_collision = 0, fail_constraint = 0;
+    int fail_ik = 0, fail_collision = 0;
 
-    while ((int)nodes.size() < num_samples && attempts < num_samples * 50) {
+    tf2::Quaternion ee_quat;
+    ee_quat.setRPY(0.0, 0.0, M_PI);
+
+    while ((int)nodes.size() < num_samples && attempts < num_samples * 10) {
         ++attempts;
 
-        JointVec q(limits.size());
-        for (size_t i = 0; i < limits.size(); ++i) {
-            std::uniform_real_distribution<double> d(
-                limits[i].first, limits[i].second);
-            q[i] = d(rng);
-        }
+        // Halton sequence in Cartesian workspace
+        double fx = halton(attempts, 2);
+        double fy = halton(attempts, 3);
+        double fz = halton(attempts, 5);
 
+        geometry_msgs::msg::Pose sample_pose;
+        sample_pose.position.x = crrt_cfg::WS_X_MIN + fx * (crrt_cfg::WS_X_MAX - crrt_cfg::WS_X_MIN);
+        sample_pose.position.y = crrt_cfg::WS_Y_MIN + fy * (crrt_cfg::WS_Y_MAX - crrt_cfg::WS_Y_MIN);
+        sample_pose.position.z = crrt_cfg::WS_Z_MIN + fz * (crrt_cfg::WS_Z_MAX - crrt_cfg::WS_Z_MIN);
+        sample_pose.orientation = tf2::toMsg(ee_quat);
+
+        // IK — workspace + constraint satisfied in one shot
         moveit::core::RobotState rs_sample(robot_model);
         rs_sample.setToDefaultValues();
-        rs_sample.setJointGroupPositions(jmg, q);
+        if (!rs_sample.setFromIK(jmg, sample_pose, 0.005)) { ++fail_ik; continue; }
+
+        JointVec q;
+        rs_sample.copyJointGroupPositions(jmg, q);
+
+        // Only collision left to reject
         rs_sample.updateLinkTransforms();
-
-        if (!project_to_ee_down_sample(rs_sample, jmg)) { ++fail_ik; continue; }
-
-        JointVec q_projected;
-        rs_sample.copyJointGroupPositions(jmg, q_projected);
-
-        // Split is_valid into two parts to see which fails
-        rs.setJointGroupPositions(jmg, q_projected);
-        rs.updateLinkTransforms();
-        if (!satisfies_ee_down(rs)) { ++fail_constraint; continue; }
-
         collision_detection::CollisionRequest req;
         collision_detection::CollisionResult  res;
         req.group_name = crrt_cfg::GROUP_NAME;
         req.contacts   = false;
-        scene_snapshot->checkCollision(req, res, rs);
+        scene_snapshot->checkCollision(req, res, rs_sample);
         if (res.collision) { ++fail_collision; continue; }
 
-        nodes.push_back({q_projected, {}});
+        nodes.push_back({q, {}});
 
-        if (attempts % 1000 == 0)
+        if (attempts % 500 == 0)
             RCLCPP_INFO(node->get_logger(),
-                "[PRM] %zu valid | %d attempts | IK fail: %d | constraint fail: %d | collision fail: %d",
-                nodes.size(), attempts, fail_ik, fail_constraint, fail_collision);
+                "[PRM] %zu valid | %d attempts | IK fail: %d | collision fail: %d",
+                nodes.size(), attempts, fail_ik, fail_collision);
     }
-    
-    
-    
 
     RCLCPP_INFO(node->get_logger(),
-        "[PRM] Sampling done: %zu valid / %d attempts | IK: %d | constraint: %d | collision: %d",
-        nodes.size(), attempts, fail_ik, fail_constraint, fail_collision);
+        "[PRM] Sampling done: %zu valid / %d attempts | IK: %d | collision: %d",
+        nodes.size(), attempts, fail_ik, fail_collision);
+    // // After main sampling loop in build_prm_roadmap, add:
+    // RCLCPP_INFO(node->get_logger(), "[PRM] Bridge sampling for narrow passages...");
+    // int bridge_attempts = 0;
+    // int bridge_added = 0;
+    // while (bridge_attempts < 50000) {
+    //     ++bridge_attempts;
 
-    // After main sampling loop in build_prm_roadmap, add:
-    RCLCPP_INFO(node->get_logger(), "[PRM] Bridge sampling for narrow passages...");
-    int bridge_attempts = 0;
-    int bridge_added = 0;
-    while (bridge_attempts < 50000) {
-        ++bridge_attempts;
+    //     // Sample two random configs
+    //     JointVec q1(limits.size()), q2(limits.size());
+    //     for (size_t i = 0; i < limits.size(); ++i) {
+    //         std::uniform_real_distribution<double> d(limits[i].first, limits[i].second);
+    //         q1[i] = d(rng);
+    //         q2[i] = d(rng);
+    //     }
 
-        // Sample two random configs
-        JointVec q1(limits.size()), q2(limits.size());
-        for (size_t i = 0; i < limits.size(); ++i) {
-            std::uniform_real_distribution<double> d(limits[i].first, limits[i].second);
-            q1[i] = d(rng);
-            q2[i] = d(rng);
-        }
+    //     // Project both onto constraint manifold
+    //     moveit::core::RobotState rs1(robot_model), rs2(robot_model);
+    //     rs1.setToDefaultValues(); rs1.setJointGroupPositions(jmg, q1); rs1.updateLinkTransforms();
+    //     rs2.setToDefaultValues(); rs2.setJointGroupPositions(jmg, q2); rs2.updateLinkTransforms();
+    //     if (!project_to_ee_down_sample(rs1, jmg)) continue;
+    //     if (!project_to_ee_down_sample(rs2, jmg)) continue;
+    //     rs1.copyJointGroupPositions(jmg, q1);
+    //     rs2.copyJointGroupPositions(jmg, q2);
 
-        // Project both onto constraint manifold
-        moveit::core::RobotState rs1(robot_model), rs2(robot_model);
-        rs1.setToDefaultValues(); rs1.setJointGroupPositions(jmg, q1); rs1.updateLinkTransforms();
-        rs2.setToDefaultValues(); rs2.setJointGroupPositions(jmg, q2); rs2.updateLinkTransforms();
-        if (!project_to_ee_down_sample(rs1, jmg)) continue;
-        if (!project_to_ee_down_sample(rs2, jmg)) continue;
-        rs1.copyJointGroupPositions(jmg, q1);
-        rs2.copyJointGroupPositions(jmg, q2);
+    //     // Both must be in collision
+    //     moveit::core::RobotState rs_check(robot_model);
+    //     rs_check.setToDefaultValues();
 
-        // Both must be in collision
-        moveit::core::RobotState rs_check(robot_model);
-        rs_check.setToDefaultValues();
+    //     rs_check.setJointGroupPositions(jmg, q1); rs_check.updateLinkTransforms();
+    //     collision_detection::CollisionRequest req; collision_detection::CollisionResult res;
+    //     req.group_name = crrt_cfg::GROUP_NAME; req.contacts = false;
+    //     scene_snapshot->checkCollision(req, res, rs_check);
+    //     if (!res.collision) continue;  // q1 must be IN collision
 
-        rs_check.setJointGroupPositions(jmg, q1); rs_check.updateLinkTransforms();
-        collision_detection::CollisionRequest req; collision_detection::CollisionResult res;
-        req.group_name = crrt_cfg::GROUP_NAME; req.contacts = false;
-        scene_snapshot->checkCollision(req, res, rs_check);
-        if (!res.collision) continue;  // q1 must be IN collision
+    //     res.clear();
+    //     rs_check.setJointGroupPositions(jmg, q2); rs_check.updateLinkTransforms();
+    //     scene_snapshot->checkCollision(req, res, rs_check);
+    //     if (!res.collision) continue;  // q2 must be IN collision
 
-        res.clear();
-        rs_check.setJointGroupPositions(jmg, q2); rs_check.updateLinkTransforms();
-        scene_snapshot->checkCollision(req, res, rs_check);
-        if (!res.collision) continue;  // q2 must be IN collision
+    //     // Midpoint must be FREE — this is the narrow passage node
+    //     JointVec q_mid(limits.size());
+    //     for (size_t i = 0; i < limits.size(); ++i)
+    //         q_mid[i] = (q1[i] + q2[i]) * 0.5;
 
-        // Midpoint must be FREE — this is the narrow passage node
-        JointVec q_mid(limits.size());
-        for (size_t i = 0; i < limits.size(); ++i)
-            q_mid[i] = (q1[i] + q2[i]) * 0.5;
+    //     moveit::core::RobotState rs_mid(robot_model);
+    //     rs_mid.setToDefaultValues();
+    //     rs_mid.setJointGroupPositions(jmg, q_mid);
+    //     rs_mid.updateLinkTransforms();
+    //     if (!project_to_ee_down_sample(rs_mid, jmg)) continue;
+    //     rs_mid.copyJointGroupPositions(jmg, q_mid);
 
-        moveit::core::RobotState rs_mid(robot_model);
-        rs_mid.setToDefaultValues();
-        rs_mid.setJointGroupPositions(jmg, q_mid);
-        rs_mid.updateLinkTransforms();
-        if (!project_to_ee_down_sample(rs_mid, jmg)) continue;
-        rs_mid.copyJointGroupPositions(jmg, q_mid);
-
-        if (is_valid(q_mid, rs_check, jmg, scene_snapshot)) {
-            nodes.push_back({q_mid, {}});
-            ++bridge_added;
-        }
-    }
-    RCLCPP_INFO(node->get_logger(), 
-        "[PRM] Bridge sampling: %d nodes added from %d attempts",
-        bridge_added, bridge_attempts);
+    //     if (is_valid(q_mid, rs_check, jmg, scene_snapshot)) {
+    //         nodes.push_back({q_mid, {}});
+    //         ++bridge_added;
+    //     }
+    // }
+    // RCLCPP_INFO(node->get_logger(), 
+    //     "[PRM] Bridge sampling: %d nodes added from %d attempts",
+    //     bridge_added, bridge_attempts);
     // ── Connect K nearest neighbors ───────────────────────────
     RCLCPP_INFO(node->get_logger(), "[PRM] Connecting neighbors...");
     int edge_ok_count = 0, edge_fail_count = 0;
@@ -608,7 +637,7 @@ void build_prm_roadmap(
             JointVec cur = nodes[i].q;
             while (joint_dist(cur, nodes[j].q) > crrt_cfg::STEP_SIZE) {
                 cur = steer(cur, nodes[j].q, crrt_cfg::STEP_SIZE);
-                if (!is_valid(cur, rs_edge, jmg, scene_snapshot)) {
+                if (!is_collision_free(cur, rs_edge, jmg, scene_snapshot)) {
                     edge_ok = false;
                     break;
                 }

@@ -11,7 +11,7 @@
 
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
-#include "constrained_rrt.hpp"
+#include "crrt_plan.hpp"   // pulls in all others transitively
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -49,6 +49,14 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+
+// Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
+static constexpr double WS_X_MIN = -0.15;
+static constexpr double WS_X_MAX =  0.85;
+static constexpr double WS_Y_MIN = -0.50;
+static constexpr double WS_Y_MAX =  0.50;
+static constexpr double WS_Z_MIN =  0.90;
+static constexpr double WS_Z_MAX =  1.30;
 
 static constexpr double ARM_PLANNING_TIME_SEC = 15.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
@@ -259,7 +267,7 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     {
         // ── Plan ──────────────────────────────────────────────
         moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto crrt_opt = prm_plan(arm_group, node, joint_values);
+        auto crrt_opt = crrt_plan(arm_group, node, joint_values);
         if (!crrt_opt)
         {
             RCLCPP_ERROR(node->get_logger(), "[Path Planning] CRRT planning failed.");

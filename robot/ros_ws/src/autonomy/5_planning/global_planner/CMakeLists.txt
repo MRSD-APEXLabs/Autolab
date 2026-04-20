@@ -25,6 +25,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 # Executable
+find_package(nlohmann_json REQUIRED)
 find_package(moveit_core REQUIRED)
 add_executable(move_to_pose_node src/move_to_pose_node.cpp)
 
@@ -54,8 +55,8 @@ ament_target_dependencies(move_to_pose_node
 target_link_libraries(move_to_pose_node
   moveit_ros_planning::moveit_planning_scene_monitor
   ${moveit_core_LIBRARIES}
+  nlohmann_json::nlohmann_json
 )
-
 # Install target
 install(TARGETS
   move_to_pose_node

@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-ROADMAP_FILE = "/home/robot/AutoLab/robot/prm_roadmap.bin"
+ROADMAP_FILE = "/home/labx/coding/Autolab/robot/prm_roadmap.bin"
 
 # ── Load ──────────────────────────────────────────────────────
 with open(ROADMAP_FILE, "rb") as f:
