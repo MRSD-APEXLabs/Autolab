@@ -40,6 +40,10 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2/exceptions.h>
 #include <geometry_msgs/msg/point_stamped.hpp>
+// ── xArm service includes ─────────────────────────────────────
+#include <xarm_msgs/srv/call.hpp>
+#include <xarm_msgs/srv/set_int16.hpp>
+#include <xarm_msgs/srv/set_int16_by_id.hpp>
 // ── STL includes ─────────────────────────────────────────────
 #include <thread>
 #include <chrono>
@@ -218,6 +222,64 @@ visualization_msgs::msg::Marker make_path_marker(
     return marker;
 }
 
+// Reactivate xArm controller: clear errors, enable motion, set state to ready (0).
+// Call this before any execute() to recover from fault/stopped state.
+bool reactivate_xarm(rclcpp::Node::SharedPtr node)
+{
+    // clean_error
+    auto clean_client = node->create_client<xarm_msgs::srv::Call>("/xarm/clean_error");
+    if (!clean_client->wait_for_service(std::chrono::seconds(3))) {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/clean_error service unavailable");
+        return false;
+    }
+    auto clean_req = std::make_shared<xarm_msgs::srv::Call::Request>();
+    auto clean_fut = clean_client->async_send_request(clean_req);
+    if (rclcpp::spin_until_future_complete(node, clean_fut, std::chrono::seconds(5))
+        != rclcpp::FutureReturnCode::SUCCESS)
+    {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] clean_error call failed");
+        return false;
+    }
+    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] clean_error ret=%d", clean_fut.get()->ret);
+
+    // motion_enable: id=8 (all joints), data=1 (enable)
+    auto enable_client = node->create_client<xarm_msgs::srv::SetInt16ById>("/xarm/motion_enable");
+    if (!enable_client->wait_for_service(std::chrono::seconds(3))) {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/motion_enable service unavailable");
+        return false;
+    }
+    auto enable_req = std::make_shared<xarm_msgs::srv::SetInt16ById::Request>();
+    enable_req->id = 8;
+    enable_req->data = 1;
+    auto enable_fut = enable_client->async_send_request(enable_req);
+    if (rclcpp::spin_until_future_complete(node, enable_fut, std::chrono::seconds(5))
+        != rclcpp::FutureReturnCode::SUCCESS)
+    {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] motion_enable call failed");
+        return false;
+    }
+    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] motion_enable ret=%d", enable_fut.get()->ret);
+
+    // set_state: data=0 (SPORT / ready)
+    auto state_client = node->create_client<xarm_msgs::srv::SetInt16>("/xarm/set_state");
+    if (!state_client->wait_for_service(std::chrono::seconds(3))) {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/set_state service unavailable");
+        return false;
+    }
+    auto state_req = std::make_shared<xarm_msgs::srv::SetInt16::Request>();
+    state_req->data = 0;
+    auto state_fut = state_client->async_send_request(state_req);
+    if (rclcpp::spin_until_future_complete(node, state_fut, std::chrono::seconds(5))
+        != rclcpp::FutureReturnCode::SUCCESS)
+    {
+        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] set_state call failed");
+        return false;
+    }
+    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] set_state(0) ret=%d", state_fut.get()->ret);
+
+    return true;
+}
+
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -297,6 +359,11 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
             std_msgs::msg::String s;
             s.data = "EXECUTING";
             state_pub->publish(s);
+        }
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Reactivating xArm controller...");
+        if (!reactivate_xarm(node)) {
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] xArm reactivation failed — aborting execution.");
+            return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
         if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
