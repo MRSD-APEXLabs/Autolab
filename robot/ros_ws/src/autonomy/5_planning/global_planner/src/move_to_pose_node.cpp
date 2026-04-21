@@ -225,6 +225,46 @@ visualization_msgs::msg::Marker make_path_marker(
     return marker;
 }
 
+void set_controller_active(
+    const std::shared_ptr<rclcpp::Node>& node,
+    const std::string& controller_name)
+{
+    auto client = node->create_client<controller_manager_msgs::srv::SwitchController>(
+        "/controller_manager/switch_controller");
+
+    if (!client->wait_for_service(std::chrono::seconds(5))) {
+        RCLCPP_ERROR(node->get_logger(), "Service not available");
+        return;
+    }
+
+    auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+
+    // Activate this controller
+    request->activate_controllers.push_back(controller_name);
+
+    // Optionally deactivate others (leave empty if not needed)
+    // request->deactivate_controllers = {...};
+
+    request->strictness = controller_manager_msgs::srv::SwitchController::Request::STRICT;
+    request->start_asap = true;
+    request->timeout = rclcpp::Duration::from_seconds(5.0);
+
+    auto future = client->async_send_request(request);
+
+    if (rclcpp::spin_until_future_complete(node, future) ==
+        rclcpp::FutureReturnCode::SUCCESS)
+    {
+        auto response = future.get();
+        if (response->ok) {
+            RCLCPP_INFO(node->get_logger(), "Controller activated successfully");
+        } else {
+            RCLCPP_ERROR(node->get_logger(), "Failed to activate controller");
+        }
+    } else {
+        RCLCPP_ERROR(node->get_logger(), "Service call failed");
+    }
+}
+
 // Reactivate xArm controller: clear errors, enable motion, set state to ready (0).
 // Call this before any execute() to recover from fault/stopped state.
 bool reactivate_xarm(rclcpp::Node::SharedPtr node)
@@ -364,10 +404,10 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
             state_pub->publish(s);
         }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Reactivating xArm controller...");
-        if (!reactivate_xarm(node)) {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] xArm reactivation failed — aborting execution.");
-            return std::nullopt;
-        }
+//        if (!reactivate_xarm(node)) {
+//            RCLCPP_ERROR(node->get_logger(), "[Path Planning] xArm reactivation failed — aborting execution.");
+//            return std::nullopt;
+//        }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
         if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
         {
@@ -611,6 +651,12 @@ int main(int argc, char *argv[])
         }
 
         RCLCPP_INFO(node->get_logger(), "Received command: %s", cmd.c_str());
+        if (cmd != "idle")
+        {
+            auto node = rclcpp::Node::make_shared("controller_switch_node");
+            set_controller_active(node, "xarm6_traj_controller");
+        }
+        
 
         if (cmd.rfind("plan_april_", 0) == 0)
         {
