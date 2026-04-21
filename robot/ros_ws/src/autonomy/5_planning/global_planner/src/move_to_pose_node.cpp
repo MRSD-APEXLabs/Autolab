@@ -41,6 +41,10 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2/exceptions.h>
 #include <geometry_msgs/msg/point_stamped.hpp>
+// ── xArm service includes ─────────────────────────────────────
+#include <xarm_msgs/srv/call.hpp>
+#include <xarm_msgs/srv/set_int16.hpp>
+#include <xarm_msgs/srv/set_int16_by_id.hpp>
 // ── STL includes ─────────────────────────────────────────────
 #include <thread>
 #include <chrono>
@@ -222,7 +226,6 @@ visualization_msgs::msg::Marker make_path_marker(
 }
 
 
-
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -302,6 +305,11 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
             std_msgs::msg::String s;
             s.data = "EXECUTING";
             state_pub->publish(s);
+        }
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Reactivating xArm controller...");
+        if (!reactivate_xarm(node)) {
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] xArm reactivation failed — aborting execution.");
+            return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
         if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)

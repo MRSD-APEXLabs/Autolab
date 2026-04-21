@@ -28,6 +28,7 @@ find_package(moveit_ros_planning REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(moveit_core REQUIRED)
+find_package(xarm_msgs REQUIRED)
 add_executable(move_to_pose_node src/move_to_pose_node.cpp)
 
 # Include directories (optional but recommended)
@@ -53,6 +54,7 @@ ament_target_dependencies(move_to_pose_node
   tf2
   controller_manager_msgs
   tf2_geometry_msgs
+  xarm_msgs
 )
 target_link_libraries(move_to_pose_node
   moveit_ros_planning::moveit_planning_scene_monitor
