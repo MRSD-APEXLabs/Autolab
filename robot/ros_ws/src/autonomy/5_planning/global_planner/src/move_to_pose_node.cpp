@@ -520,7 +520,6 @@ int main(int argc, char *argv[])
     target_point.z = 0.0;
 
 
-
     auto finish_plan = [&](const std::optional<moveit::planning_interface::MoveGroupInterface::Plan>& opt) {
         if (opt.has_value()) {
             publish_state("SUCCESS");

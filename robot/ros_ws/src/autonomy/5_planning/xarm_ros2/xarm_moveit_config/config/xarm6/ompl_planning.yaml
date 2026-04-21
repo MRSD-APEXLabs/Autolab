@@ -1,5 +1,9 @@
 xarm6:
+<<<<<<< HEAD
   default_planner_config: SBL
+=======
+  default_planner_config: RRTConnect
+>>>>>>> 19e0b65de22f903df32c8a0a9f219eb3d4c94bc8
   planner_configs:
     - SBL
     - EST
