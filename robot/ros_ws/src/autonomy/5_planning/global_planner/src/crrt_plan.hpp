@@ -374,7 +374,42 @@ prm_plan(
             RCLCPP_ERROR(node->get_logger(),
                 "[PRM] Waypoint %d FAILED collision  octomap=%s  pairs: %s",
                 wp_idx, has_octomap ? "YES" : "NO", pairs.c_str());
-            return std::nullopt;
+            RCLCPP_ERROR(node->get_logger(),
+                    "[PRM] Waypoint %d angles: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                    wp_idx,
+                    q[0], q[1], q[2], q[3], q[4], q[5]);
+            RCLCPP_WARN(node->get_logger(),
+                    "[PRM] Path validation failed — trying midpoint fallback...");
+                auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
+                if (!plan1) { RCLCPP_ERROR(node->get_logger(), "[PRM] Midpoint Stage 1 failed."); return std::nullopt; }
+                auto plan2 = prm_plan_from_to(arm_group, node, best_mid, q_goal);
+                if (!plan2) { RCLCPP_ERROR(node->get_logger(), "[PRM] Midpoint Stage 2 failed."); return std::nullopt; }
+                std::vector<JointVec> stitched;
+                for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+                    stitched.push_back(pt.positions);
+                for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
+                    stitched.push_back(pt.positions);
+                moveit::core::RobotState rs_short(robot_model);
+                rs_short.setToDefaultValues();
+                std::mt19937 rng_short(42);
+                for (int i = 0; i < 200; ++i) {
+                    if (stitched.size() < 3) break;
+                    std::uniform_int_distribution<int> dist_s(0, stitched.size()-1);
+                    int a = dist_s(rng_short), b = dist_s(rng_short);
+                    if (a > b) std::swap(a, b);
+                    if (b - a < 2) continue;
+                    bool ok = true;
+                    JointVec cur = stitched[a];
+                    while (joint_dist(cur, stitched[b]) > crrt_cfg::STEP_SIZE) {
+                        cur = steer(cur, stitched[b], crrt_cfg::STEP_SIZE);
+                        if (!is_valid(cur, rs_short, jmg, scene_snapshot)) { ok = false; break; }
+                    }
+                    if (ok) stitched.erase(stitched.begin()+a+1, stitched.begin()+b);
+                }
+                return build_plan(
+                    stitched,
+                    std::vector<std::string>(joint_names.begin(), joint_names.end()),
+                    arm_group);
         }
         ++wp_idx;
     }

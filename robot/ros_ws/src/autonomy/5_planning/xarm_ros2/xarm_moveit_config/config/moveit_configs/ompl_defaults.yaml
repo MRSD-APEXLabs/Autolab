@@ -92,10 +92,6 @@ planner_configs:
     frountier_threshold: 0.0  # dist new state to nearest neighbor to disqualify as frontier. default: 0.0 set in setup()
     frountier_node_ratio: 0.1  # 1/10, or 1 nonfrontier for every 10 frontier. default: 0.1
     cost_threshold: 1e300  # the cost threshold. Any motion cost that is not better will not be expanded. default: inf
-<<<<<<< HEAD
-
-=======
->>>>>>> 19e0b65de22f903df32c8a0a9f219eb3d4c94bc8
   LBTRRT:
     type: geometric::LBTRRT
     range: 0.0  # Max motion added to tree. ==> maxDistance_ default: 0.0, if 0.0, set on setup()
@@ -124,8 +120,4 @@ planner_configs:
     stretch_factor: 3.0  # roadmap spanner stretch factor. multiplicative upper bound on path quality. It does not make sense to make this parameter more than 3. default: 3.0
     sparse_delta_fraction: 0.25  # delta fraction for connection distance. This value represents the visibility range of sparse samples. default: 0.25
     dense_delta_fraction: 0.001  # delta fraction for interface detection. default: 0.001
-<<<<<<< HEAD
     max_failures: 5000  # maximum consecutive failure limit. default: 5000
-=======
-    max_failures: 5000  # maximum consecutive failure limit. default: 5000
->>>>>>> 19e0b65de22f903df32c8a0a9f219eb3d4c94bc8

@@ -25,6 +25,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(moveit_ros_planning REQUIRED)
 # Executable
+find_package(controller_manager_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(moveit_core REQUIRED)
 add_executable(move_to_pose_node src/move_to_pose_node.cpp)
@@ -50,6 +51,7 @@ ament_target_dependencies(move_to_pose_node
   visualization_msgs
   shape_msgs
   tf2
+  controller_manager_msgs
   tf2_geometry_msgs
 )
 target_link_libraries(move_to_pose_node

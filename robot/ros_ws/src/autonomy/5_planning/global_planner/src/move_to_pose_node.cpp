@@ -11,6 +11,7 @@
 
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
+#include <controller_manager_msgs/srv/switch_controller.hpp>
 #include "crrt_plan.hpp"   // pulls in all others transitively
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
@@ -66,6 +67,8 @@ static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
 static constexpr double WELLPLATE_STALE_SEC = 1.0;
 static constexpr int WELLPLATE_WAIT_TIMEOUT_SEC = 10;
 static constexpr int WELLPLATE_WAIT_STEP_MS = 100;
+
+
 
 struct AprilTagEntry {
     geometry_msgs::msg::Point position;
@@ -217,6 +220,8 @@ visualization_msgs::msg::Marker make_path_marker(
     }
     return marker;
 }
+
+
 
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
