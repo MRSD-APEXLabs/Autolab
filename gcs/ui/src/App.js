@@ -16,15 +16,15 @@ const DEFAULT_ROUTINE = JSON.stringify(
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
                   {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [0]},
-                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [50]},
-                  {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 1, 2, 3, 4], volumes: [10, 10, 10, 10, 10]},
+                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200]},
+                  {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 5, 10, 15, 20], volumes: [40, 40, 40, 40, 40]},
                   {action: 'return_tips'}
                   ]}
       },
       { name: 'pick_up' },
       { name: 'place', target_machine: 'shaker' },
-      { name: 'shaker', pwm: 100 },
-      { name: 'wait', 'time_s': 10 },
+      { name: 'shaker', pwm: 150 },
+      { name: 'wait', 'time_s': 20 },
       { name: 'shaker', pwm: 0 },
       { name: 'pick_up' },
     ],

@@ -73,14 +73,19 @@ def main() -> None:
 
     node = MqttRos2Bridge(client)
 
+    def on_connect(_client, _userdata, _flags, rc):
+        if rc != 0:
+            print(f'[mqtt_ros2_bridge] Connect failed rc={rc}', flush=True)
+            return
+        for mqtt_topic in CMD_TOPIC_MAP:
+            _client.subscribe(mqtt_topic)
+            print(f'[mqtt_ros2_bridge] Subscribed: {mqtt_topic}', flush=True)
+
     def on_message(_client, _userdata, msg):
         node.relay(msg.topic, msg.payload)
 
+    client.on_connect = on_connect
     client.on_message = on_message
-
-    for mqtt_topic in CMD_TOPIC_MAP:
-        client.subscribe(mqtt_topic)
-        print(f'[mqtt_ros2_bridge] Subscribed: {mqtt_topic}', flush=True)
 
     client.loop_start()
 
