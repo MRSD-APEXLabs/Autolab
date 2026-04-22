@@ -130,6 +130,33 @@ prm_plan_from_to(
 //  4. Runs Dijkstra
 //  5. Validates final path and returns a MoveIt plan
 // ─────────────────────────────────────────────────────────────
+// Helper lambda you can reuse anywhere
+// Add this near the top of crrt_plan.hpp, alongside prm_plan_from_to
+
+static void shortcut(
+    std::vector<JointVec>& path,
+    moveit::core::RobotState& rs_sc,
+    const moveit::core::JointModelGroup* jmg,
+    const planning_scene::PlanningScenePtr& scene_snapshot,
+    int iters = 200)
+{
+    std::mt19937 rng_sc(42);
+    for (int i = 0; i < iters; ++i) {
+        if (path.size() < 3) break;
+        std::uniform_int_distribution<int> d(0, path.size() - 1);
+        int a = d(rng_sc), b = d(rng_sc);
+        if (a > b) std::swap(a, b);
+        if (b - a < 2) continue;
+        bool ok = true;
+        JointVec cur = path[a];
+        while (joint_dist(cur, path[b]) > crrt_cfg::STEP_SIZE) {
+            cur = steer(cur, path[b], crrt_cfg::STEP_SIZE);
+            if (!is_valid(cur, rs_sc, jmg, scene_snapshot)) { ok = false; break; }
+        }
+        if (ok) path.erase(path.begin() + a + 1, path.begin() + b);
+    }
+}
+
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
 prm_plan(
     moveit::planning_interface::MoveGroupInterface& arm_group,
@@ -445,16 +472,25 @@ prm_plan(
         auto plan2 = prm_plan_from_to(arm_group, node, best_mid, q_goal);
         if (!plan2) return std::nullopt;
 
-        // stitch as before
-        std::vector<JointVec> stitched;
+        // Extract segment waypoints
+        std::vector<JointVec> seg1, seg2;
         for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
-            stitched.push_back(pt.positions);
+            seg1.push_back(pt.positions);
         for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
-            stitched.push_back(pt.positions);
-        return build_plan(
-            stitched,
-            std::vector<std::string>(joint_names.begin(), joint_names.end()),
-            arm_group);
+            seg2.push_back(pt.positions);
+
+        // Shortcut each segment independently
+        moveit::core::RobotState rs_sc(robot_model);
+        rs_sc.setToDefaultValues();
+        shortcut(seg1, rs_sc, jmg, scene_snapshot, 200);
+        rs_sc.setToDefaultValues();  // reset between segments
+        shortcut(seg2, rs_sc, jmg, scene_snapshot, 200);
+        // Then stitch the already-shortened segments
+        std::vector<JointVec> stitched;
+        stitched.insert(stitched.end(), seg1.begin(), seg1.end());
+        stitched.insert(stitched.end(), seg2.begin(), seg2.end());
+
+        return build_plan(stitched, std::vector<std::string>(joint_names.begin(), joint_names.end()), arm_group);
     }
 
     auto plan = build_plan(
