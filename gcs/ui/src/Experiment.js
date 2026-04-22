@@ -4,6 +4,8 @@ import mqtt from "mqtt";
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
 const CANCEL_TOPIC = "cmd/routine_executor/cancel";
+const PAUSE_TOPIC = "cmd/routine_executor/pause";
+const RESUME_TOPIC = "cmd/routine_executor/resume";
 
 // Mirror of step_config.py display_topics.
 // Keys are step names; values are absolute ROS2 topic paths.
@@ -23,6 +25,7 @@ const ALL_DISPLAY_MQTT_TOPICS = [
 const STATE_STYLE = {
   idle:    { label: "Idle",    badge: "bg-gray-200 text-gray-600",     text: "text-gray-500" },
   running: { label: "Running", badge: "bg-orange-100 text-orange-600", text: "text-orange-600" },
+  paused:  { label: "Paused",  badge: "bg-yellow-100 text-yellow-700", text: "text-yellow-600" },
   success: { label: "Done",    badge: "bg-green-100 text-green-700",   text: "text-green-600" },
   failed:  { label: "Failed",  badge: "bg-red-100 text-red-600",       text: "text-red-600" },
 };
@@ -43,6 +46,14 @@ export default function ExperimentSequence() {
 
   function handleCancel() {
     clientRef.current?.publish(CANCEL_TOPIC, '');
+  }
+
+  function handlePause() {
+    clientRef.current?.publish(PAUSE_TOPIC, '');
+  }
+
+  function handleResume() {
+    clientRef.current?.publish(RESUME_TOPIC, '');
   }
 
   useEffect(() => {
@@ -102,10 +113,26 @@ export default function ExperimentSequence() {
           <button
             onClick={handleCancel}
             className="text-xs px-3 py-1 rounded-full bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-40"
-            disabled={state !== "running"}
+            disabled={state !== "running" && state !== "paused"}
           >
             Cancel
           </button>
+          {state === "running" && (
+            <button
+              onClick={handlePause}
+              className="text-xs px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+            >
+              Pause
+            </button>
+          )}
+          {state === "paused" && (
+            <button
+              onClick={handleResume}
+              className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200"
+            >
+              Resume
+            </button>
+          )}
           <span
             className={`text-xs px-2 py-1 rounded-full ${
               connected ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
@@ -151,6 +178,8 @@ export default function ExperimentSequence() {
                 bg = "bg-green-500";
               } else if (i < currentStepIdx) {
                 bg = "bg-green-500";
+              } else if (i === currentStepIdx && state === "paused") {
+                bg = "bg-yellow-500";
               } else if (i === currentStepIdx && state === "running") {
                 bg = "bg-orange-500";
               } else if (i === currentStepIdx && state === "failed") {
@@ -172,10 +201,10 @@ export default function ExperimentSequence() {
           </div>
 
           <p className="text-sm mt-2 text-gray-500">
-            {state === "running" && status.current_step_name && (
+            {(state === "running" || state === "paused") && status.current_step_name && (
               <>
-                Currently executing:{" "}
-                <span className="text-orange-600 font-medium">
+                {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
+                <span className={`font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-600"}`}>
                   {status.current_step_name}
                 </span>
               </>
@@ -194,13 +223,15 @@ export default function ExperimentSequence() {
       )}
 
       {/* Active Step Card */}
-      {status && state === "running" && status.current_step_name && (
+      {status && (state === "running" || state === "paused") && status.current_step_name && (
         <div className="bg-white rounded-2xl shadow p-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               Step {currentStepIdx + 1} of {totalSteps}
             </h3>
-            <span className="text-sm text-orange-500 font-medium">Running</span>
+            <span className={`text-sm font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-500"}`}>
+              {state === "paused" ? "Paused" : "Running"}
+            </span>
           </div>
 
           <div className="mb-4">
