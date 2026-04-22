@@ -146,13 +146,13 @@ class RoutineExecutorNode(Node):
         if not self._listening:
             return  # ignore stale messages published before this step started
 
-        if msg.status == Status.SUCCESS:
+        if msg.status == Status.RUNNING:
+            self._seen_running = True
+        elif msg.status == Status.SUCCESS and self._seen_running:
             self.get_logger().info(f'Step "{step_name}" succeeded')
             self._sm.on_success()
             self._listening = False
             self._seen_running = False
-        elif msg.status == Status.RUNNING:
-            self._seen_running = True
         elif msg.status == Status.FAILURE and self._seen_running:
             self._sm.on_failure()
             self.get_logger().warn(
