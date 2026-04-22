@@ -416,7 +416,7 @@ bool ManipulationExecutive::activate_camera_mode(const std::string& mode,
     nlohmann::json set_cmd    = {{"cmd", "mode"},   {"mode", mode}};
     nlohmann::json status_cmd = {{"cmd", "status"}};
 
-    constexpr int MAX_POLLS        = 120;   // 60 × 500 ms = 30 s timeout
+    constexpr int MAX_POLLS        = 240;   // 60 × 500 ms = 30 s timeout
     constexpr int POLL_INTERVAL_MS = 500;
 
     ws_round_trip(set_cmd.dump());  // fire mode command; confirm via status polls
