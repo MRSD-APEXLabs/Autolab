@@ -18,16 +18,25 @@ services:
         if [ \"${ISAAC_SIM_USE_STANDALONE_SCRIPT}\" = 'true' ]; then
           tmux send-keys -t isaac '/isaac-sim/python.sh /root/Autolab/simulation/isaac-sim/launch_scripts/${ISAAC_SIM_SCRIPT_NAME}' ENTER
         else
-          tmux send-keys -t isaac 'ros2 launch isaacsim run_isaacsim.launch.py gui:=\"${ISAAC_SIM_GUI}\" play_sim_on_start:=\"${PLAY_SIM_ON_START}\" ' ENTER
+          tmux send-keys -t isaac 'ros2 launch isaacsim_bringup run_isaacsim.launch.py gui:=\"${ISAAC_SIM_GUI}\" play_sim_on_start:=\"${PLAY_SIM_ON_START}\" custom_args:=\"--enable sl.sensor.camera --/renderer/activeGpu=0 --/renderer/multiGpu/enabled=false\"' ENTER
         fi
-        # start ZED streamer explicitly, bind to 0.0.0.0
-        tmux send-keys -t isaac 'zedx-streamer-cli --bind-ip 0.0.0.0 --port 30000 --verbose' ENTER
       fi;
       sleep infinity"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          logdir="/root/.nvidia-omniverse/logs/Kit";
+          [ -d "$$logdir" ] &&
+          latest=$$(find "$$logdir" -type f -name 'kit_*.log' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-) &&
+          [ -n "$$latest" ] && grep -q 'AppReady' "$$latest"
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
     stdin_open: true
     tty: true
     ipc: host
-    privileged: true
     network_mode: host   # simpler networking for ZED
     devices:
       - /dev/bus/usb:/dev/bus/usb   # full USB access
@@ -39,15 +48,18 @@ services:
       - FASTRTPS_DEFAULT_PROFILES_FILE=/isaac-sim/fastdds.xml
       - ISAACSIM_PATH=/isaac-sim
       - ISAACSIM_PYTHON=/isaac-sim/python.sh
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - ROS_DISTRO=jazzy
       - ROS_DOMAIN_ID=0
       - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
-      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - PRIVACY_CONSENT=Y
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["0"]
               capabilities: [gpu]
     volumes:
       - $HOME/.Xauthority:/root/.Xauthority
@@ -60,8 +72,6 @@ services:
       - $HOME/Documents/isaac_sim_data/logs:/root/.nvidia-omniverse/logs:rw
       - $HOME/Documents/isaac_sim_data/data:/root/.local/share/ov/data:rw
       - $HOME/documents/isaac_sim_data/documents:/root/Documents:rw
-      - ./user.config.json:/root/.local/share/ov/data/Kit/Isaac-Sim Full/4.5/user.config.json:rw
-      - ./ui.py:/isaac-sim/kit/exts/omni.kit.widget.nucleus_connector/omni/kit/widget/nucleus_connector/ui.py:rw
       - .dev:/root/.dev:rw
       - .bashrc:/root/.bashrc:rw
       - ../../../common/inputrc:/etc/inputrc:rw
@@ -79,7 +89,7 @@ services:
       - isaac-sim-gui
     command: >
       bash -c "tmux new -d -s isaac; 
-        tmux send-keys -t isaac '/isaac-sim/runapp.sh' ENTER; 
+        tmux send-keys -t isaac '/isaac-sim/runapp.sh --enable sl.sensor.camera --/renderer/activeGpu=0 --/renderer/multiGpu/enabled=false' ENTER;
       sleep infinity"
     networks: !reset null
    

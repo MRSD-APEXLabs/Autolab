@@ -9,8 +9,9 @@
 ROS2_WS_DIR="$HOME/AutoLab/robot/ros_ws"
 # needed for communication with Isaac Sim ROS2  # https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_ros.html#enabling-the-ros-bridge-extension
 export FASTRTPS_DEFAULT_PROFILES_FILE="$ROS2_WS_DIR/fastdds.xml"
-# for local development, prevent conflict with other desktops
-export ROS_LOCALHOST_ONLY=1
+# Compose controls discovery for simulation. Keep an explicitly supplied value
+# instead of forcing localhost-only discovery inside every interactive shell.
+export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 
 # fix ROS2 humble setuptools deprecation warning https://robotics.stackexchange.com/questions/24230/setuptoolsdeprecationwarning-in-ros2-humble/24349#24349
 # PYTHONWARNINGS="ignore:easy_install command is deprecated,ignore:setup.py install is deprecated"
@@ -75,7 +76,9 @@ container_name="robot-1"
 #$(host $(host $(hostname) | awk '{print $NF}') | awk '{print $NF}' | awk -F . '{print $1}')
 
 # remove the prefix and convert dashes to underscores
-export ROBOT_NAME=$(echo "$container_name" | sed 's/.*\(robot-[0-9]*\)$/\1/' | sed 's#-#_#')
+if [ -z "$ROBOT_NAME" ]; then
+    export ROBOT_NAME=$(echo "$container_name" | sed 's/.*\(robot-[0-9]*\)$/\1/' | sed 's#-#_#')
+fi
 
 # fallback: DNS lookup chain failed — derive from hostname directly
 if [ -z "$ROBOT_NAME" ]; then
@@ -89,7 +92,9 @@ if [ -z "$ROBOT_NAME" ]; then
     unset _num
 fi
 
-export ROS_DOMAIN_ID=$(echo "$ROBOT_NAME" | awk -F'_' '{print $NF}')
+if [ -z "$ROS_DOMAIN_ID" ]; then
+    export ROS_DOMAIN_ID=$(echo "$ROBOT_NAME" | awk -F'_' '{print $NF}')
+fi
 # if ROS_DOMAIN_ID is not a number (e.g. hostname like "autolab"), default to 0
 if ! [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]]; then
     export ROS_DOMAIN_ID=0

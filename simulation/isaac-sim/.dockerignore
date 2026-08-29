@@ -1,0 +1,10 @@
+zed-isaac-sim/.git
+zed-isaac-sim/_build
+zed-isaac-sim/_compiler
+zed-isaac-sim/_deps
+zed-isaac-sim/_repo
+zed-isaac-sim/exts/sl.sensor.camera/bin
+zed-isaac-sim/exts/sl.sensor.camera.bridge
+zed-isaac-sim/usd
+Collected_working5
+Final_working

@@ -23,6 +23,7 @@ services:
       - AUTOLAUNCH=${AUTOLAUNCH:-true}
       - NVIDIA_DRIVER_CAPABILITIES=all
       - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
       - ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     command: >
@@ -30,7 +31,7 @@ services:
       service ssh restart;
       if [ $$AUTOLAUNCH == 'true' ]; then
         tmux new -d -s robot_bringup;
-        tmux send-keys -t robot_bringup 'bws && sws && ros2 launch ${ROBOT_LAUNCH_PACKAGE} ${ROBOT_LAUNCH_FILE}' ENTER;
+        tmux send-keys -t robot_bringup 'bws --packages-select base_urdf robot_bringup && sws && ros2 launch ${ROBOT_LAUNCH_PACKAGE} ${ROBOT_LAUNCH_FILE}' ENTER;
       fi;
       sleep infinity"
     # assumes you're connected to work internet, so creates a network to isolate from other developers on your work internet

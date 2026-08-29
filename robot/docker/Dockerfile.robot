@@ -2,6 +2,7 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE:-ubuntu:22.04}
 
+ARG REAL_ROBOT=false
 ARG UPDATE_FLAGS="-o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true"
 ARG INSTALL_FLAGS="-o APT::Get::AllowUnauthenticated=true"
 
@@ -127,17 +128,26 @@ RUN apt update -y && apt install -y \
   libcurl4-openssl-dev \
   nlohmann-json3-dev
 
-# Install TensorRT
-# FAKE ROBOT wget command
-# RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(lsb_release -rs | tr -d .)/x86_64/cuda-keyring_1.1-1_all.deb && \
-
-# REAL ROBOT
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(lsb_release -rs | tr -d .)/sbsa/cuda-keyring_1.1-1_all.deb && \
-  dpkg -i cuda-keyring_1.1-1_all.deb && \
-  apt update -y && \
-  apt install -y \
-    libnvinfer10 libnvinfer-dev libnvinfer-plugin10 \
-    python3-libnvinfer python3-libnvinfer-dev;
+# Install TensorRT for the desktop image. The L4T JetPack base image already
+# contains the Jetson-compatible CUDA and TensorRT stack.
+RUN if [ "${REAL_ROBOT}" = "true" ]; then \
+    echo "Using TensorRT supplied by the L4T JetPack base image"; \
+  else \
+    case "$(dpkg --print-architecture)" in \
+      amd64) cuda_repo_arch=x86_64 ;; \
+      arm64) cuda_repo_arch=sbsa ;; \
+      *) echo "Unsupported architecture for the NVIDIA CUDA repository" >&2; exit 1 ;; \
+    esac && \
+    ubuntu_version="$(lsb_release -rs | tr -d .)" && \
+    wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${ubuntu_version}/${cuda_repo_arch}/cuda-keyring_1.1-1_all.deb" && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      tensorrt-dev \
+      python3-libnvinfer-dev && \
+    rm -rf /var/lib/apt/lists/*; \
+  fi
 
 
 # ARG UBUNTU_RELEASE_YEAR=22
@@ -168,7 +178,7 @@ RUN pip3 install \
   pypose \
   rich \
   tqdm \
-  pillow \ 
+  pillow \
   flow_vis \
   h5py \
   evo \
@@ -177,13 +187,12 @@ RUN pip3 install \
   timm==0.9.12 \
   rerun-sdk==0.22.0 \
   yacs \
-  wandb \ 
+  wandb \
   loguru \
   jaxtyping \
   kornia \
   typeguard==2.13.3 \
   onnx \
-  tensorrt \
   opencv-python \
   websockets
 
@@ -232,7 +241,6 @@ RUN addgroup --gid 1000 robot && \
   echo "robot:robot" | chpasswd
 
 
-ARG REAL_ROBOT=true
 RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   # Put commands here that should run for the real robot but not the sim
   echo "REAL_ROBOT is true"; \
@@ -272,4 +280,3 @@ RUN cd ~/AutoLab/robot/ros_ws \
 && rm -rf build install log \
 && colcon build --packages-ignore robot_bringup rviz_behavior_tree_panel \
 && source install/setup.bash
-

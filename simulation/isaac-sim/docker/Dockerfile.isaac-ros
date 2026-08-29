@@ -1,4 +1,4 @@
-ARG ISAAC_VERSION="5.0.0"
+ARG ISAAC_VERSION="6.0.1"
 # expects context to be the root of the repository, i.e. AutoLab/. this is so we can access AutoLab/ros_ws/
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_VERSION}
 ARG ISAAC_VERSION
@@ -15,7 +15,7 @@ ENV OMNI_KIT_ALLOW_ROOT=1
 # setup environment
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
-ENV ROS_DISTRO=humble
+ENV ROS_DISTRO=jazzy
 
 # setup timezone
 RUN echo 'Etc/UTC' > /etc/timezone && \
@@ -65,26 +65,23 @@ RUN set -eux; \
     rm -rf "$GNUPGHOME"
 
 # setup ros2 apt source
-RUN echo "deb [ signed-by=/usr/share/keyrings/ros2-latest-archive-keyring.gpg ] http://packages.ros.org/ros2/ubuntu jammy main" > /etc/apt/sources.list.d/ros2-latest.list
+RUN echo "deb [ signed-by=/usr/share/keyrings/ros2-latest-archive-keyring.gpg ] http://packages.ros.org/ros2/ubuntu noble main" > /etc/apt/sources.list.d/ros2-latest.list
 
-# Remove conflicting third-party apt sources that cause libbrotli conflicts
-RUN rm -f /etc/apt/sources.list.d/*deb.sury.org*.list || true && apt-get update
-
+# Install the ROS distribution native to Isaac Sim 6's Ubuntu 24.04 base.
 RUN apt-get update && \
-    apt-get install -y --allow-downgrades --no-install-recommends libbrotli1=1.0.9-2build6 && \
-    apt-mark hold libbrotli1 && \
     apt-get install -y --no-install-recommends \
     libfreetype6-dev \
     libfontconfig1-dev \
-    ros-humble-desktop \
+    ros-jazzy-desktop \
     ros-dev-tools \
     python3-rosdep \
-    ros-humble-tf2* \
-    ros-humble-ackermann-msgs \
-    ros-humble-topic-tools \
-    ros-humble-grid-map \
-    ros-humble-domain-bridge \
-    ros-humble-moveit \
+    ros-jazzy-tf2-ros \
+    ros-jazzy-tf2-tools \
+    ros-jazzy-ackermann-msgs \
+    ros-jazzy-topic-tools \
+    ros-jazzy-grid-map \
+    ros-jazzy-domain-bridge \
+    ros-jazzy-moveit \
     zstd \
     python3-colcon-common-extensions && \
     rm -rf /var/lib/apt/lists/*
@@ -99,9 +96,9 @@ ARG isaac_dir_name="IsaacSim-ros_workspaces-IsaacSim-${ISAAC_VERSION}"
 RUN cd /tmp/ && \
     curl -L -O https://github.com/isaac-sim/IsaacSim-ros_workspaces/archive/refs/tags/IsaacSim-${ISAAC_VERSION}.zip && \
     unzip IsaacSim-${ISAAC_VERSION}.zip && \
-    mv ${isaac_dir_name}/humble_ws /humble_ws && \
-    cd /humble_ws && \
-    . /opt/ros/humble/setup.sh && \
+    mv ${isaac_dir_name}/jazzy_ws /jazzy_ws && \
+    cd /jazzy_ws && \
+    . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install && \
     rm -rf /tmp/IsaacSim-${ISAAC_VERSION}.zip /tmp/${isaac_dir_name}
 
@@ -119,19 +116,37 @@ RUN git clone https://github.com/tmux-plugins/tpm /root/.tmux/plugins/tpm
 # copy FastDDS config
 COPY docker/fastdds.xml /isaac-sim/fastdds.xml
 
-# ROS2 humble launch script seeks this
+# The ROS 2 launch package also searches this compatibility path.
 RUN ln -s /isaac-sim /root/isaacsim
 
-ARG UBUNTU_RELEASE_YEAR=22
-ARG CUDA_MAJOR=12
-ARG CUDA_MINOR=8
-ARG ZED_SDK_MAJOR=5
-ARG ZED_SDK_MINOR=1
-# Install ZED SDK
-RUN wget -q -O ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run https://download.stereolabs.com/zedsdk/${ZED_SDK_MAJOR}.${ZED_SDK_MINOR}/cu${CUDA_MAJOR}/ubuntu${UBUNTU_RELEASE_YEAR} && \
-  chmod +x ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run ; ./ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run -- silent && \
+ARG UBUNTU_RELEASE_YEAR=24
+ARG ZED_CUDA_MAJOR=12
+ARG ZED_CUDA_MINOR=8
+ARG ZED_SDK_VERSION=5.4.1
+# Isaac Sim 6 does not expose a system CUDA toolkit. Install only the CUDA
+# runtime libraries required by ZED instead of allowing the ZED installer to
+# pull the much larger compiler, profiler, and Nsight toolchain.
+RUN wget -q -O /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_RELEASE_YEAR}04/x86_64/cuda-keyring_1.1-1_all.deb && \
+  dpkg -i /tmp/cuda-keyring.deb && \
+  apt-get update && \
+  apt-get install -y --no-install-recommends cuda-libraries-${ZED_CUDA_MAJOR}-${ZED_CUDA_MINOR} && \
+  rm -rf /var/lib/apt/lists/* /tmp/cuda-keyring.deb
+
+# Install ZED SDK. CUDA is provided above, so skip the installer's toolkit
+# detection (which checks for nvcc and otherwise installs the full toolkit).
+RUN wget -q -O ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run https://download.stereolabs.com/zedsdk/${ZED_SDK_VERSION}/cu${ZED_CUDA_MAJOR}/ubuntu${UBUNTU_RELEASE_YEAR} && \
+  chmod +x ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run && \
+  ./ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run -- silent skip_cuda && \
   ln -sf /lib/x86_64-linux-gnu/libusb-1.0.so.0 /usr/lib/x86_64-linux-gnu/libusb-1.0.so && \
   rm ZED_SDK_Linux_Ubuntu${UBUNTU_RELEASE_YEAR}.run
+
+# Build against Isaac Sim's Ubuntu/GCC runtime to prevent GLIBCXX ABI errors.
+# Isaac Sim automatically searches /isaac-sim/extsUser for extensions.
+COPY zed-isaac-sim /opt/zed-isaac-sim
+RUN cd /opt/zed-isaac-sim && \
+    ./build.sh && \
+    mkdir -p /isaac-sim/extsUser && \
+    cp -a exts/. /isaac-sim/extsUser/
 
 
 # Cleanup. Prevent people accidentally doing git commits as root in Docker

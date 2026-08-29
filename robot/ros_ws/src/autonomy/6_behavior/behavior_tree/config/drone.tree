@@ -59,3 +59,22 @@
 					(Stuck)
 					[Rewind]
 				[Follow Global Plan]
+
+
+			if map esistes -> pick up 5,0,9)
+
+
+
+
+			<waiting/initialized>
+			<execute>
+
+			<find well plate>
+			<grasp well plate>
+			<transfer well plate>
+			<place well plate>
+				<ot2-execute>
+				<shaker-execute>
+			<go back to grasp and repeat>
+
+			<stop?>

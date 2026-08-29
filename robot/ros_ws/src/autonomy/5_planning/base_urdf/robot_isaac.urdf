@@ -1,6 +1,16 @@
 <?xml version="1.0" ?>
 <robot name="demo_bot">
 
+  <!-- KDL requires the tree root to have no inertia.  Keep the physical
+       chassis unchanged beneath a massless fixed root frame. -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_to_chassis" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="Chassis_1"/>
+    <!-- The exported mesh/joint tree is X-up relative to ROS's Z-up view. -->
+    <origin xyz="0 0 0.89259868" rpy="3.141592653589793 0 0"/>
+  </joint>
 
   <link name="Chassis_1">
     <visual name="Chassis_1_visual">
@@ -292,6 +302,39 @@
   <joint name="Revolute_4" type="revolute">
     <parent link="Az_Back_left_1"/><child link="Wheel_Back_Left_1"/>
     <origin xyz="0 -0.0024 -0.057" rpy="1.5707 0 0"/><axis xyz="0 0 -1"/><limit effort="1" velocity="1" lower="-6.28" upper="6.28"/>
+  </joint>
+
+  <!-- Physical camera frames use the ROS camera_link convention: X forward,
+       Y left, Z up. Optical children use REP-103: Z forward, X right, Y down. -->
+  <link name="zed_x_mount"/>
+  <joint name="zed_x_mount_joint" type="fixed">
+    <!-- Parent to the corrected root so the chassis inversion is not applied
+         a second time to this transform extracted from the USD world frame. -->
+    <parent link="base_footprint"/>
+    <child link="zed_x_mount"/>
+    <origin xyz="0.08318796 0.03996821 1.50901977"
+            rpy="-0.00002608 0.52735827 -0.00600658"/>
+  </joint>
+  <link name="zed_x_left_camera"/>
+  <joint name="zed_x_left_optical_joint" type="fixed">
+    <parent link="zed_x_mount"/>
+    <child link="zed_x_left_camera"/>
+    <!-- <origin xyz="0 0 0" rpy="-1.570796326794897 0 -1.570796326794897"/> -->
+    <origin xyz="0 0 0" rpy="-1.570796326794897 -1.570796326794897 -1.570796326794897"/>
+  </joint>
+
+  <link name="zed_x_nano_mount"/>
+  <joint name="zed_x_nano_mount_joint" type="fixed">
+    <parent link="gripper_v43_1"/>
+    <child link="zed_x_nano_mount"/>
+    <origin xyz="0.05207864 0.03019945 -0.04880624"
+            rpy="-1.51883872 0.05957537 -1.70751561"/>
+  </joint>
+  <link name="zed_x_nano_left_camera"/>
+  <joint name="zed_x_nano_left_optical_joint" type="fixed">
+    <parent link="zed_x_nano_mount"/>
+    <child link="zed_x_nano_left_camera"/>
+    <origin xyz="0 0 0" rpy="-1.570796326794897 0 -1.570796326794897"/>
   </joint>
 
 </robot>
