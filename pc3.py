@@ -10,6 +10,8 @@ import cv2
 import numpy as np
 import websockets
 
+import os
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -25,6 +27,7 @@ import sensor_msgs_py.point_cloud2 as pc2
 WS_URI = "ws://192.168.1.101:8766"
 FRAME_ID = "top_camera"
 PC_COUNT = 10
+PC_CACHE_PATH = "./pc3_accumulated.npy"
 
 
 class WSVisualizer(Node):
@@ -41,6 +44,12 @@ class WSVisualizer(Node):
 
         self._pc_buffer: List[np.ndarray] = []
         self._pcs: Optional[np.ndarray] = None
+
+        if os.path.exists(PC_CACHE_PATH):
+            self._pcs = np.load(PC_CACHE_PATH)
+            self.get_logger().info(
+                f"Loaded cached point cloud from {PC_CACHE_PATH} ({self._pcs.shape[0]} points)"
+            )
 
         # Servo topics
         self.servo_image_pub = self.create_publisher(Image, "/servo/image", qos)
@@ -418,8 +427,9 @@ class WSVisualizer(Node):
             if len(self._pc_buffer) >= PC_COUNT:
                 self._pcs = np.vstack(self._pc_buffer)
                 self._pc_buffer.clear()
+                np.save(PC_CACHE_PATH, self._pcs)
                 self.get_logger().info(
-                    f"Point cloud accumulated: {self._pcs.shape[0]} points."
+                    f"Point cloud accumulated: {self._pcs.shape[0]} points. Saved to {PC_CACHE_PATH}"
                 )
 
         if self._pcs is not None:

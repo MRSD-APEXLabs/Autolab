@@ -42,19 +42,21 @@ demo_arm_bot:
     - PRMstar
     - BITstar
     - InformedRRTstar 
+    - BiTRRT
   RRTConnect:
-    type: geometric::RRTConnect
+    type: geometric::RRTstar
     range: 0.015
     num_planning_attempts: 100
-    goal_bias: 0.3
+    goal_bias: 0.8
     seed: 42
   ## Any planning path longer than this (relative to world) will be checked for collisions
   # Update this in your yaml
   longest_valid_segment_fraction: 0.002  # Make this smaller for tighter spaces
   # ## Used for projection-based planners like KPIECE
   # projection_evaluator: joints(Revolute_9,Revolute_10, Revolute_11, Revolute_12)  # Example: project to 3D space of these joints
-  enforce_joint_model_state_space: true # Helps with constraints
+  # enforce_joint_model_state_space: true # Helps with constraints
   enforce_constrained_state_space: true
+  constraint_approximation_method: PROJECT 
   # enforce_constrained_state_space: true  
   simplify_solutions: true
   interpolation_type: open_rave # Keeps it human-like

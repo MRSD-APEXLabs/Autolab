@@ -18,10 +18,17 @@ find_package(moveit_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(shape_msgs REQUIRED)
+find_package(ompl REQUIRED)
+find_package(octomap REQUIRED)
+find_package(octomap_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-
+find_package(moveit_ros_planning REQUIRED)
 # Executable
+find_package(controller_manager_msgs REQUIRED)
+find_package(nlohmann_json REQUIRED)
+find_package(moveit_core REQUIRED)
+find_package(xarm_msgs REQUIRED)
 add_executable(move_to_pose_node src/move_to_pose_node.cpp)
 
 # Include directories (optional but recommended)
@@ -36,6 +43,7 @@ ament_target_dependencies(move_to_pose_node
   moveit_ros_planning_interface
   geometry_msgs
   nav_msgs
+  moveit_core
   sensor_msgs
   std_msgs
   std_srvs
@@ -44,9 +52,17 @@ ament_target_dependencies(move_to_pose_node
   visualization_msgs
   shape_msgs
   tf2
+  controller_manager_msgs
   tf2_geometry_msgs
+  xarm_msgs
 )
-
+target_link_libraries(move_to_pose_node
+  moveit_ros_planning::moveit_planning_scene_monitor
+  ${moveit_core_LIBRARIES}
+  nlohmann_json::nlohmann_json
+  moveit_core::moveit_trajectory_processing
+  moveit_core::moveit_robot_trajectory
+)
 # Install target
 install(TARGETS
   move_to_pose_node

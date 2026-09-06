@@ -140,6 +140,12 @@
     </visual>
     <collision>
       <geometry>
+<<<<<<<< HEAD:robot/ros_ws/src/autonomy/5_planning/base_urdf/robot.old.urdf
+        <box size="0.17 0.05 0.05"/></geometry>
+    </collision>
+  </link>
+
+========
         <box size="0.17 0.05 0.05"/>
       </geometry>
     </collision>
@@ -160,37 +166,11 @@
     </visual> -->
     <collision>
       <geometry>
-        <box size="0.025 0.35 0.5"/>
+        <box size="0.05 1 0.5"/>
       </geometry>
     </collision>
   </link>
-  <link name="wellplate_holder_link">
-    <!-- <visual>
-      <geometry>
-        <box size="0.03320 1 0.5"/>
-      </geometry>
-      <material name="green"><color rgba="0 1 0 1"/></material>
-    </visual> -->
-    <!-- <visual>
-      <geometry>
-        <box size="0.0001 0.0001 0.0001"/>
-      </geometry>
-      <material name="green"><color rgba="0 1 0 1"/></material>
-    </visual> -->
-    <collision>
-      <geometry>
-        <box size="0.32 0.65 0.025"/>
-      </geometry>
-    </collision>
-  </link>
-<!--   
-  <link name="gripper_wire_link">
-    <collision>
-      <geometry>
-        <box size="0.07 0.15 0.05"/>
-      </geometry>
-    </collision>
-  </link> -->
+
   <link name="wellplate_link">
     <!-- <visual>
       <geometry>
@@ -200,7 +180,7 @@
     </visual> -->
     <collision>
       <geometry>
-        <box size="0.004 0.01410 0.08543"/>
+        <box size="0.12771 0.01410 0.08543"/>
       </geometry>
     </collision>
   </link>
@@ -234,7 +214,7 @@
     </visual> -->
     <collision>
       <geometry>
-        <box size="0.05 0.35 0.8"/>
+        <box size="0.05 1 0.5"/>
       </geometry>
     </collision>
   </link>
@@ -242,6 +222,7 @@
 
 
 
+>>>>>>>> 19e0b65de22f903df32c8a0a9f219eb3d4c94bc8:robot/ros_ws/src/autonomy/5_planning/base_urdf/robot.urdf
   <link name="Finger_left_2">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Finger_left_2.stl"/></geometry></visual>
     <collision><geometry><mesh filename="package://base_urdf/meshes/Finger_left_2.stl" scale="1 1.5 1"/></geometry></collision>
@@ -392,7 +373,7 @@
   <joint name="Revolute_8" type="revolute">
     <origin xyz="0.429 -0.049 0.784" rpy="3.14159 0 0"/>
     <parent link="Chassis_1"/>
-    <child link="Az_Back_left_1"/>3
+    <child link="Az_Back_left_1"/>
     <axis xyz="0 0 -1"/><limit effort="1" velocity="1" lower="-6.28" upper="6.28"/>
   </joint>
 
@@ -418,6 +399,8 @@
     <origin xyz="0 0.10 0" rpy="0.0 0.0 0.0"/> 
   </joint>
 
+<<<<<<<< HEAD:robot/ros_ws/src/autonomy/5_planning/base_urdf/robot.old.urdf
+========
   <joint name="cube_joint" type="fixed">
     <parent link="Chassis_1"/> <child link="cube_link"/>
     <origin xyz="0.16 0.2 -0.15" rpy="0.0 0.0 0.0"/> 
@@ -435,16 +418,9 @@
 
   <joint name="cube_angle_joint" type="fixed">
     <parent link="Chassis_1"/> <child link="cube_angle_link"/>
-    <origin xyz="0.05 0.2 -0.65" rpy="0.0 0.523598776 0.0"/> 
+    <origin xyz="0.05 0.0 -0.65" rpy="0.0 0.523598776 0.0"/> 
   </joint>
+  
 
-  <joint name="wellplate_holder_joint" type="fixed">
-    <parent link="Chassis_1"/> <child link="wellplate_holder_link"/>
-    <origin xyz="0 +0.2 0.14" rpy="0.0 0 0.0"/> 
-  </joint>
-   <!-- <joint name="gripper_wire_joint" type="fixed">
-    <parent link="camera_link"/> <child link="gripper_wire_link"/>
-    <origin xyz="-0.12 -0.045 0" rpy="0.0 0 0.0"/> 
-  </joint> -->
-
+>>>>>>>> 19e0b65de22f903df32c8a0a9f219eb3d4c94bc8:robot/ros_ws/src/autonomy/5_planning/base_urdf/robot.urdf
 </robot>

@@ -11,8 +11,6 @@
 
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
-#include <controller_manager_msgs/srv/switch_controller.hpp>
-#include "crrt_plan.hpp"   // pulls in all others transitively
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -41,10 +39,6 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2/exceptions.h>
 #include <geometry_msgs/msg/point_stamped.hpp>
-// ── xArm service includes ─────────────────────────────────────
-#include <xarm_msgs/srv/call.hpp>
-#include <xarm_msgs/srv/set_int16.hpp>
-#include <xarm_msgs/srv/set_int16_by_id.hpp>
 // ── STL includes ─────────────────────────────────────────────
 #include <thread>
 #include <chrono>
@@ -55,24 +49,11 @@
 #include <iomanip>
 #include <map>
 
-// Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
-static constexpr double WS_X_MIN = -0.15;
-static constexpr double WS_X_MAX =  0.85;
-static constexpr double WS_Y_MIN = -0.50;
-static constexpr double WS_Y_MAX =  0.50;
-static constexpr double WS_Z_MIN =  0.90;
-static constexpr double WS_Z_MAX =  1.30;
-
-static constexpr double ARM_PLANNING_TIME_SEC = 15.0;
+static constexpr double ARM_PLANNING_TIME_SEC = 30.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
 static constexpr double APRIL_TAG_STALE_SEC = 1.0;
 static constexpr int APRIL_TAG_WAIT_TIMEOUT_SEC = 10;
 static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
-static constexpr double WELLPLATE_STALE_SEC = 1.0;
-static constexpr int WELLPLATE_WAIT_TIMEOUT_SEC = 10;
-static constexpr int WELLPLATE_WAIT_STEP_MS = 100;
-
-
 
 struct AprilTagEntry {
     geometry_msgs::msg::Point position;
@@ -82,12 +63,9 @@ static std::map<int, AprilTagEntry> april_tags;
 static std::mutex april_tags_mutex;
 static int marker_id = 0;
 
-struct WellplateEntry {
-    geometry_msgs::msg::Point position;
-    rclcpp::Time stamp;
-};
-static std::optional<WellplateEntry> wellplate_detection;
-static std::mutex wellplate_mutex;
+double wellplate_tag_x = 0.0;
+double wellplate_tag_y = 0.0;
+double wellplate_tag_z = 0.0;
 
 namespace defaults
 {
@@ -225,104 +203,6 @@ visualization_msgs::msg::Marker make_path_marker(
     return marker;
 }
 
-void set_controller_active(
-    const std::shared_ptr<rclcpp::Node>& node,
-    const std::string& controller_name)
-{
-    auto client = node->create_client<controller_manager_msgs::srv::SwitchController>(
-        "/controller_manager/switch_controller");
-
-    if (!client->wait_for_service(std::chrono::seconds(5))) {
-        RCLCPP_ERROR(node->get_logger(), "Service not available");
-        return;
-    }
-
-    auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
-
-    // Activate this controller
-    request->activate_controllers.push_back(controller_name);
-
-    // Optionally deactivate others (leave empty if not needed)
-    // request->deactivate_controllers = {...};
-
-    request->strictness = controller_manager_msgs::srv::SwitchController::Request::STRICT;
-    request->start_asap = true;
-    request->timeout = rclcpp::Duration::from_seconds(5.0);
-
-    auto future = client->async_send_request(request);
-
-    if (rclcpp::spin_until_future_complete(node, future) ==
-        rclcpp::FutureReturnCode::SUCCESS)
-    {
-        auto response = future.get();
-        if (response->ok) {
-            RCLCPP_INFO(node->get_logger(), "Controller activated successfully");
-        } else {
-            RCLCPP_ERROR(node->get_logger(), "Failed to activate controller");
-        }
-    } else {
-        RCLCPP_ERROR(node->get_logger(), "Service call failed");
-    }
-}
-
-// Reactivate xArm controller: clear errors, enable motion, set state to ready (0).
-// Call this before any execute() to recover from fault/stopped state.
-bool reactivate_xarm(rclcpp::Node::SharedPtr node)
-{
-    // clean_error
-    auto clean_client = node->create_client<xarm_msgs::srv::Call>("/xarm/clean_error");
-    if (!clean_client->wait_for_service(std::chrono::seconds(3))) {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/clean_error service unavailable");
-        return false;
-    }
-    auto clean_req = std::make_shared<xarm_msgs::srv::Call::Request>();
-    auto clean_fut = clean_client->async_send_request(clean_req);
-    if (rclcpp::spin_until_future_complete(node, clean_fut, std::chrono::seconds(5))
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] clean_error call failed");
-        return false;
-    }
-    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] clean_error ret=%d", clean_fut.get()->ret);
-
-    // motion_enable: id=8 (all joints), data=1 (enable)
-    auto enable_client = node->create_client<xarm_msgs::srv::SetInt16ById>("/xarm/motion_enable");
-    if (!enable_client->wait_for_service(std::chrono::seconds(3))) {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/motion_enable service unavailable");
-        return false;
-    }
-    auto enable_req = std::make_shared<xarm_msgs::srv::SetInt16ById::Request>();
-    enable_req->id = 8;
-    enable_req->data = 1;
-    auto enable_fut = enable_client->async_send_request(enable_req);
-    if (rclcpp::spin_until_future_complete(node, enable_fut, std::chrono::seconds(5))
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] motion_enable call failed");
-        return false;
-    }
-    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] motion_enable ret=%d", enable_fut.get()->ret);
-
-    // set_state: data=0 (SPORT / ready)
-    auto state_client = node->create_client<xarm_msgs::srv::SetInt16>("/xarm/set_state");
-    if (!state_client->wait_for_service(std::chrono::seconds(3))) {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] /xarm/set_state service unavailable");
-        return false;
-    }
-    auto state_req = std::make_shared<xarm_msgs::srv::SetInt16::Request>();
-    state_req->data = 0;
-    auto state_fut = state_client->async_send_request(state_req);
-    if (rclcpp::spin_until_future_complete(node, state_fut, std::chrono::seconds(5))
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-        RCLCPP_ERROR(node->get_logger(), "[reactivate_xarm] set_state call failed");
-        return false;
-    }
-    RCLCPP_INFO(node->get_logger(), "[reactivate_xarm] set_state(0) ret=%d", state_fut.get()->ret);
-
-    return true;
-}
-
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -340,7 +220,7 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);           // match GUI exactly
     arm_group.setNumPlanningAttempts(20);     // match GUI exactly
     arm_group.setPoseReferenceFrame("world");
-    arm_group.setPathConstraints(make_ee_down_constraint());
+    arm_group.clearPathConstraints();
     arm_group.setStartStateToCurrentState();
     arm_group.setWorkspace(-0.15, -0.50, 0.90,
                             0.85,  0.50, 1.30);
@@ -363,11 +243,8 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     std::vector<double> joint_values;
     current_state->copyJointGroupPositions(jmg, joint_values);
     arm_group.setJointValueTarget(joint_values);  // ← key change
-    
-    RCLCPP_INFO(node->get_logger(),
-        "Constraints: %zu",
-        arm_group.getPathConstraints().orientation_constraints.size());
-        arm_group.allowReplanning(true);
+    arm_group.setPathConstraints(make_ee_down_constraint());
+        // arm_group.allowReplanning(true);
 
     // Adjust speed based on task type
     double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
@@ -378,13 +255,11 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     {
         // ── Plan ──────────────────────────────────────────────
         moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto crrt_opt = prm_plan(arm_group, node, joint_values);
-        if (!crrt_opt)
+        if (arm_group.plan(plan) != moveit::core::MoveItErrorCode::SUCCESS)
         {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] CRRT planning failed.");
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Planning failed.");
             return std::nullopt;
         }
-        plan = std::move(*crrt_opt);
 
         // ── Publish to RViz (like MoveIt Plan button) ─────────
         auto display_pub = node->create_publisher<moveit_msgs::msg::DisplayTrajectory>(
@@ -403,18 +278,13 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
             s.data = "EXECUTING";
             state_pub->publish(s);
         }
-        RCLCPP_INFO(node->get_logger(), "[Path Planning] Reactivating xArm controller...");
-//        if (!reactivate_xarm(node)) {
-//            RCLCPP_ERROR(node->get_logger(), "[Path Planning] xArm reactivation failed — aborting execution.");
-//            return std::nullopt;
-//        }
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Executing plan...");
-        if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
-        {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
-            // pub_status->publish([]{ std_msgs::msg::String s; s.data="RRT_EXEC_FAILED"; return s; }());
-            return std::nullopt;
-        }
+        // if (arm_group.execute(plan) != moveit::core::MoveItErrorCode::SUCCESS)
+        // {
+        //     RCLCPP_ERROR(node->get_logger(), "[Path Planning] Execution failed.");
+        //     // pub_status->publish([]{ std_msgs::msg::String s; s.data="RRT_EXEC_FAILED"; return s; }());
+        //     return std::nullopt;
+        // }
 
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Execution succeeded. Syncing state...");
         // ── Update start state for next planning stage ─────────
@@ -494,6 +364,27 @@ void publish_target_marker(
                 pose.position.x, pose.position.y, pose.position.z);
 }
 
+void wellplate_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
+{
+    for (const auto &marker : msg->markers)
+    {
+        // Skip markers that are not being added
+        if (marker.action != visualization_msgs::msg::Marker::ADD)
+            continue;
+
+        // Process wellplate markers
+        if (marker.ns == "wellplates")
+        {
+            wellplate_tag_x = marker.pose.position.x;
+            wellplate_tag_y = marker.pose.position.y;
+            wellplate_tag_z = marker.pose.position.z;
+
+            // RCLCPP_INFO(this->get_logger(),
+            //             "Wellplate Marker ID: %d | Position -> x: %.3f, y: %.3f, z: %.3f",
+            //             marker.id, wellplate_tag_x, wellplate_tag_y, wellplate_tag_z);
+        }
+    }
+}
 
 static std::mutex cmd_mutex;
 static std::string received_command = "idle";
@@ -511,8 +402,7 @@ int main(int argc, char *argv[])
 
     // Spin on a background thread so MoveGroupInterface can call services
     // without blocking the main execution thread.
-    rclcpp::executors::MultiThreadedExecutor executor(
-        rclcpp::ExecutorOptions(), 2);
+    rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(node);
     std::thread executor_thread([&executor]()
                                 { executor.spin(); });
@@ -567,6 +457,7 @@ int main(int argc, char *argv[])
             {
                 if (marker.action != visualization_msgs::msg::Marker::ADD)
                     continue;
+                // TODO: Investigate this. marker.id appears to actually be 0 indexed.
                 april_tags[marker.id] = {marker.pose.position, node->now()};
             }
         });
@@ -575,17 +466,7 @@ int main(int argc, char *argv[])
     auto wellplate_subscription = node->create_subscription<visualization_msgs::msg::MarkerArray>(
         "/inspect/wellplates",
         qos,
-        [&node](const visualization_msgs::msg::MarkerArray::SharedPtr msg)
-        {
-            std::lock_guard<std::mutex> lock(wellplate_mutex);
-            for (const auto &marker : msg->markers)
-            {
-                if (marker.action != visualization_msgs::msg::Marker::ADD)
-                    continue;
-                if (marker.ns == "wellplates")
-                    wellplate_detection = WellplateEntry{marker.pose.position, node->now()};
-            }
-        });
+        wellplate_callback);
 
     // 1. Define your custom QoS profile
     rclcpp::QoS pointcloud_qos(1);
@@ -629,6 +510,25 @@ int main(int argc, char *argv[])
     target_point.y = 0.5;
     target_point.z = 0.0;
 
+    // arm_group.setPlanningPipelineId("ompl");
+    // arm_group.setPlannerId("RRTConnect");
+    // arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);
+    // arm_group.setNumPlanningAttempts(40);
+    // arm_group.setPoseReferenceFrame("world");
+    // arm_group.setPathConstraints(make_ee_down_constraint());
+    // arm_group.setStartStateToCurrentState();
+    // // arm_group.setPoseTarget(target_pose);
+    // arm_group.setWorkspace(
+    //     0.0, 0.0, 1.0,
+    //     1, 1.5, 1.5);
+    // arm_group.setGoalPositionTolerance(0.01);
+    // arm_group.setGoalOrientationTolerance(0.05);
+    // arm_group.allowReplanning(true);
+
+    // Adjust speed based on task type
+    // double velocity_scaling = (task_type == "Grasp") ? 0.05 : 0.1;
+    // arm_group.setMaxVelocityScalingFactor(velocity_scaling);
+    // arm_group.setMaxAccelerationScalingFactor(velocity_scaling);
 
     auto finish_plan = [&](const std::optional<moveit::planning_interface::MoveGroupInterface::Plan>& opt) {
         if (opt.has_value()) {
@@ -651,12 +551,6 @@ int main(int argc, char *argv[])
         }
 
         RCLCPP_INFO(node->get_logger(), "Received command: %s", cmd.c_str());
-        if (cmd != "idle")
-        {
-            auto node = rclcpp::Node::make_shared("controller_switch_node");
-            set_controller_active(node, "xarm6_traj_controller");
-        }
-        
 
         if (cmd.rfind("plan_april_", 0) == 0)
         {
@@ -735,35 +629,11 @@ int main(int argc, char *argv[])
         }
         else if (cmd == "plan_wellplate")
         {
-            // Wait up to WELLPLATE_WAIT_TIMEOUT_SEC for a fresh detection
-            geometry_msgs::msg::Point wellplate_point;
-            bool found = false;
-            for (int elapsed_ms = 0;
-                 elapsed_ms < WELLPLATE_WAIT_TIMEOUT_SEC * 1000;
-                 elapsed_ms += WELLPLATE_WAIT_STEP_MS)
-            {
-                {
-                    const rclcpp::Time now = node->now();
-                    std::lock_guard<std::mutex> lock(wellplate_mutex);
-                    if (wellplate_detection.has_value() &&
-                        (now - wellplate_detection->stamp).seconds() <= WELLPLATE_STALE_SEC)
-                    {
-                        wellplate_point = wellplate_detection->position;
-                        found = true;
-                    }
-                }
-                if (found) break;
-                rclcpp::sleep_for(std::chrono::milliseconds(WELLPLATE_WAIT_STEP_MS));
-            }
 
-            if (!found)
-            {
-                RCLCPP_ERROR(node->get_logger(),
-                             "Wellplate not found or stale after %ds — aborting.",
-                             WELLPLATE_WAIT_TIMEOUT_SEC);
-                finish_plan(std::nullopt);
-                continue;
-            }
+            geometry_msgs::msg::Point wellplate_point;
+            wellplate_point.x = wellplate_tag_x;
+            wellplate_point.y = wellplate_tag_y;
+            wellplate_point.z = wellplate_tag_z;
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
@@ -830,18 +700,33 @@ int main(int argc, char *argv[])
         }
         else if (cmd == "plan_home_offset")
         {
-            const JointVec home_offset_joints = {1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284};
+            // TODO: Move Hardcoded values to a config file
+            geometry_msgs::msg::Point home_point;
+            home_point.x = -0.048;
+            home_point.y = 0.443;
+            home_point.z = 0.247;
+
+            // Resolve final task parameters (live > default)
+            const geometry_msgs::msg::Pose target_position =
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, home_point, 0.15));
+            const std::string task_type =
+                live_task_type.value_or(defaults::TASK_TYPE);
+            publish_target_marker(node, target_position);
+
+            if (!live_target_pose)
+                RCLCPP_WARN(node->get_logger(), "Using default target pose.");
+            if (!live_task_type)
+                RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
+
+            const double PREGRASP_Z_OFFSET = 0.00;
+            geometry_msgs::msg::Pose pregrasp_pose = target_position;
+            pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             publish_state("PLANNING");
-            auto rrt_plan_opt = prm_plan(arm_group, node, home_offset_joints);
+            auto rrt_plan_opt = plan_and_publish_rrt(
+                task_type, pregrasp_pose,
+                arm_group, node, planning_state_pub);
 
-            if (rrt_plan_opt) {
-                publish_state("EXECUTING");
-                if (arm_group.execute(*rrt_plan_opt) != moveit::core::MoveItErrorCode::SUCCESS) {
-                    finish_plan(std::nullopt);
-                    continue;
-                }
-            }
             finish_plan(rrt_plan_opt);
         }
         else

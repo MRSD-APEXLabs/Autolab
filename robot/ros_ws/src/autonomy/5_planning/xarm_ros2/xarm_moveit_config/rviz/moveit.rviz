@@ -93,11 +93,11 @@ Visualization Manager:
         Center:
           X: 0.35
           Y: 0
-          Z: 1.1
+          Z: 1.05
         Size:
           X: 1
           Y: 1
-          Z: 0.4
+          Z: 0.35
       Name: MotionPlanning
       Planned Path:
         Color Enabled: false
@@ -173,7 +173,17 @@ Visualization Manager:
             Show Axes: false
             Show Trail: false
             Value: true
+          base_top_link:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
           camera_link:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
+          cube_angle_link:
             Alpha: 1
             Show Axes: false
             Show Trail: false
@@ -328,7 +338,17 @@ Visualization Manager:
             Show Axes: false
             Show Trail: false
             Value: true
+          base_top_link:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
           camera_link:
+            Alpha: 1
+            Show Axes: false
+            Show Trail: false
+            Value: true
+          cube_angle_link:
             Alpha: 1
             Show Axes: false
             Show Trail: false
@@ -460,7 +480,17 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        base_top_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         camera_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        cube_angle_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -587,7 +617,17 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        base_top_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         camera_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        cube_angle_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -690,25 +730,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.623917818069458
+      Distance: 1.8138484954833984
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.19554832577705383
-        Y: -0.08961130678653717
-        Z: 0.8507053256034851
+        X: 0.19355255365371704
+        Y: -0.13161824643611908
+        Z: 0.7282426953315735
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.19039665162563324
+      Pitch: 0.7653959393501282
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 1.6304006576538086
+      Yaw: 3.6454010009765625
     Saved: ~
 Window Geometry:
   Displays:

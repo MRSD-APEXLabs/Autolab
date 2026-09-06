@@ -32,6 +32,10 @@ class RoutineExecutorNode(Node):
                                  self._on_start_cmd, 10)
         self.create_subscription(String, '/routine_executor/cancel',
                                  self._on_cancel, 10)
+        self.create_subscription(String, '/routine_executor/pause',
+                                 self._on_pause_cmd, 10)
+        self.create_subscription(String, '/routine_executor/resume',
+                                 self._on_resume_cmd, 10)
 
         # Status output
         self._status_pub = self.create_publisher(String, '/routine_executor/status', 10)
@@ -84,8 +88,8 @@ class RoutineExecutorNode(Node):
             self.get_logger().error(f'Invalid JSON in start_routine_cmd: {e}')
             return
 
-        if self._sm.state == 'running':
-            self.get_logger().warn('Routine already running — ignoring start command')
+        if self._sm.state in ('running', 'paused'):
+            self.get_logger().warn(f'Routine already active (state={self._sm.state}) — ignoring start command')
             return
 
         steps = payload.get('steps', [])
@@ -127,7 +131,7 @@ class RoutineExecutorNode(Node):
         self.get_logger().info(f'Starting routine: {steps} (robot={robot}, retries={max_retries})')
 
     def _on_cancel(self, msg: String) -> None:
-        if self._sm.state == 'running':
+        if self._sm.state in ('running', 'paused'):
             if self._listen_timer is not None and not self._listen_timer.is_canceled():
                 self._listen_timer.cancel()
             if self._wait_timer is not None and not self._wait_timer.is_canceled():
@@ -138,21 +142,35 @@ class RoutineExecutorNode(Node):
         else:
             self.get_logger().warn('Cancel received but no routine is running')
 
+    def _on_pause_cmd(self, msg: String) -> None:
+        if self._sm.state == 'running':
+            self._sm.pause()
+            self.get_logger().info('Routine paused')
+        else:
+            self.get_logger().warn(f'Pause received but state is {self._sm.state}')
+
+    def _on_resume_cmd(self, msg: String) -> None:
+        if self._sm.state == 'paused':
+            self._sm.resume()
+            self.get_logger().info('Routine resumed')
+        else:
+            self.get_logger().warn(f'Resume received but state is {self._sm.state}')
+
     def _on_action_status(self, msg: Status, step_name: str) -> None:
-        if self._sm.state != 'running':
+        if self._sm.state not in ('running', 'paused'):
             return
         if step_name != self._sm.current_step_name():
             return
         if not self._listening:
             return  # ignore stale messages published before this step started
 
-        if msg.status == Status.SUCCESS:
+        if msg.status == Status.RUNNING:
+            self._seen_running = True
+        elif msg.status == Status.SUCCESS and self._seen_running:
             self.get_logger().info(f'Step "{step_name}" succeeded')
             self._sm.on_success()
             self._listening = False
             self._seen_running = False
-        elif msg.status == Status.RUNNING:
-            self._seen_running = True
         elif msg.status == Status.FAILURE and self._seen_running:
             self._sm.on_failure()
             self.get_logger().warn(

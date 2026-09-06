@@ -6,10 +6,10 @@ my_pointcloud:
   point_cloud_topic: /zed_pointcloud
   max_range: 1.5
   point_subsample: 1
-  padding_offset: 0.1
-  padding_scale: 1.15
+  padding_offset: 0.0
+  padding_scale: 0.0
   max_update_rate: 0.0
-  octomap_resolution: 0.02
+  octomap_resolution: 0.05
   filtered_cloud_topic: /zed_pointcloud_filtered
   transform_tolerance:  0.1
 octomap_resolution: 0.02
