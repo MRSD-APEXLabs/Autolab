@@ -244,8 +244,11 @@ RUN addgroup --gid 1000 robot && \
 RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   # Put commands here that should run for the real robot but not the sim
   echo "REAL_ROBOT is true"; \
-  apt-get ${UPDATE_FLAGS} update && apt-get ${INSTALL_FLAGS} install -y libimath-dev; \
-  groupadd -g 20 dialout; \
+  curl -s --compressed -o /usr/share/keyrings/ctr-pubkey.gpg "https://deb.ctr-electronics.com/ctr-pubkey.gpg" && \
+  curl -s --compressed -o /etc/apt/sources.list.d/ctr2026.list "https://deb.ctr-electronics.com/ctr2026.list" && \
+  sed -i 's/stable/jetson/' /etc/apt/sources.list.d/ctr2026.list && \
+  apt-get ${UPDATE_FLAGS} update && apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
+  (getent group dialout || groupadd -g 20 dialout) && \
   usermod -aG dialout robot; \
   USER=robot && \
   GROUP=robot && \

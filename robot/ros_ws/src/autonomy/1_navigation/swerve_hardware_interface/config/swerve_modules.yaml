@@ -1,0 +1,25 @@
+# config/swerve_modules.yaml
+# Mirrors the module_mapping.cpp defaults + shared physical/control constants
+# from the source repo's generated/tuner_constants.py. module_mapping.cpp is
+# the source of truth for CAN IDs/offsets; this file documents the remaining
+# shared constants consumed by Task 4/5.
+/**:
+  ros__parameters:
+    can_bus_name: "AutoLab Canivore"
+    wheel_radius_m: 0.0508
+    drive_gear_ratio: 7.03125
+    steer_gear_ratio: 26.09090909090909
+    coupling_gear_ratio: 4.5
+    steer_kp: 100.0
+    steer_ki: 0.0
+    steer_kd: 0.5
+    steer_ks: 0.1
+    steer_kv: 2.49
+    drive_kp: 0.1
+    drive_ki: 0.0
+    drive_kd: 0.0
+    drive_ks: 0.0
+    drive_kv: 0.124
+    steer_stator_current_limit_a: 60.0
+    command_watchdog_timeout_ms: 250
+    joint_states_publish_rate_hz: 100.0

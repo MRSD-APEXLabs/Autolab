@@ -1,12 +1,16 @@
 <!-- AUTONOMY -->
 <launch>
 
+  <arg name="sim" default="true" />
+
   <!-- Interface -->
   <include
     file="$(find-pkg-share $(env INTERFACE_LAUNCH_PACKAGE))/launch/$(env INTERFACE_LAUNCH_FILE)" />
 
   <!-- Navigation -->
-  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)" />
+  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)">
+    <arg name="sim" value="$(var sim)" />
+  </include>
 
   <!-- Perception -->
   <include
