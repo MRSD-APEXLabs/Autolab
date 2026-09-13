@@ -25,7 +25,7 @@ SwerveModuleHardware::SwerveModuleHardware(
 bool SwerveModuleHardware::configure()
 {
   configs::CANcoderConfiguration cc_cfg{};
-  cc_cfg.MagnetSensor.MagnetOffset = cfg_.cancoder_offset_rot;
+  cc_cfg.MagnetSensor.MagnetOffset = units::angle::turn_t{cfg_.cancoder_offset_rot};
   bool ok = cancoder_.GetConfigurator().Apply(cc_cfg).IsOK();
 
   configs::TalonFXConfiguration steer_cfg{};
@@ -38,7 +38,8 @@ bool SwerveModuleHardware::configure()
   steer_cfg.Feedback.FeedbackSensorSource =
     signals::FeedbackSensorSourceValue::FusedCANcoder;
   steer_cfg.Feedback.RotorToSensorRatio = params_.steer_gear_ratio;
-  steer_cfg.CurrentLimits.StatorCurrentLimit = params_.steer_stator_current_limit_a;
+  steer_cfg.CurrentLimits.StatorCurrentLimit =
+    units::current::ampere_t{params_.steer_stator_current_limit_a};
   steer_cfg.CurrentLimits.StatorCurrentLimitEnable = true;
   ok = steer_.GetConfigurator().Apply(steer_cfg).IsOK() && ok;
 
