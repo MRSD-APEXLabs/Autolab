@@ -322,6 +322,8 @@ static int extend_greedy_with_projection(std::vector<RRTNode>& tree,
                                          const moveit::core::JointModelGroup* jmg,
                                          const planning_scene::PlanningScenePtr& scene)
 {
+    // Function to extend the tree greedily toward q_target, projecting to ee_down and checking collisions. Returns index of last added node or -1 if no progress. 
+
     int last_added_idx = -1;
     int ni = nearest(tree, q_target);
     JointVec q_curr = tree[ni].q;

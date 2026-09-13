@@ -1,3 +1,6 @@
 log/
 .idea
 frames_2026*
+venv
+.venv*
+__pycache__/

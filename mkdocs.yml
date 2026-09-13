@@ -1,0 +1,76 @@
+site_name: Autolab
+site_description: MRSD APEX Labs self-driving laboratory robot — xArm6 + swerve base + OT-2 + shaker
+repo_url: https://github.com/MRSD-APEXLabs/Autolab
+repo_name: MRSD-APEXLabs/Autolab
+
+# The docs container (docs/docker/docker-compose.yaml) mounts the repo root at
+# /docs, so this file must live at the repo root and pages under docs/.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - toc.integrate
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# docs/docker/ holds the mkdocs container build files, not site content.
+exclude_docs: |
+  docker/
+
+nav:
+  - Home: index.md
+  - ROS 2 Primer: ros2-primer.md
+  - Setup: setup.md
+  - Running the System: running.md
+  - Planning Quickstart (copy-paste): planning-quickstart.md
+  - Subsystems:
+      - Robot Bringup: subsystems/robot-bringup.md
+      - Planning & Arm Motion: subsystems/planning.md
+      - Behavior & Executives: subsystems/behavior.md
+      - Perception: subsystems/perception.md
+      - Camera-Edge (Xavier): subsystems/xavier.md
+      - Navigation (Swerve Base): subsystems/navigation.md
+      - Ground Control Station: subsystems/gcs.md
+      - Web UI: subsystems/ui.md
+      - Simulation (Isaac Sim): subsystems/simulation.md
+      - Joystick Teleop: subsystems/teleop.md
+  - Reference:
+      - Command Cheatsheet: reference/commands.md
+      - Topic Map: reference/topics.md
+      - Data Files: reference/data-files.md
+  - Known Issues & Gotchas: known-issues.md

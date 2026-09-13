@@ -542,6 +542,18 @@ Visualization Manager:
       Update Interval: 0
       Value: true
       Visual Enabled: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: CRRT Search
+      Namespaces:
+        {}
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /crrt/viz
+      Value: true
     - Class: moveit_rviz_plugin/Trajectory
       Color Enabled: false
       Enabled: true

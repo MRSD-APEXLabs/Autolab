@@ -14,7 +14,8 @@ from xarm.wrapper import XArmAPI
 WAYPOINTS_FILE = "/home/robot/AutoLab/robot/manual_waypoints.json"
 
 arm = XArmAPI('192.168.1.236')
-time.sleep(0.5)python
+DISPLAY_INTERVAL = 5.0  # seconds between live pose prints
+time.sleep(0.5)
 arm.set_mode(2)   # manual/teach mode — lets you move the arm by hand
 arm.set_state(0)
 
