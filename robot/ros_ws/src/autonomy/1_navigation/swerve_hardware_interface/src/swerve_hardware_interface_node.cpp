@@ -77,7 +77,7 @@ public:
 
     if (all_configured) {
       enable_feed_timer_ = create_wall_timer(
-        50ms, [this]() {ctre::phoenix6::unmanaged::FeedEnable(100);});
+        50ms, [this]() {ctre::phoenix::unmanaged::FeedEnable(100);});
     }
 
     publish_timer_ = create_wall_timer(
