@@ -22,11 +22,28 @@ SwerveModuleHardware::SwerveModuleHardware(
 {
 }
 
+namespace
+{
+// Apply() can transiently fail ("Could not transmit CAN Frame") when all
+// 12 devices across 4 modules are configured back-to-back right as the bus
+// comes up — retry rather than treating a single dropped frame as a real
+// device/wiring fault.
+template<typename Device, typename Config>
+bool apply_with_retry(Device & device, const Config & config, int max_tries = 5)
+{
+  bool ok = false;
+  for (int i = 0; i < max_tries && !ok; ++i) {
+    ok = device.GetConfigurator().Apply(config).IsOK();
+  }
+  return ok;
+}
+}  // namespace
+
 bool SwerveModuleHardware::configure()
 {
   configs::CANcoderConfiguration cc_cfg{};
   cc_cfg.MagnetSensor.MagnetOffset = units::angle::turn_t{cfg_.cancoder_offset_rot};
-  bool ok = cancoder_.GetConfigurator().Apply(cc_cfg).IsOK();
+  bool ok = apply_with_retry(cancoder_, cc_cfg);
 
   configs::TalonFXConfiguration steer_cfg{};
   steer_cfg.Slot0.kP = params_.steer_kp;
@@ -46,7 +63,7 @@ bool SwerveModuleHardware::configure()
   steer_cfg.CurrentLimits.StatorCurrentLimit =
     units::current::ampere_t{params_.steer_stator_current_limit_a};
   steer_cfg.CurrentLimits.StatorCurrentLimitEnable = true;
-  ok = steer_.GetConfigurator().Apply(steer_cfg).IsOK() && ok;
+  ok = apply_with_retry(steer_, steer_cfg) && ok;
 
   configs::TalonFXConfiguration drive_cfg{};
   drive_cfg.Slot0.kP = params_.drive_kp;
@@ -62,7 +79,7 @@ bool SwerveModuleHardware::configure()
   // (SwerveModuleConstants), not on the raw device config. This is a known,
   // accepted gap (see design spec) that will cause minor odometry
   // drift/wheel scrub when steering in place; out of scope for this task.
-  ok = drive_.GetConfigurator().Apply(drive_cfg).IsOK() && ok;
+  ok = apply_with_retry(drive_, drive_cfg) && ok;
 
   return ok;
 }
