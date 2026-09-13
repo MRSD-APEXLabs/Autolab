@@ -7,7 +7,7 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 
 #include <ctre/phoenix6/CANBus.hpp>
-#include <ctre/phoenix6/Unmanaged.hpp>
+#include <ctre/phoenix6/unmanaged/Unmanaged.hpp>
 
 #include "swerve_hardware_interface/module_mapping.hpp"
 #include "swerve_hardware_interface/swerve_module_hardware.hpp"

@@ -23,7 +23,7 @@ add_executable(swerve_hardware_interface_node
 )
 target_link_libraries(swerve_hardware_interface_node
   swerve_module_mapping
-  phoenix6::ctre_phoenix6
+  phoenix6
 )
 ament_target_dependencies(swerve_hardware_interface_node
   rclcpp

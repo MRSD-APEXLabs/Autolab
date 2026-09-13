@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include <ctre/phoenix6/configs/Configs.hpp>
+#include <ctre/phoenix6/configs/Configuration.hpp>
 #include <ctre/phoenix6/controls/VelocityVoltage.hpp>
 #include <ctre/phoenix6/controls/PositionVoltage.hpp>
 
