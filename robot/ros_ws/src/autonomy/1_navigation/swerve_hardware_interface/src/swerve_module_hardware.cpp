@@ -35,8 +35,13 @@ bool SwerveModuleHardware::configure()
   steer_cfg.Slot0.kS = params_.steer_ks;
   steer_cfg.Slot0.kV = params_.steer_kv;
   steer_cfg.Feedback.FeedbackRemoteSensorID = cfg_.cancoder_id;
+  // RemoteCANcoder, not FusedCANcoder — fusion is a Phoenix Pro-licensed
+  // feature and these steer TalonFX are unlicensed. RemoteCANcoder still
+  // drives steer position feedback directly off the CANcoder (same
+  // RotorToSensorRatio mapping to mechanism units), just without Pro's
+  // rotor-fusion smoothing/robustness.
   steer_cfg.Feedback.FeedbackSensorSource =
-    signals::FeedbackSensorSourceValue::FusedCANcoder;
+    signals::FeedbackSensorSourceValue::RemoteCANcoder;
   steer_cfg.Feedback.RotorToSensorRatio = params_.steer_gear_ratio;
   steer_cfg.CurrentLimits.StatorCurrentLimit =
     units::current::ampere_t{params_.steer_stator_current_limit_a};
@@ -72,7 +77,7 @@ void SwerveModuleHardware::set_drive_velocity_rotps(double wheel_rotps)
 
 void SwerveModuleHardware::set_steer_position_rad(double rad)
 {
-  // Under FusedCANcoder feedback, the TalonFX's mechanism position already
+  // Under RemoteCANcoder feedback, the TalonFX's mechanism position already
   // tracks the CANcoder (module/azimuth) directly — one mechanism rotation
   // equals one module rotation, already gear-compensated by firmware. Only
   // convert rad -> mechanism turns, no steer_gear_ratio factor here.
@@ -89,7 +94,7 @@ double SwerveModuleHardware::get_drive_velocity_rotps()
 double SwerveModuleHardware::get_steer_position_rad()
 {
   // See set_steer_position_rad(): firmware already reports mechanism
-  // (module/azimuth) turns via FusedCANcoder, no gear ratio factor here.
+  // (module/azimuth) turns via RemoteCANcoder, no gear ratio factor here.
   double mechanism_turns = steer_.GetPosition().GetValueAsDouble();
   return mechanism_turns * 2.0 * M_PI;
 }
