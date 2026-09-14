@@ -2,6 +2,55 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Testing
+
+### Unit tests (frontend)
+
+```bash
+npm install    # first time, or after package.json changes
+npm test       # interactive watch mode
+CI=true npx react-scripts test --watchAll=false            # run once, non-interactive (CI)
+CI=true npx react-scripts test src/debug --watchAll=false   # just the debug console suite
+```
+
+### Debug / Testing Console (manual)
+
+The `/debug` route (`src/debug/`) is a curated low-level command console for testing
+individual autonomy subsystems (navigation, planning, perception, manipulation, lab
+machine integration) outside the main APEX flow. See
+`docs/superpowers/specs/2026-09-13-debug-testing-ui-design.md` for the full design.
+
+To exercise it end to end:
+
+1. Bring up the stack so the MQTT broker and ROS2 nodes are running:
+   ```bash
+   autolab up            # from the repo root, sitl/desktop profile is fine
+   ```
+2. Start the dev server and open the console:
+   ```bash
+   npm start
+   # then visit http://localhost:3000/debug
+   ```
+3. The connection banner at the top should read "MQTT: connected" once the
+   broker (port 9001, MQTT-over-WebSocket) is reachable. Each panel's status
+   tiles populate as the corresponding ROS2 topics publish; every
+   motion/hardware-sending button requires a second "Confirm?" click before
+   it actually publishes.
+
+### ROS2-side tests (bridge + manipulation_executive)
+
+These live outside `gcs/ui` and need a container with ROS2 sourced (see the
+top-level `CLAUDE.md`):
+
+```bash
+# Inside the gcs container — mqtt_ros2_bridge unit tests
+colcon test --packages-select gcs_monitoring --event-handlers=console_direct+
+
+# Inside the robot container — manipulation_executive's camera-mode guard test
+colcon build --symlink-install --packages-select manipulation_executive
+colcon test --packages-select manipulation_executive --event-handlers=console_direct+
+```
+
 ## Available Scripts
 
 In the project directory, you can run:
