@@ -73,6 +73,13 @@ ManipulationExecutive::ManipulationExecutive()
         "manipulation_command", 10,
         std::bind(&ManipulationExecutive::command_callback, this, std::placeholders::_1));
 
+    // Debug-tool: manual camera-edge mode command, guarded to only run when idle.
+    camera_mode_status_pub_ = this->create_publisher<std_msgs::msg::String>(
+        "perception/camera_mode_status", 10);
+    camera_mode_cmd_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "perception/camera_mode_cmd", 10,
+        std::bind(&ManipulationExecutive::camera_mode_cmd_callback, this, std::placeholders::_1));
+
     // 20 Hz timer
     timer_ = rclcpp::create_timer(
         this, this->get_clock(), rclcpp::Duration::from_seconds(1.0 / 20.0),
@@ -127,6 +134,36 @@ void ManipulationExecutive::command_callback(
         RCLCPP_WARN(this->get_logger(), "Unknown manipulation type '%s' — ignoring",
                     msg->type.c_str());
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Manual camera-mode command — debug tool. Only runs when idle; does not
+// interact with the pick/place state machine's own use of activate_camera_mode.
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ManipulationExecutive::camera_mode_cmd_callback(const std_msgs::msg::String::SharedPtr msg)
+{
+    if (!camera_mode_cmd_allowed(manip_phase_)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Ignoring manual camera-mode command '%s' — manipulation in progress",
+                    msg->data.c_str());
+        std_msgs::msg::String status;
+        status.data = "busy";
+        camera_mode_status_pub_->publish(status);
+        return;
+    }
+
+    const std::string mode = msg->data;
+    RCLCPP_INFO(this->get_logger(), "Manual camera-mode command: '%s'", mode.c_str());
+
+    // Fire-and-forget: this is a standalone debug action, not part of
+    // tick_manip()'s pending_/in_flight_ future-polling machinery.
+    std::thread([this, mode]() {
+        bool ok = activate_camera_mode(mode, /*wait_complete=*/false);
+        std_msgs::msg::String status;
+        status.data = ok ? "activated" : "failed";
+        camera_mode_status_pub_->publish(status);
+    }).detach();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

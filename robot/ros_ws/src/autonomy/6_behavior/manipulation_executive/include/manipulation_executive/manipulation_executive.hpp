@@ -26,6 +26,13 @@ public:
         PLANNING_SAFE,
     };
 
+    // Debug-tool guard for the manual camera-mode command topic — only allow
+    // a manual mode change while no pick/place is in flight. Defined inline
+    // here (not in the .cpp) so it's unit-testable without linking main().
+    static bool camera_mode_cmd_allowed(ManipPhase phase) {
+        return phase == ManipPhase::IDLE;
+    }
+
 private:
     // ── BT nodes ──────────────────────────────────────────────────────────────
     bt::Condition* pick_up_condition_;
@@ -58,6 +65,8 @@ private:
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr camera_mode_cmd_sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr camera_mode_status_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
     // 0=unknown/waiting, 1=SUCCESS, 2=ERROR
@@ -67,6 +76,7 @@ private:
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::ManipulationCommand::SharedPtr msg);
+    void camera_mode_cmd_callback(const std_msgs::msg::String::SharedPtr msg);
     void timer_callback();
 
     // ── State machine ─────────────────────────────────────────────────────────
