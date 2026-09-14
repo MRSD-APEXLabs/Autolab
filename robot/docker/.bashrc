@@ -22,6 +22,19 @@ export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 function bws(){
     echo "Running \`colcon build $@\` in $ROS2_WS_DIR"
     COLCON_LOG_PATH="$ROS2_WS_DIR"/log colcon build --symlink-install --base-paths "$ROS2_WS_DIR"/ --build-base "$ROS2_WS_DIR"/build/ --install-base "$ROS2_WS_DIR"/install/ "$@"
+
+    # setcap is stored on the file itself and is wiped every time colcon
+    # relinks the binary, so it has to be reapplied after every build.
+    # --symlink-install means the install/ path is a symlink into build/ —
+    # setcap refuses symlinks, so resolve it first.
+    local swerve_bin="$ROS2_WS_DIR/install/swerve_hardware_interface/lib/swerve_hardware_interface/swerve_hardware_interface_node"
+    if [ -f "$swerve_bin" ]; then
+        if sudo setcap cap_net_admin+ep "$(readlink -f "$swerve_bin")"; then
+            echo "Reapplied cap_net_admin to swerve_hardware_interface_node (no sudo needed to run it)"
+        else
+            echo "WARNING: setcap failed on swerve_hardware_interface_node — it will need sudo to bring up the CAN bus"
+        fi
+    fi
 }
 function sws(){
     echo "Sourcing "$ROS2_WS_DIR"/install/local_setup.bash"

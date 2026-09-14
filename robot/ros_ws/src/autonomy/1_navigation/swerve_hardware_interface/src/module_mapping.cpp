@@ -8,8 +8,8 @@ namespace swerve_hardware_interface
 std::vector<ModuleConfig> default_module_configs()
 {
   return {
-    {"FR", "Revolute_1", "Revolute_5", 12, 32, 22, -0.009521484375},
-    {"FL", "Revolute_2", "Revolute_6", 10, 30, 20, -0.199462890625},
+    {"FR", "Revolute_2", "Revolute_6", 12, 32, 22, -0.009521484375},
+    {"FL", "Revolute_1", "Revolute_5", 10, 30, 20, -0.199462890625},
     {"RR", "Revolute_4", "Revolute_8", 13, 33, 23, -0.082275390625},
     {"RL", "Revolute_3", "Revolute_7", 11, 31, 21, -0.36376953125},
   };

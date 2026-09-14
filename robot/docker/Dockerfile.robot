@@ -50,6 +50,7 @@ RUN sudo add-apt-repository universe \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null \
   && apt-get ${UPDATE_FLAGS} update -y && apt-get ${INSTALL_FLAGS} install -y --no-install-recommends \
     ros-humble-desktop \
+    ros-humble-ros2run \
     python3-argcomplete \
   && rm -rf /var/lib/apt/lists/*
 
@@ -249,7 +250,19 @@ RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   sed -i 's/stable/jetson/' /etc/apt/sources.list.d/ctr2026.list && \
   apt-get ${UPDATE_FLAGS} update && apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
   (getent group dialout || groupadd -g 20 dialout) && \
-  usermod -aG dialout robot; \
+  usermod -aG dialout robot && \
+  # phoenix6's .so lives in a non-default dir, and the ROS2 workspace binary
+  # that links it (swerve_hardware_interface_node) gets `setcap
+  # cap_net_admin+ep` applied after each build (see .bashrc's bws()) so it
+  # can bring up the CANivore's SocketCAN interface without sudo. File
+  # capabilities put the binary into glibc secure-exec mode, which makes the
+  # dynamic loader ignore LD_LIBRARY_PATH entirely — so both phoenix6's lib
+  # dir and ROS2's own core lib dir (normally found only via the
+  # LD_LIBRARY_PATH set by sourcing setup.bash) must be registered with
+  # ldconfig instead, or that binary can't find its own dependencies.
+  echo "/usr/lib/phoenix6" > /etc/ld.so.conf.d/phoenix6.conf && \
+  echo "/opt/ros/humble/lib" > /etc/ld.so.conf.d/ros-humble.conf && \
+  ldconfig; \
   USER=robot && \
   GROUP=robot && \
   curl -SsL https://github.com/boxboat/fixuid/releases/download/v0.6.0/fixuid-0.6.0-linux-arm64.tar.gz | tar -C /usr/local/bin -xzf - && \
