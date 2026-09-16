@@ -27,6 +27,7 @@ def generate_launch_description():
             'robot_type': 'xarm',
             'hw_ns': hw_ns,
             'no_gui_ctrl': 'false',
+            'show_rviz': 'false',
         }.items(),
     )
     
