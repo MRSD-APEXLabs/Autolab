@@ -5,7 +5,7 @@
     <arg name="odom_topic" default="/robot_1/odom" />
     <arg name="frame_id" default="base_link" />
 
-    <node pkg="rtabmap_ros" exec="rtabmap" name="rtabmap" namespace="rtabmap" output="screen">
+    <node pkg="rtabmap_slam" exec="rtabmap_node" name="rtabmap" namespace="rtabmap" output="screen">
         <param name="frame_id" value="$(var frame_id)" />
         <param name="subscribe_depth" value="false" />
         <param name="subscribe_rgb" value="false" />
