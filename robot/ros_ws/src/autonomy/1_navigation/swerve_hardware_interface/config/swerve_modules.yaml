@@ -5,7 +5,7 @@
 # shared constants consumed by Task 4/5.
 /**:
   ros__parameters:
-    can_bus_name: "AutoLab Canivore"
+    can_bus_name: "can0"
     wheel_radius_m: 0.0508
     drive_gear_ratio: 7.03125
     steer_gear_ratio: 26.09090909090909

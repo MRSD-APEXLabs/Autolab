@@ -27,10 +27,14 @@ function bws(){
     # relinks the binary, so it has to be reapplied after every build.
     # --symlink-install means the install/ path is a symlink into build/ —
     # setcap refuses symlinks, so resolve it first.
+    # cap_net_raw is needed alongside cap_net_admin for raw CAN frame TX/RX
+    # (cap_net_admin alone brings the interface administratively up, but
+    # SocketCAN frame I/O is gated by cap_net_raw) — see swerve_hardware_interface/README.txt
+    # for the full CAN bring-up debugging history.
     local swerve_bin="$ROS2_WS_DIR/install/swerve_hardware_interface/lib/swerve_hardware_interface/swerve_hardware_interface_node"
     if [ -f "$swerve_bin" ]; then
-        if sudo setcap cap_net_admin+ep "$(readlink -f "$swerve_bin")"; then
-            echo "Reapplied cap_net_admin to swerve_hardware_interface_node (no sudo needed to run it)"
+        if sudo setcap cap_net_admin,cap_net_raw+ep "$(readlink -f "$swerve_bin")"; then
+            echo "Reapplied cap_net_admin,cap_net_raw to swerve_hardware_interface_node (no sudo needed to run it)"
         else
             echo "WARNING: setcap failed on swerve_hardware_interface_node — it will need sudo to bring up the CAN bus"
         fi

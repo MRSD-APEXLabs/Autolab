@@ -253,13 +253,22 @@ RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   usermod -aG dialout robot && \
   # phoenix6's .so lives in a non-default dir, and the ROS2 workspace binary
   # that links it (swerve_hardware_interface_node) gets `setcap
-  # cap_net_admin+ep` applied after each build (see .bashrc's bws()) so it
-  # can bring up the CANivore's SocketCAN interface without sudo. File
-  # capabilities put the binary into glibc secure-exec mode, which makes the
-  # dynamic loader ignore LD_LIBRARY_PATH entirely — so both phoenix6's lib
-  # dir and ROS2's own core lib dir (normally found only via the
-  # LD_LIBRARY_PATH set by sourcing setup.bash) must be registered with
-  # ldconfig instead, or that binary can't find its own dependencies.
+  # cap_net_admin,cap_net_raw+ep` applied after each build (see .bashrc's
+  # bws()) so it can bring up and use the CANivore's SocketCAN interface
+  # without sudo (cap_net_admin for interface up/down, cap_net_raw for raw
+  # frame TX/RX). File capabilities put the binary into glibc secure-exec
+  # mode, which makes the dynamic loader ignore LD_LIBRARY_PATH entirely —
+  # so both phoenix6's lib dir and ROS2's own core lib dir (normally found
+  # only via the LD_LIBRARY_PATH set by sourcing setup.bash) must be
+  # registered with ldconfig instead, or that binary can't find its own
+  # dependencies. NOTE: if a running robot-l4t container throws
+  # "error while loading shared libraries: librcl_interfaces__rosidl_typesupport_cpp.so"
+  # even though this Dockerfile already registers /opt/ros/humble/lib below,
+  # the container was built from an image older than this fix — rebuild the
+  # image (don't just patch /etc/ld.so.conf.d by hand in the running
+  # container, it won't survive the next recreate). See
+  # swerve_hardware_interface/README.txt for the full bring-up sequence and
+  # debugging history.
   echo "/usr/lib/phoenix6" > /etc/ld.so.conf.d/phoenix6.conf && \
   echo "/opt/ros/humble/lib" > /etc/ld.so.conf.d/ros-humble.conf && \
   ldconfig; \
