@@ -33,6 +33,7 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     state_estimate_timed_out_condition = new bt::Condition("State Estimate Timed Out", this);
     stuck_condition = new bt::Condition("Stuck", this);
     autonomously_explore_condition = new bt::Condition("Autonomously Explore Commanded", this);
+    navigate_to_pose_commanded_condition = new bt::Condition("Navigate To Pose Commanded", this);
     conditions.push_back(armed_condition);
     conditions.push_back(stationary_condition);
     conditions.push_back(pause_commanded_condition);
@@ -44,6 +45,7 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     conditions.push_back(state_estimate_timed_out_condition);
     conditions.push_back(stuck_condition);
     conditions.push_back(autonomously_explore_condition);
+    conditions.push_back(navigate_to_pose_commanded_condition);
 
     // actions
     arm_action = new bt::Action("Arm", this);
@@ -53,6 +55,7 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     global_plan_action = new bt::Action("Follow Global Plan", this);
     request_control_action = new bt::Action("Request Control", this);
     disarm_action = new bt::Action("Disarm", this);
+    navigate_to_pose_action = new bt::Action("Navigate To Pose", this);
     actions.push_back(arm_action);
     actions.push_back(pause_action);
     actions.push_back(rewind_action);
@@ -60,6 +63,10 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
     actions.push_back(global_plan_action);
     actions.push_back(request_control_action);
     actions.push_back(disarm_action);
+    actions.push_back(navigate_to_pose_action);
+
+    navigate_to_pose_client = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
+        this, "navigate_to_pose");
 
     // subscribers
     behavior_tree_commands_sub =
@@ -78,6 +85,12 @@ BehaviorExecutive::BehaviorExecutive() : Node("behavior_executive") {
 						     std::bind(&BehaviorExecutive::stuck_callback,
 							       this, std::placeholders::_1));
 									 
+
+    navigate_to_pose_goal_sub = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+        "navigate_to_pose_goal", 1,
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+            navigate_to_pose_goal_ = *msg;
+        });
 
     // publishers
     recording_pub = this->create_publisher<std_msgs::msg::Bool>("set_recording_status", 1);
@@ -146,6 +159,36 @@ void BehaviorExecutive::timer_callback() {
                     global_plan_action->set_failure();
 	    }
         };
+    }
+
+    if (navigate_to_pose_action->is_active()) {
+        navigate_to_pose_action->set_running();
+
+        if (navigate_to_pose_action->active_has_changed() && !navigate_to_pose_goal_in_flight) {
+            if (navigate_to_pose_client->action_server_is_ready()) {
+                nav2_msgs::action::NavigateToPose::Goal goal_msg;
+                goal_msg.pose = navigate_to_pose_goal_;
+
+                auto send_goal_options =
+                    rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+                send_goal_options.result_callback =
+                    [this](const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>::WrappedResult & result) {
+                        navigate_to_pose_goal_in_flight = false;
+                        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+                            navigate_to_pose_action->set_success();
+                        } else {
+                            navigate_to_pose_action->set_failure();
+                        }
+                    };
+
+                navigate_to_pose_goal_in_flight = true;
+                navigate_to_pose_client->async_send_goal(goal_msg, send_goal_options);
+            } else {
+                navigate_to_pose_action->set_failure();
+            }
+        }
+    } else {
+        navigate_to_pose_goal_in_flight = false;
     }
 
     for (bt::Condition* condition : conditions) condition->publish();

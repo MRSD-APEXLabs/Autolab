@@ -16,6 +16,7 @@ find_package(behavior_tree REQUIRED)
 find_package(behavior_tree_msgs REQUIRED)
 find_package(autolab_msgs REQUIRED)
 find_package(autolab_common REQUIRED)
+find_package(nav2_msgs REQUIRED)
 
 add_executable(behavior_executive src/behavior_executive.cpp)
 target_include_directories(behavior_executive PUBLIC
@@ -32,6 +33,7 @@ ament_target_dependencies(behavior_executive
   behavior_tree_msgs
   autolab_msgs
   autolab_common
+  nav2_msgs
 )
 
 install(TARGETS behavior_executive

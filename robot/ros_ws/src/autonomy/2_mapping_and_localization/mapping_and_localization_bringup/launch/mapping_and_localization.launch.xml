@@ -1,4 +1,22 @@
 <!-- MAPPING AND LOCALIZATION -->
 <launch>
+    <arg name="database_path" default="$(env HOME)/.ros/rtabmap.db" />
+    <arg name="merged_points_topic" default="/robot_1/perception/merged_points" />
+    <arg name="odom_topic" default="/robot_1/odom" />
+    <arg name="frame_id" default="base_link" />
 
+    <node pkg="rtabmap_ros" exec="rtabmap" name="rtabmap" namespace="rtabmap" output="screen">
+        <param name="frame_id" value="$(var frame_id)" />
+        <param name="subscribe_depth" value="false" />
+        <param name="subscribe_rgb" value="false" />
+        <param name="subscribe_scan_cloud" value="true" />
+        <param name="approx_sync" value="true" />
+        <param name="database_path" value="$(var database_path)" />
+        <param name="Mem/IncrementalMemory" value="false" />
+        <param name="Mem/InitWMWithAllNodes" value="true" />
+        <param name="Grid/FromDepth" value="false" />
+
+        <remap from="scan_cloud" to="$(var merged_points_topic)" />
+        <remap from="odom" to="$(var odom_topic)" />
+    </node>
 </launch>

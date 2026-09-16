@@ -27,6 +27,10 @@
 			?
 				[Follow Global Plan]
 		->
+			(Navigate To Pose Commanded)
+			?
+				[Navigate To Pose]
+		->
 			(Arm Commanded)
 			?
 				(Armed)
