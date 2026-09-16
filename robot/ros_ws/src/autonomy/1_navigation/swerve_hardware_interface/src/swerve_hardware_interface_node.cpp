@@ -1,6 +1,7 @@
 // src/swerve_hardware_interface_node.cpp
 #include <chrono>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
@@ -54,9 +55,22 @@ public:
       modules_.emplace_back(std::make_unique<SwerveModuleHardware>(cfg, params, bus_));
     }
 
-    bool all_configured = true;
-    for (auto & module : modules_) {
-      all_configured = module->configure() && all_configured;
+    // Phoenix6's CANivore client session comes up asynchronously in the
+    // background (see the "CANbus Connected"/"Network Up" log lines, which
+    // can print AFTER this constructor already ran) — calling configure()
+    // immediately after construction can race that bring-up and fail every
+    // module on the first attempt even though the bus is fine moments
+    // later. Retry the whole configure pass a few times with a short wait,
+    // instead of giving up after one attempt.
+    bool all_configured = false;
+    for (int attempt = 0; attempt < 10 && !all_configured; ++attempt) {
+      if (attempt > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      }
+      all_configured = true;
+      for (auto & module : modules_) {
+        all_configured = module->configure() && all_configured;
+      }
     }
     if (!all_configured) {
       RCLCPP_ERROR(
