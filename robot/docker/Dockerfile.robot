@@ -77,6 +77,7 @@ RUN apt update && apt install -y \
   gdb \
   libpng-dev \
   libgomp1 \
+  libdc1394-dev \
   zstd
 
 # Install any additional ROS2 packages
