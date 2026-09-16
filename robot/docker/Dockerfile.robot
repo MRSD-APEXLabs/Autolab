@@ -251,7 +251,20 @@ RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   # `libs/2026` repo is stable-suite-only for L4T (jetson suite 403s there),
   # so scope the substitution to the tools line
   sed -i '/deb.ctr-electronics.com\/tools/s/stable/jetson/' /etc/apt/sources.list.d/ctr2026.list && \
-  apt-get ${UPDATE_FLAGS} update && apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
+  apt-get ${UPDATE_FLAGS} update && \
+  # canivore-usb-kernel's postinst DKMS-builds and modprobes its .ko against
+  # the running kernel. Build-time kernel identity inside the container
+  # doesn't reliably match the deploy host's real kernel (observed: DKMS
+  # built for 5.15.0-191-generic, then modprobe looked in
+  # /lib/modules/6.8.12-tegra and failed, killing the whole install). The
+  # module is loaded for real at container start via `caniv -a -s` (see
+  # docker-compose.yaml), so stub out modprobe just for this install to let
+  # dpkg configure cleanly without actually loading anything at build time.
+  MODPROBE_BIN=$(command -v modprobe) && \
+  mv "$MODPROBE_BIN" "${MODPROBE_BIN}.real" && \
+  printf '#!/bin/sh\nexit 0\n' > "$MODPROBE_BIN" && chmod +x "$MODPROBE_BIN" && \
+  apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
+  mv "${MODPROBE_BIN}.real" "$MODPROBE_BIN" && \
   (getent group dialout || groupadd -g 20 dialout) && \
   usermod -aG dialout robot && \
   # phoenix6's .so lives in a non-default dir, and the ROS2 workspace binary
