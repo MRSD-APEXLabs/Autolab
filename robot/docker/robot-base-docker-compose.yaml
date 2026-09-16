@@ -36,8 +36,10 @@ services:
       # --
       - BEHAVIOR_LAUNCH_PACKAGE=${BEHAVIOR_LAUNCH_PACKAGE}
       - BEHAVIOR_LAUNCH_FILE=${BEHAVIOR_LAUNCH_FILE}
-      # URDF Robot Description
-      - ROBOT_URDF_FILE_PATH=${ROBOT_DESCRIPTION_PACKAGE}/urdf/${ROBOT_URDF_FILE}
+      # SIM URDF Robot Description
+      # - ROBOT_URDF_FILE_PATH=${ROBOT_DESCRIPTION_PACKAGE}/urdf/${ROBOT_URDF_FILE}
+      # REAL URDF Robot Description
+      - ROBOT_URDF_FILE_PATH=${ROBOT_DESCRIPTION_PACKAGE}/${ROBOT_URDF_FILE}
     deploy:
       # let it use the GPU
       resources:
