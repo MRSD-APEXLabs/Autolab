@@ -2,12 +2,9 @@
 <launch>
     <arg name="use_sim_time" default="true" />
 
-    <group>
-        <remap from="cmd_vel" to="/robot_1/cmd_vel" />
-        <include file="$(find-pkg-share nav2_bringup)/launch/navigation_launch.py">
-            <arg name="params_file" value="$(find-pkg-share nav2_bringup_config)/config/nav2_params.yaml" />
-            <arg name="use_sim_time" value="$(var use_sim_time)" />
-            <arg name="odom_topic" value="/robot_1/odom" />
-        </include>
-    </group>
+    <include file="$(find-pkg-share nav2_bringup)/launch/navigation_launch.py">
+        <arg name="params_file" value="$(find-pkg-share nav2_bringup_config)/config/nav2_params.yaml" />
+        <arg name="use_sim_time" value="$(var use_sim_time)" />
+        <arg name="odom_topic" value="/robot_1/odom" />
+    </include>
 </launch>
