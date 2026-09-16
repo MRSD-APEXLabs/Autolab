@@ -242,7 +242,12 @@ RUN addgroup --gid 1000 robot && \
   echo "robot:robot" | chpasswd
 
 
-RUN if [ "$REAL_ROBOT"  = "true" ]; then \
+RUN set -e; \
+  # this block chains a lot of steps with a bare `;` between the REAL_ROBOT
+  # branch and the shared fixuid setup below — without set -e, a failure
+  # anywhere in the branch (e.g. an apt install) is silently skipped over
+  # instead of failing the build, rather than aborting it.
+  if [ "$REAL_ROBOT"  = "true" ]; then \
   # Put commands here that should run for the real robot but not the sim
   echo "REAL_ROBOT is true"; \
   curl -s --compressed -o /usr/share/keyrings/ctr-pubkey.gpg "https://deb.ctr-electronics.com/ctr-pubkey.gpg" && \
@@ -260,11 +265,16 @@ RUN if [ "$REAL_ROBOT"  = "true" ]; then \
   # module is loaded for real at container start via `caniv -a -s` (see
   # docker-compose.yaml), so stub out modprobe just for this install to let
   # dpkg configure cleanly without actually loading anything at build time.
-  MODPROBE_BIN=$(command -v modprobe) && \
-  mv "$MODPROBE_BIN" "${MODPROBE_BIN}.real" && \
-  printf '#!/bin/sh\nexit 0\n' > "$MODPROBE_BIN" && chmod +x "$MODPROBE_BIN" && \
+  # kmod (which owns /usr/sbin/modprobe) isn't installed yet at this point —
+  # it comes in transitively as a dependency of canivore-usb-kernel during
+  # the install below — so a plain mv-aside would just get overwritten
+  # mid-transaction. dpkg-divert redirects any package's attempt to write
+  # that path for the duration of the install, no matter install order.
+  dpkg-divert --local --rename --add /usr/sbin/modprobe && \
+  printf '#!/bin/sh\nexit 0\n' > /usr/sbin/modprobe && chmod +x /usr/sbin/modprobe && \
   apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
-  mv "${MODPROBE_BIN}.real" "$MODPROBE_BIN" && \
+  rm -f /usr/sbin/modprobe && \
+  dpkg-divert --local --rename --remove /usr/sbin/modprobe && \
   (getent group dialout || groupadd -g 20 dialout) && \
   usermod -aG dialout robot && \
   # phoenix6's .so lives in a non-default dir, and the ROS2 workspace binary
