@@ -12,9 +12,9 @@
         <param name="subscribe_scan_cloud" value="true" />
         <param name="approx_sync" value="true" />
         <param name="database_path" value="$(var database_path)" />
-        <param name="Mem/IncrementalMemory" value="false" />
-        <param name="Mem/InitWMWithAllNodes" value="true" />
-        <param name="Grid/FromDepth" value="false" />
+        <param name="Mem/IncrementalMemory" value="false" type="str" />
+        <param name="Mem/InitWMWithAllNodes" value="true" type="str" />
+        <param name="Grid/FromDepth" value="false" type="str" />
 
         <remap from="scan_cloud" to="$(var merged_points_topic)" />
         <remap from="odom" to="$(var odom_topic)" />
