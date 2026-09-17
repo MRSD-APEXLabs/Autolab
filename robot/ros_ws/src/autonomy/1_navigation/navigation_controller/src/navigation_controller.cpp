@@ -22,15 +22,15 @@ public:
     cmd_vel_timeout_sec_ = declare_parameter("cmd_vel_timeout_sec", 0.3);
 
     drive_joints_ = {
-      "Revolute_1",  // front right
-      "Revolute_2",  // front left
+      "Revolute_2",  // front right
+      "Revolute_1",  // front left
       "Revolute_4",  // rear right
       "Revolute_3"   // rear left
     };
 
     azimuth_joints_ = {
-      "Revolute_5",  // front right
-      "Revolute_6",  // front left
+      "Revolute_6",  // front right
+      "Revolute_5",  // front left
       "Revolute_8",  // rear right
       "Revolute_7"   // rear left
     };

@@ -18,7 +18,7 @@
     drive_kp: 0.1
     drive_ki: 0.0
     drive_kd: 0.0
-    drive_ks: 0.0
+    drive_ks: 0.1
     drive_kv: 0.124
     steer_stator_current_limit_a: 60.0
     command_watchdog_timeout_ms: 250

@@ -13,10 +13,10 @@ SwerveCommand compute_swerve_command(
   const double c_ = linear_x_cmd - angular_cmd * x_offset / 2.0;
   const double d = linear_x_cmd + angular_cmd * x_offset / 2.0;
 
-  const double fl_vel =  std::hypot(b, d) / (wheel_radius * M_PI);
-  const double fr_vel = -std::hypot(b, c_) / (wheel_radius * M_PI);
-  const double rl_vel =  std::hypot(a, d) / (wheel_radius * M_PI);
-  const double rr_vel = -std::hypot(a, c_) / (wheel_radius * M_PI);
+  const double fl_vel = -std::hypot(b, d) / (wheel_radius * M_PI);
+  const double fr_vel =  std::hypot(b, c_) / (wheel_radius * M_PI);
+  const double rl_vel = -std::hypot(a, d) / (wheel_radius * M_PI);
+  const double rr_vel =  std::hypot(a, c_) / (wheel_radius * M_PI);
 
   const double fl_pos = -std::atan2(b, d);
   const double fr_pos = -std::atan2(b, c_);
