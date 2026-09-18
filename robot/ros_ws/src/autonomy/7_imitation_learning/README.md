@@ -63,11 +63,12 @@ data/<dataset>/index.csv      one row per kept episode
 data/<dataset>/episodes/episode_0001.hdf5 ...   (layout in actlib/episode_io.py)
 data/<dataset>/sessions/*.log console log of every session, including discarded attempts
 ```
-**Duplicate frames:** a camera frame is dropped when it repeats the last kept frame: every joint moved less than 0.01 deg
-since it AND the picture changed less than 4 gray levels (thumbnail difference; sensor noise measures 0.3-2.7 even at extreme noise,
-a real scene change 16), or it has the same capture timestamp / identical bytes. Comparing with the last *kept* frame means slow motion
-still accumulates into new frames. Static stretches (waiting before you move, the tail after you stop) collapse to one frame; the 100 Hz
-robot log is never thinned. Kept frames are therefore not evenly spaced: `frames/t` has each one's true capture time and the
+**Duplicate frames:** a camera frame is removed when every joint angle at its capture time (so the TCP xyz too) is identical to
+the frame before it, or when the stream repeated a frame (same capture timestamp / identical bytes). The first frame of each still
+stretch is kept. Joint angles, not xyz, define "identical" (rotating the last joint moves no xyz but is real motion). The picture is deliberately not compared: camera noise makes every still frame differ a little, while a still
+arm reports bit-identical angles (67% of consecutive frame pairs in a first real episode were exactly identical, and the smallest real
+motion step was 0.00006 deg). Consequence: frames where only the scene or the gripper changes while the arm is still are removed too.
+The 100 Hz robot log is never thinned. Kept frames are therefore not evenly spaced: `frames/t` has each one's true capture time and the
 `stat_*` attributes / `index.csv` still describe the health of the full recorded stream. Tune or disable in `recording.dedupe`.
 
 Clock handling: the Xavier and this machine are NTP-synced yet differ by tens of ms and drift ~1 ms/min, so the offset is measured

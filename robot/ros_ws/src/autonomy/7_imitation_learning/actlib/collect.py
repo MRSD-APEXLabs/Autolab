@@ -312,7 +312,7 @@ def record_episode(rig: Rig, cfg: dict):
     warnings = eio.quality_warnings(stats, rec)
     dd = rec.get("dedupe", {})
     if dd.get("enabled", True):
-        keep = eio.dedupe_frames(frames, t_cam, robot["t"], robot["q"], dd["q_deg"], dd["img_mad"])
+        keep = eio.dedupe_frames(frames, t_cam, robot["t"], robot["q"], dd["q_deg"])
         frames, t_cam = [frames[i] for i in keep], t_cam[keep]
     stats["n_recorded"], stats["n_frames"] = stats["n_frames"], len(frames)
     return {"frames": frames, "t_cam": t_cam, "ts_source": src, "robot": robot, "control": control, "gripper": grip,
@@ -323,7 +323,8 @@ def print_summary(res: dict):
     s = res["stats"]
     say(f"Stopped: {s['duration_s']:.1f} s | camera {s['n_recorded']} frames @ {s['cam_hz']:.1f} Hz "
         f"(max gap {s['max_frame_gap_ms']:.0f} ms, {s['frame_id_gaps']} lost) -> {s['n_frames']} kept, "
-        f"{s['n_recorded'] - s['n_frames']} duplicate frames removed | robot {s['robot_rows']} rows @ {s['robot_hz']:.0f} Hz | "
+        f"{s['n_recorded'] - s['n_frames']} duplicate frames removed (joint angles identical to the previous frame)"
+        f" | robot {s['robot_rows']} rows @ {s['robot_hz']:.0f} Hz | "
         f"gripper {s['gripper_reads']} reads | faults {s['faults']}")
     for w in res["warnings"]:
         say(f"  WARNING: {w}")

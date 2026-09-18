@@ -24,7 +24,6 @@ import json
 import os
 import re
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -86,38 +85,23 @@ def trim_to_span(frames: List[dict], t_cam: np.ndarray, t_lo: float, t_hi: float
     return [frames[i] for i in idx], t_cam[idx]
 
 
-def _thumb(buf: bytes) -> np.ndarray:
-    """160x100 gray thumbnail decoded straight from the JPEG (DCT-domain 1/4 downscale: far cheaper than a full decode)."""
-    return cv2.imdecode(np.frombuffer(buf, np.uint8), cv2.IMREAD_REDUCED_GRAYSCALE_4).astype(np.int16)
-
-
 def dedupe_frames(frames: List[dict], t_cam: np.ndarray, robot_t: np.ndarray, robot_q: np.ndarray,
-                  q_deg: float, img_mad: float) -> np.ndarray:
-    """Indices of the frames worth keeping.
-
-    Each frame is compared with the last KEPT frame (not just its predecessor, so slow motion still accumulates until
-    it is worth a new frame). It is dropped when every joint moved less than `q_deg` since then AND the picture changed
-    less than `img_mad` (mean absolute gray-level difference, both eyes). A frame with the same capture timestamp as
-    its predecessor, or byte-identical images, is always dropped. The robot log itself is never thinned."""
+                  q_eps: float = 1e-6) -> np.ndarray:
+    """Indices of the frames to keep. A frame is a duplicate, and is removed, when every joint angle at its capture time
+    is identical to the frame before it (so the TCP xyz is too), or when the stream repeated a frame (same capture
+    timestamp or byte-identical images). The first frame of each still stretch is kept. Joint angles, not xyz, define
+    "identical": rotating the last joint moves no xyz but is real motion. The picture is not compared: sensor noise makes
+    every still frame differ a little, while a still arm reports bit-identical angles. The robot log is never thinned."""
     n = len(frames)
     if n == 0:
         return np.zeros(0, dtype=int)
-    q = _interp(t_cam, robot_t + np.arange(len(robot_t)) * 1e-9, robot_q)
-    with ThreadPoolExecutor(max_workers=4) as ex:  # cv2 releases the GIL while decoding
-        left = list(ex.map(lambda f: _thumb(f["left"]), frames))
-        right = list(ex.map(lambda f: _thumb(f["right"]), frames))
-    keep, last = [0], 0
-    for i in range(1, n):
-        f, g = frames[i], frames[last]
-        if f["t_image_ns"] == frames[i - 1]["t_image_ns"] or (f["left"] == g["left"] and f["right"] == g["right"]):
-            continue
-        if np.abs(q[i] - q[last]).max() < q_deg:
-            mad = 0.5 * (np.abs(left[i] - left[last]).mean() + np.abs(right[i] - right[last]).mean())
-            if mad < img_mad:
-                continue
-        keep.append(i)
-        last = i
-    return np.array(keep, dtype=int)
+    tt = robot_t + np.arange(len(robot_t)) * 1e-9
+    q = _interp(t_cam, tt, robot_q)
+    still = np.abs(np.diff(q, axis=0)).max(axis=1) < q_eps
+    repeated = np.array([frames[i]["t_image_ns"] == frames[i - 1]["t_image_ns"]
+                         or (frames[i]["left"] == frames[i - 1]["left"] and frames[i]["right"] == frames[i - 1]["right"])
+                         for i in range(1, n)], dtype=bool)
+    return np.concatenate([[0], 1 + np.flatnonzero(~(still | repeated))]).astype(int)
 
 
 def _interp(t_new: np.ndarray, t: np.ndarray, y: np.ndarray, angular_cols=()) -> np.ndarray:
