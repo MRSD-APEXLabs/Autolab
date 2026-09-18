@@ -5,7 +5,6 @@
 """
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
@@ -14,7 +13,7 @@ import cv2
 import h5py
 import numpy as np
 
-from .episode_io import decode_depth, decode_image, episode_files
+from .episode_io import decode_depth, decode_image, episode_files, index_rows
 
 
 def depth_vis(d: np.ndarray, lo: float = 100.0, hi: float = 1500.0) -> np.ndarray:
@@ -108,9 +107,9 @@ def inspect_file(path: Path, args):
 
 
 def list_dataset(root: Path):
-    rows = list(csv.DictReader(open(root / "index.csv"))) if (root / "index.csv").exists() else []
+    rows = index_rows(root)  # read from the episode files themselves, so it is always current
     files = episode_files(root)
-    print(f"{root}: {len(files)} episode files, {len(rows)} index rows")
+    print(f"{root}: {len(files)} episode files")
     tot = 0.0
     for r in rows:
         tot += float(r["duration_s"])

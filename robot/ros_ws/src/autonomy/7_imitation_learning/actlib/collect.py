@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import termios
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -336,13 +337,7 @@ def save_episode(rig: Rig, cfg: dict, dataset_dir: Path, ep_id: int, task: str, 
             "warnings": "; ".join(res["warnings"])}
     path = eio.write_episode(dataset_dir, ep_id, res["frames"], res["t_cam"], res["ts_source"], res["robot"], res["control"],
                              res["gripper"], res["events"], res["off_pre"], res["off_post"], meta, res["stats"])
-    s = res["stats"]
-    eio.append_index(dataset_dir, {
-        "episode_id": ep_id, "file": path.name, "created": meta["created"], "duration_s": round(s["duration_s"], 2),
-        "n_frames": s["n_frames"], "n_recorded": s["n_recorded"], "cam_hz": round(s["cam_hz"], 2), "max_frame_gap_ms": round(s["max_frame_gap_ms"], 1),
-        "frame_id_gaps": s["frame_id_gaps"], "robot_rows": s["robot_rows"], "robot_hz": round(s["robot_hz"], 1),
-        "faults": s["faults"], "clock_offset_ms": round(res["off_post"][1] * 1e3, 2),
-        "size_mb": round(path.stat().st_size / 1e6, 1), "notes": "; ".join(res["warnings"])})
+    eio.rebuild_index(dataset_dir)
     calib = rig.cam.calibration if rig.cam else None
     eio.ensure_dataset_yaml(dataset_dir, task, calib, cfg["xavier"]["scale"], cfg, KEYS_DOC)
     return path
@@ -391,6 +386,40 @@ def run_session(rig: Rig, cfg: dict, dataset_dir: Path, target: int, task: str):
         else:
             say(f"Episode {ep_id:04d} deleted (was {res['stats']['duration_s']:.1f} s; nothing written).")
         del res
+
+
+class IndexWatcher(threading.Thread):
+    """Keeps index.csv equal to the episode files while a session runs, so deleting an episode file is all it takes: its
+    row disappears within a couple of seconds (and a re-recorded number never shows up twice)."""
+
+    def __init__(self, dataset_dir: Path, period_s: float = 2.0):
+        super().__init__(name="index-watcher", daemon=True)
+        self.dir, self.period, self._stop_evt = dataset_dir, period_s, threading.Event()
+
+    def _signature(self):
+        sig = []
+        for p in eio.episode_files(self.dir):
+            try:
+                st = p.stat()
+                sig.append((p.name, st.st_mtime_ns, st.st_size))
+            except OSError:
+                pass
+        return tuple(sig)
+
+    def run(self):
+        last = None
+        while not self._stop_evt.is_set():
+            try:
+                sig = self._signature()
+                if sig != last:
+                    eio.rebuild_index(self.dir)
+                    last = sig
+            except Exception as e:
+                log.warning("index refresh failed: %s", e)
+            self._stop_evt.wait(self.period)
+
+    def stop(self):
+        self._stop_evt.set()
 
 
 def start_viewer(dataset_dir: Path, port: int):
@@ -457,6 +486,8 @@ def main(argv=None, rig_factory=None):
 
     rig = (rig_factory or build_rig)(cfg)
     viewer = None
+    watcher = IndexWatcher(dataset_dir)
+    watcher.start()  # also rebuilds index.csv from the files right away
     try:
         viewer, rig.viewer_url = start_viewer(dataset_dir, args.viewer_port)
         if rig.viewer_url:
@@ -466,6 +497,8 @@ def main(argv=None, rig_factory=None):
         say("\nInterrupted (Ctrl-C): arm stopped, current episode discarded.")
     finally:
         say("cleaning up: handing the Xavier and the arm back (Ctrl-C is ignored for a moment) ...")
+        watcher.stop()
+        watcher.join(2.0)  # never exit with a file read in flight
         if viewer is not None:
             viewer.terminate()
         rig.close()

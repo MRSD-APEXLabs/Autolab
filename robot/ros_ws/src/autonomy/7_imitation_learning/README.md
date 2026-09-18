@@ -59,7 +59,7 @@ inside the workspace box. If the controller faults (e.g. near a singularity) it 
 
 ```
 data/<dataset>/dataset.yaml   conventions, units, camera calibration
-data/<dataset>/index.csv      one row per kept episode
+data/<dataset>/index.csv      table of the episode files, REBUILT from them (never edit it: to delete an episode just delete its .hdf5)
 data/<dataset>/episodes/episode_0001.hdf5 ...   (layout in actlib/episode_io.py)
 data/<dataset>/sessions/*.log console log of every session, including discarded attempts
 ```
@@ -73,6 +73,11 @@ The 100 Hz robot log is never thinned. Kept frames are therefore not evenly spac
 
 Clock handling: the Xavier and this machine are NTP-synced yet differ by tens of ms and drift ~1 ms/min, so the offset is measured
 (20 round trips, best RTT) before and after every episode and stored; `frames/t` is already corrected (verified to <1 ms).
+
+**Deleting an episode:** delete its file `episodes/episode_000N.hdf5` and nothing else. `index.csv` is rebuilt from the files at every
+start and save and re-checked every 2 s while `collect.sh` runs (`./inspect.sh <dataset>` always reads the files directly), so the row
+disappears by itself and a re-recorded number never appears twice. Deleting in VS Code sends the file to the Trash (still on disk);
+`rm` deletes it for good.
 
 Watch saved episodes in a browser (left + right camera + colourised depth + joint angles / TCP / commanded velocity / gripper, all on
 one timeline; play, step, scrub, click a plot to seek, 0.25x-2x):

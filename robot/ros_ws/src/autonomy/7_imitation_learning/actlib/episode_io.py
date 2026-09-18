@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -243,14 +244,49 @@ def write_episode(dataset_dir: Path, episode_id: int, frames: List[dict], t_cam:
     return path
 
 
-def append_index(dataset_dir: Path, row: dict):
+_INDEX_LOCK = threading.Lock()
+
+
+def _index_row(path: Path) -> dict:
+    with h5py.File(path, "r") as f:
+        a = f.attrs
+        n = int(f["frames/t"].shape[0])
+        return {
+            "episode_id": int(a["episode_id"]), "file": path.name, "created": str(a["created"]),
+            "duration_s": round(float(a["stat_duration_s"]), 2), "n_frames": n,
+            "n_recorded": int(a["stat_n_recorded"]) if "stat_n_recorded" in a else n,
+            "cam_hz": round(float(a["stat_cam_hz"]), 2), "max_frame_gap_ms": round(float(a["stat_max_frame_gap_ms"]), 1),
+            "frame_id_gaps": int(a["stat_frame_id_gaps"]), "robot_rows": int(a["stat_robot_rows"]),
+            "robot_hz": round(float(a["stat_robot_hz"]), 1), "faults": int(a["stat_faults"]),
+            "clock_offset_ms": round(float(a["clock_offset_post_s"]) * 1e3, 2),
+            "size_mb": round(path.stat().st_size / 1e6, 1), "notes": str(a["warnings"]) if "warnings" in a else "",
+        }
+
+
+def index_rows(dataset_dir: Path) -> List[dict]:
+    """One row per episode file that exists right now, read from the files themselves."""
+    rows = []
+    for p in episode_files(dataset_dir):
+        try:
+            rows.append(_index_row(p))
+        except Exception:  # a half-written or foreign file is simply not listed
+            continue
+    return rows
+
+
+def rebuild_index(dataset_dir: Path) -> int:
+    """index.csv is derived from the episode files, never edited by hand: delete an episode file and its row disappears
+    at the next rebuild; a re-recorded number gets exactly one row. Written atomically."""
+    rows = index_rows(dataset_dir)
     p = Path(dataset_dir) / "index.csv"
-    new = not p.exists()
-    with open(p, "a", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=INDEX_COLUMNS)
-        if new:
+    with _INDEX_LOCK:
+        tmp = p.with_suffix(".csv.tmp")
+        with open(tmp, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=INDEX_COLUMNS)
             w.writeheader()
-        w.writerow({k: row.get(k, "") for k in INDEX_COLUMNS})
+            w.writerows(rows)
+        os.replace(tmp, p)
+    return len(rows)
 
 
 def ensure_dataset_yaml(dataset_dir: Path, task: str, calibration: Optional[dict], scale: float, cfg: dict, keys_doc: dict):
