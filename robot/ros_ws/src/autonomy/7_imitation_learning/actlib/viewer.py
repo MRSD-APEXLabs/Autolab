@@ -68,7 +68,7 @@ class Store:
                 f = self._file(ep)
                 a = f.attrs
                 n = int(f["frames/t"].shape[0])
-                out.append({"id": ep, "created": str(a["created"]), "duration_s": float(a["stat_duration_s"]), "n_frames": n,
+                out.append({"id": ep, "created": str(a["created"]), "duration_s": float(a["stat_saved_duration_s"] if "stat_saved_duration_s" in a else a["stat_duration_s"]), "n_frames": n,
                             "n_recorded": int(a["stat_n_recorded"]) if "stat_n_recorded" in a else n,
                             "size_mb": round(p.stat().st_size / 1e6, 1), "faults": int(a["stat_faults"])})
             except Exception as e:  # a half-written or foreign file must not break the list
@@ -94,7 +94,7 @@ class Store:
             "created": str(a["created"]),
             "duration": float(rt[-1] - t0),
             "info": {
-                "duration_s": float(a["stat_duration_s"]), "kept": n,
+                "duration_s": float(a["stat_saved_duration_s"] if "stat_saved_duration_s" in a else a["stat_duration_s"]), "kept": n,
                 "recorded": int(a["stat_n_recorded"]) if "stat_n_recorded" in a else n,
                 "cam_hz": float(a["stat_cam_hz"]), "max_frame_gap_ms": float(a["stat_max_frame_gap_ms"]),
                 "frames_lost": int(a["stat_frame_id_gaps"]), "robot_hz": float(a["stat_robot_hz"]),

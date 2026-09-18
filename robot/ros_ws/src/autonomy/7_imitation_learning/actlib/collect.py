@@ -11,7 +11,6 @@ import argparse
 import datetime
 import logging
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -230,16 +229,6 @@ def build_rig(cfg: dict) -> Rig:
 
 
 # --------------------------------------------------------------------------- one episode
-def _fit_line(segments, sep: str = " | ") -> str:
-    """Join (priority, text) segments, dropping the least important until the line fits the terminal: a line wider
-    than the terminal wraps into several rows and becomes unreadable."""
-    cols = shutil.get_terminal_size((100, 24)).columns - 1
-    segments = list(segments)
-    while len(segments) > 1 and sum(len(t) for _, t in segments) + len(sep) * (len(segments) - 1) > cols:
-        segments.remove(max(segments, key=lambda seg: seg[0]))
-    return sep.join(t for _, t in segments)
-
-
 def _status_printer(rig: Rig, tag: str):
     """Live log: one new line each time the joint angles differ from the previous line; nothing is printed while the
     arm is still. (A fault appearing or clearing also prints a line.)"""
@@ -253,17 +242,17 @@ def _status_printer(rig: Rig, tag: str):
             return
         last["q"], last["fault"] = q, s["faulted"]
         tcp = s["tcp"]
-        segs = [(0, f"{tag} {s['elapsed']:6.1f}s")]
+        parts = [f"{tag} {s['elapsed']:6.1f}s"]
         if s["faulted"]:
-            segs.append((0, "FAULT"))
+            parts.append("FAULT")
         if tcp:
-            segs.append((1, f"x={tcp[0]:.1f} y={tcp[1]:.1f} z={tcp[2]:.1f} mm"))
+            parts.append(f"x={tcp[0]:.1f} y={tcp[1]:.1f} z={tcp[2]:.1f} mm")
         if tag == "REC":
-            segs.append((2, f"cam {rig.cam.hz():.0f} Hz {rig.cam.recorded_count()} fr lost {rig.cam.gaps}"))
-        segs.append((3, f"preset {s['preset']}"))
-        segs.append((4, f"robot {rig.feed.hz():.0f} Hz"))
-        segs.append((5, f"{s['lin']} mm/s {s['ang']} deg/s"))
-        print(_fit_line(segs), flush=True)
+            parts.append(f"cam {rig.cam.hz():.0f} Hz {rig.cam.recorded_count()} fr lost {rig.cam.gaps}")
+        parts.append(f"preset {s['preset']}")
+        parts.append(f"robot {rig.feed.hz():.0f} Hz")
+        parts.append(f"{s['lin']} mm/s {s['ang']} deg/s")
+        print(" | ".join(parts), flush=True)  # every field, always: a narrow terminal just wraps the line
     return cb
 
 
@@ -337,18 +326,31 @@ def record_episode(rig: Rig, cfg: dict):
     warnings = eio.quality_warnings(stats, rec)
     dd = rec.get("dedupe", {})
     if dd.get("enabled", True):
-        keep = eio.dedupe_frames(frames, t_cam, robot["t"], robot["q"], dd["q_deg"])
+        keep = eio.dedupe_frames(frames, t_cam, robot["t"], robot["q"])
         frames, t_cam = [frames[i] for i in keep], t_cam[keep]
     stats["n_recorded"], stats["n_frames"] = stats["n_frames"], len(frames)
+    # The saved episode ends where its frames end: the waiting after the last kept frame (frames removed as duplicates)
+    # would otherwise leave 10+ s of robot log with no picture, and the timeline longer than the video.
+    t_end = float(t_cam[-1]) + 0.1
+    robot, control, grip = (_trim_log(x, t_end) for x in (robot, control, grip))
+    events = [e for e in events if e[0] <= t_end]
+    stats["robot_rows"] = int(len(robot["t"]))
+    stats["saved_duration_s"] = float(t_cam[-1] - t_cam[0])
     return {"frames": frames, "t_cam": t_cam, "ts_source": src, "robot": robot, "control": control, "gripper": grip,
             "events": events, "off_pre": off_pre, "off_post": off_post, "stats": stats, "warnings": warnings}
 
 
+def _trim_log(d: dict, t_end: float) -> dict:
+    keep = d["t"] <= t_end
+    return {k: v[keep] for k, v in d.items()}
+
+
 def print_summary(res: dict):
     s = res["stats"]
-    say(f"Stopped: {s['duration_s']:.1f} s | camera {s['n_recorded']} frames @ {s['cam_hz']:.1f} Hz "
+    saved = f" (saved {s['saved_duration_s']:.1f} s: the waiting at the end is cut)" if s.get("saved_duration_s", 0) < s["duration_s"] - 0.5 else ""
+    say(f"Stopped: {s['duration_s']:.1f} s{saved} | camera {s['n_recorded']} frames @ {s['cam_hz']:.1f} Hz "
         f"(max gap {s['max_frame_gap_ms']:.0f} ms, {s['frame_id_gaps']} lost) -> {s['n_frames']} kept, "
-        f"{s['n_recorded'] - s['n_frames']} duplicate frames removed (joint angles identical to the previous frame)"
+        f"{s['n_recorded'] - s['n_frames']} duplicate frames removed (joint angles exactly the same as the previous frame)"
         f" | robot {s['robot_rows']} rows @ {s['robot_hz']:.0f} Hz | "
         f"gripper {s['gripper_reads']} reads | faults {s['faults']}")
     for w in res["warnings"]:

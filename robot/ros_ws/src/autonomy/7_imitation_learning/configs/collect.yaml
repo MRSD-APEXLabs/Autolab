@@ -17,14 +17,11 @@ recording:
   min_duration_s: 2.0
   max_lag_ms: 400           # preflight aborts if frames arrive later than this (link saturated / backlog)
   tail_s: 0.35              # keep recording after the arm stops so late-arriving camera frames are captured
-  # Redundant-frame removal at save time: a camera frame is removed when every joint angle at its capture time (hence the
-  # TCP xyz too) is identical to the frame before it, or the stream repeated the frame (same timestamp / same bytes). The
-  # first frame of each still stretch is kept. The picture is not compared: camera noise makes every still frame differ a
-  # little, while a still arm reports bit-identical angles. The 100 Hz robot log is never thinned. enabled: false keeps
-  # every frame.
+  # Redundant-frame removal at save time: a camera frame is dropped when its joint angles are EXACTLY the same as the previous
+  # frame's (joint angles only; no tolerance, nothing else is compared). The first frame of each still stretch is kept. The
+  # 100 Hz robot log is never thinned. enabled: false keeps every frame.
   dedupe:
     enabled: true
-    q_deg: 1.0e-6           # "identical" = joint angles unchanged to within this
 
 teleop:
   loop_hz: 100

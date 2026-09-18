@@ -86,23 +86,16 @@ def trim_to_span(frames: List[dict], t_cam: np.ndarray, t_lo: float, t_hi: float
     return [frames[i] for i in idx], t_cam[idx]
 
 
-def dedupe_frames(frames: List[dict], t_cam: np.ndarray, robot_t: np.ndarray, robot_q: np.ndarray,
-                  q_eps: float = 1e-6) -> np.ndarray:
-    """Indices of the frames to keep. A frame is a duplicate, and is removed, when every joint angle at its capture time
-    is identical to the frame before it (so the TCP xyz is too), or when the stream repeated a frame (same capture
-    timestamp or byte-identical images). The first frame of each still stretch is kept. Joint angles, not xyz, define
-    "identical": rotating the last joint moves no xyz but is real motion. The picture is not compared: sensor noise makes
-    every still frame differ a little, while a still arm reports bit-identical angles. The robot log is never thinned."""
+def dedupe_frames(frames: List[dict], t_cam: np.ndarray, robot_t: np.ndarray, robot_q: np.ndarray) -> np.ndarray:
+    """Indices of the frames to keep. A frame is dropped when its joint angles (at its capture time) are EXACTLY the
+    same as the previous frame's. Joint angles only: not the picture, not the timestamps, no tolerance. The first frame
+    of each still stretch is kept. The robot log itself is never thinned."""
     n = len(frames)
     if n == 0:
         return np.zeros(0, dtype=int)
-    tt = robot_t + np.arange(len(robot_t)) * 1e-9
-    q = _interp(t_cam, tt, robot_q)
-    still = np.abs(np.diff(q, axis=0)).max(axis=1) < q_eps
-    repeated = np.array([frames[i]["t_image_ns"] == frames[i - 1]["t_image_ns"]
-                         or (frames[i]["left"] == frames[i - 1]["left"] and frames[i]["right"] == frames[i - 1]["right"])
-                         for i in range(1, n)], dtype=bool)
-    return np.concatenate([[0], 1 + np.flatnonzero(~(still | repeated))]).astype(int)
+    q = _interp(t_cam, robot_t + np.arange(len(robot_t)) * 1e-9, robot_q)
+    same_as_previous = (np.diff(q, axis=0) == 0).all(axis=1)
+    return np.concatenate([[0], 1 + np.flatnonzero(~same_as_previous)]).astype(int)
 
 
 def _interp(t_new: np.ndarray, t: np.ndarray, y: np.ndarray, angular_cols=()) -> np.ndarray:
@@ -253,7 +246,7 @@ def _index_row(path: Path) -> dict:
         n = int(f["frames/t"].shape[0])
         return {
             "episode_id": int(a["episode_id"]), "file": path.name, "created": str(a["created"]),
-            "duration_s": round(float(a["stat_duration_s"]), 2), "n_frames": n,
+            "duration_s": round(float(a["stat_saved_duration_s"] if "stat_saved_duration_s" in a else a["stat_duration_s"]), 2), "n_frames": n,
             "n_recorded": int(a["stat_n_recorded"]) if "stat_n_recorded" in a else n,
             "cam_hz": round(float(a["stat_cam_hz"]), 2), "max_frame_gap_ms": round(float(a["stat_max_frame_gap_ms"]), 1),
             "frame_id_gaps": int(a["stat_frame_id_gaps"]), "robot_rows": int(a["stat_robot_rows"]),

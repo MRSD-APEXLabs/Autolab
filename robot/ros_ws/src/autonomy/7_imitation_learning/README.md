@@ -63,13 +63,14 @@ data/<dataset>/index.csv      table of the episode files, REBUILT from them (nev
 data/<dataset>/episodes/episode_0001.hdf5 ...   (layout in actlib/episode_io.py)
 data/<dataset>/sessions/*.log console log of every session, including discarded attempts
 ```
-**Duplicate frames:** a camera frame is removed when every joint angle at its capture time (so the TCP xyz too) is identical to
-the frame before it, or when the stream repeated a frame (same capture timestamp / identical bytes). The first frame of each still
-stretch is kept. Joint angles, not xyz, define "identical" (rotating the last joint moves no xyz but is real motion). The picture is deliberately not compared: camera noise makes every still frame differ a little, while a still
-arm reports bit-identical angles (67% of consecutive frame pairs in a first real episode were exactly identical, and the smallest real
-motion step was 0.00006 deg). Consequence: frames where only the scene or the gripper changes while the arm is still are removed too.
-The 100 Hz robot log is never thinned. Kept frames are therefore not evenly spaced: `frames/t` has each one's true capture time and the
-`stat_*` attributes / `index.csv` still describe the health of the full recorded stream. Tune or disable in `recording.dedupe`.
+**Duplicate frames:** a camera frame is dropped when its joint angles are exactly the same as the previous frame's. Joint angles only:
+no tolerance, and neither the picture nor the timestamps are compared. The first frame of each still stretch is kept. A waiting arm that
+is exactly still reports bit-identical angles (in a first real episode 67% of consecutive frame pairs were), so those frames go; frames
+where the angles differ even in the 4th decimal (sensor jitter, slow creep) are different frames and stay. Frames where only the scene or
+the gripper changes while the arm is still are dropped too. The waiting at the END of a recording (after the last kept frame) is also cut
+from the saved robot / control / gripper logs, so the saved episode ends where its frames end. The 100 Hz robot log is otherwise never
+thinned. Kept frames are therefore not evenly spaced: `frames/t` has each one's true capture time and the
+`stat_*` attributes / `index.csv` still describe the health of the full recorded stream. Disable in `recording.dedupe`.
 
 Clock handling: the Xavier and this machine are NTP-synced yet differ by tens of ms and drift ~1 ms/min, so the offset is measured
 (20 round trips, best RTT) before and after every episode and stored; `frames/t` is already corrected (verified to <1 ms).

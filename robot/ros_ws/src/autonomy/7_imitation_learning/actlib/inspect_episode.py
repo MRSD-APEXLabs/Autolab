@@ -60,7 +60,8 @@ def inspect_file(path: Path, args):
         n = len(t)
         print(f"{path.name}: dataset '{a['dataset']}', task '{a['task']}', created {a['created']}, git {a['git_hash']}")
         rec = int(a.get("stat_n_recorded", n))
-        print(f"  duration {a['stat_duration_s']:.2f} s | camera recorded {rec} frames @ {a['stat_cam_hz']:.2f} Hz (max gap "
+        print(f"  duration {a['stat_saved_duration_s'] if 'stat_saved_duration_s' in a else a['stat_duration_s']:.2f} s saved"
+              + (f" (the recording lasted {a['stat_duration_s']:.1f} s)" if 'stat_saved_duration_s' in a else "") + f" | camera recorded {rec} frames @ {a['stat_cam_hz']:.2f} Hz (max gap "
               f"{a['stat_max_frame_gap_ms']:.0f} ms, {a['stat_frame_id_gaps']} lost) -> {n} kept, {rec - n} duplicates removed"
               f" | image {[int(x) for x in a['image_size_wh']]} scale {a['image_scale']:.3f}, depth {a['depth_codec']}")
         print(f"  robot {len(rt)} rows @ {(len(rt)-1)/(rt[-1]-rt[0]):.1f} Hz (max gap {np.diff(rt).max()*1e3:.0f} ms) | "
