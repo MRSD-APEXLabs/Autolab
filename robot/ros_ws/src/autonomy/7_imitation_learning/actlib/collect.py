@@ -11,6 +11,7 @@ import argparse
 import datetime
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -229,15 +230,40 @@ def build_rig(cfg: dict) -> Rig:
 
 
 # --------------------------------------------------------------------------- one episode
+def _fit_line(segments, sep: str = " | ") -> str:
+    """Join (priority, text) segments, dropping the least important until the line fits the terminal: a line wider
+    than the terminal wraps into several rows and becomes unreadable."""
+    cols = shutil.get_terminal_size((100, 24)).columns - 1
+    segments = list(segments)
+    while len(segments) > 1 and sum(len(t) for _, t in segments) + len(sep) * (len(segments) - 1) > cols:
+        segments.remove(max(segments, key=lambda seg: seg[0]))
+    return sep.join(t for _, t in segments)
+
+
 def _status_printer(rig: Rig, tag: str):
+    """Live log: one new line each time the joint angles differ from the previous line; nothing is printed while the
+    arm is still. (A fault appearing or clearing also prints a line.)"""
+    last = {"q": None, "fault": None}
+
     def cb(s: dict):
+        latest = rig.feed.latest
+        q = latest["q"] if latest else None
+        if (q is not None and last["q"] is not None and s["faulted"] == last["fault"]
+                and max(abs(a - b) for a, b in zip(q, last["q"])) < 1e-6):
+            return
+        last["q"], last["fault"] = q, s["faulted"]
         tcp = s["tcp"]
-        pos = f"x={tcp[0]:7.1f} y={tcp[1]:7.1f} z={tcp[2]:7.1f}" if tcp else "tcp n/a"
-        cam = f"cam {rig.cam.hz():4.1f} Hz, {rig.cam.recorded_count():4d} fr, lost {rig.cam.gaps}" if tag == "REC" else ""
-        line = (f"\r{tag} {s['elapsed']:6.1f} s | {cam} | robot {rig.feed.hz():3.0f} Hz | preset {s['preset']} "
-                f"({s['lin']} mm/s, {s['ang']} deg/s) | {pos} mm{' | FAULT' if s['faulted'] else ''}   ")
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        segs = [(0, f"{tag} {s['elapsed']:6.1f}s")]
+        if s["faulted"]:
+            segs.append((0, "FAULT"))
+        if tcp:
+            segs.append((1, f"x={tcp[0]:.1f} y={tcp[1]:.1f} z={tcp[2]:.1f} mm"))
+        if tag == "REC":
+            segs.append((2, f"cam {rig.cam.hz():.0f} Hz {rig.cam.recorded_count()} fr lost {rig.cam.gaps}"))
+        segs.append((3, f"preset {s['preset']}"))
+        segs.append((4, f"robot {rig.feed.hz():.0f} Hz"))
+        segs.append((5, f"{s['lin']} mm/s {s['ang']} deg/s"))
+        print(_fit_line(segs), flush=True)
     return cb
 
 
@@ -251,7 +277,6 @@ def jog(rig: Rig):
             rig.teleop.run(recording=False, on_status=_status_printer(rig, "JOG"))
     finally:
         rig.keys.deactivate()
-        print()
         give_back(rig)
 
 
@@ -293,7 +318,6 @@ def record_episode(rig: Rig, cfg: dict):
         frames = rig.cam.end_recording()
         robot = rig.feed.stop_recording()
         grip = rig.gripper.stop_recording() if rig.gripper else {"t": np.zeros(0), "setpoint": np.zeros(0, np.int32), "fsr": np.zeros((0, 2), np.int32)}
-        print()
         give_back(rig)
     control = rig.teleop.control_arrays()
     events = list(rig.teleop.events)
