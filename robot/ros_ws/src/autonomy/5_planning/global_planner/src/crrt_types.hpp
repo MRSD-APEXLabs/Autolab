@@ -48,9 +48,26 @@ static constexpr double EE_PITCH_TOL = 0.2;   // rad
 // RRT-Connect tuning
 static constexpr int    MAX_ITER     = 5000;
 static constexpr double MAX_TIME_SEC = 12.0;
+// Budget for each leg of the two-stage midpoint fallback, which runs only
+// after MAX_TIME_SEC has already been spent. Worst case is MAX_TIME_SEC +
+// 2 * STAGE_TIME_SEC before crrt_plan() gives up.
+static constexpr double STAGE_TIME_SEC = 5.0;
 static constexpr double STEP_SIZE    = 0.05;  // rad per step
 static constexpr double GOAL_BIAS    = 0.3;  // 10 % samples toward goal
 static constexpr double CONNECT_TOL  = 0.02;  // rad — trees considered joined
+// Random-pair shortcut passes run on the raw RRT-Connect path (and on each
+// leg of the midpoint fallback) before time parameterization. Each pass
+// validates the straight segment at STEP_SIZE resolution, so cost scales
+// with path length; 200 matches what prm_plan uses.
+static constexpr int    SHORTCUT_ITERS = 200;
+
+// Informed RRT* (irrtstar_plan) — anytime: keeps improving the first solution
+// until RRTSTAR_TIME_SEC, then hands the best path to the same post-processing
+// as crrt_plan.
+static constexpr double RRTSTAR_TIME_SEC = 5.0;
+static constexpr int    RRTSTAR_MAX_ITER = 20000;
+static constexpr double RRTSTAR_ETA      = 0.5;   // max extension per step (rad)
+static constexpr double RRTSTAR_GAMMA    = 3.0;   // near-neighbour radius scale
 
 // Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
 static constexpr double WS_X_MIN = -0.15;

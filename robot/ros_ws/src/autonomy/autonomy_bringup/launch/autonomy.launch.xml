@@ -26,7 +26,9 @@
   <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
 
   <!-- Planning -->
-  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)" />
+  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)">
+    <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
+  </include>
 
   <!-- Behavior -->
   <include
