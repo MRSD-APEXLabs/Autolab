@@ -12,7 +12,8 @@
 // ── ROS / MoveIt includes ────────────────────────────────────
 #include <rclcpp/rclcpp.hpp>
 #include <controller_manager_msgs/srv/switch_controller.hpp>
-#include "crrt_plan.hpp"   // pulls in all others transitively
+#include <controller_manager_msgs/srv/list_controllers.hpp>
+#include "crrt_rrtstar.hpp"   // pulls in crrt_plan.hpp and all others transitively
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -225,44 +226,121 @@ visualization_msgs::msg::Marker make_path_marker(
     return marker;
 }
 
-void set_controller_active(
+// Ensure `controller_name` is active. Returns true if it is active on return
+// (including when it was already active and no switch was needed).
+bool set_controller_active(
     const std::shared_ptr<rclcpp::Node>& node,
     const std::string& controller_name)
 {
+    // ── Check the current state first ─────────────────────────
+    // The controller manager only accepts an activation request for a
+    // controller that is currently *inactive*. Asking it to activate an
+    // already-active controller is treated as a failed transition, and under
+    // STRICT strictness that aborts the entire switch ("Aborting, no
+    // controller is switched!"). So query the state and skip the no-op.
+    auto list_client = node->create_client<controller_manager_msgs::srv::ListControllers>(
+        "/controller_manager/list_controllers");
+
+    if (list_client->wait_for_service(std::chrono::seconds(5)))
+    {
+        auto list_req = std::make_shared<controller_manager_msgs::srv::ListControllers::Request>();
+        auto list_fut = list_client->async_send_request(list_req);
+
+        if (rclcpp::spin_until_future_complete(node, list_fut, std::chrono::seconds(5)) ==
+            rclcpp::FutureReturnCode::SUCCESS)
+        {
+            bool known = false;
+            // get() moves the response shared_ptr out of the future and returns
+            // it by value. Iterating list_fut.get()->controller directly would
+            // free the response at the end of that expression, leaving the loop
+            // walking freed memory, so hold the pointer for the loop's lifetime.
+            auto list_resp = list_fut.get();
+            for (const auto& c : list_resp->controller)
+            {
+                if (c.name != controller_name)
+                    continue;
+                known = true;
+
+                if (c.state == "active")
+                {
+                    RCLCPP_INFO(node->get_logger(),
+                                "Controller '%s' is already active — no switch needed.",
+                                controller_name.c_str());
+                    return true;
+                }
+                if (c.state != "inactive")
+                {
+                    // unconfigured / finalized — activation is impossible from here.
+                    RCLCPP_ERROR(node->get_logger(),
+                                 "Controller '%s' is in state '%s'; it must be 'inactive' "
+                                 "before it can be activated.",
+                                 controller_name.c_str(), c.state.c_str());
+                    return false;
+                }
+                break;  // inactive → fall through and activate it
+            }
+
+            if (!known)
+            {
+                RCLCPP_ERROR(node->get_logger(),
+                             "Controller '%s' is not loaded in the controller manager.",
+                             controller_name.c_str());
+                return false;
+            }
+        }
+        else
+        {
+            RCLCPP_WARN(node->get_logger(),
+                        "list_controllers call failed — attempting the switch anyway.");
+        }
+    }
+    else
+    {
+        RCLCPP_WARN(node->get_logger(),
+                    "/controller_manager/list_controllers unavailable — "
+                    "attempting the switch anyway.");
+    }
+
+    // ── Activate ──────────────────────────────────────────────
     auto client = node->create_client<controller_manager_msgs::srv::SwitchController>(
         "/controller_manager/switch_controller");
 
     if (!client->wait_for_service(std::chrono::seconds(5))) {
-        RCLCPP_ERROR(node->get_logger(), "Service not available");
-        return;
+        RCLCPP_ERROR(node->get_logger(),
+                     "/controller_manager/switch_controller unavailable");
+        return false;
     }
 
     auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
-
-    // Activate this controller
     request->activate_controllers.push_back(controller_name);
 
-    // Optionally deactivate others (leave empty if not needed)
-    // request->deactivate_controllers = {...};
-
-    request->strictness = controller_manager_msgs::srv::SwitchController::Request::STRICT;
-    request->start_asap = true;
+    // BEST_EFFORT only triggers a transition when the controller is not already
+    // in the target state, so a redundant activation is a no-op instead of an
+    // abort. Belt-and-braces with the state check above, which also races
+    // against another node switching controllers between the two calls.
+    request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+    request->activate_asap = true;   // 'start_asap' is the deprecated spelling
     request->timeout = rclcpp::Duration::from_seconds(5.0);
 
     auto future = client->async_send_request(request);
 
-    if (rclcpp::spin_until_future_complete(node, future) ==
+    if (rclcpp::spin_until_future_complete(node, future, std::chrono::seconds(10)) !=
         rclcpp::FutureReturnCode::SUCCESS)
     {
-        auto response = future.get();
-        if (response->ok) {
-            RCLCPP_INFO(node->get_logger(), "Controller activated successfully");
-        } else {
-            RCLCPP_ERROR(node->get_logger(), "Failed to activate controller");
-        }
-    } else {
-        RCLCPP_ERROR(node->get_logger(), "Service call failed");
+        RCLCPP_ERROR(node->get_logger(), "switch_controller call failed");
+        return false;
     }
+
+    auto response = future.get();
+    if (!response->ok) {
+       //  Fixed: remove response->message.c_str()
+        RCLCPP_ERROR(node->get_logger(), "Failed to activate controller '%s'.",
+                    controller_name.c_str());
+        return false;
+    }
+
+    RCLCPP_INFO(node->get_logger(), "Controller '%s' activated.", controller_name.c_str());
+    return true;
 }
 
 // Reactivate xArm controller: clear errors, enable motion, set state to ready (0).
@@ -323,6 +401,24 @@ bool reactivate_xarm(rclcpp::Node::SharedPtr node)
     return true;
 }
 
+// ── Planner selection ─────────────────────────────────────────
+// Change PLANNER to switch the planner at every call site.
+enum class Planner { RRT_CONNECT, INFORMED_RRTSTAR, PRM };
+static constexpr Planner PLANNER = Planner::INFORMED_RRTSTAR;// RRT_CONNECT or INFORMED_RRTSTAR / PRM
+
+std::optional<moveit::planning_interface::MoveGroupInterface::Plan> run_planner(
+    moveit::planning_interface::MoveGroupInterface &arm_group,
+    rclcpp::Node::SharedPtr node,
+    const std::vector<double> &q_goal)
+{
+    switch (PLANNER) {
+        case Planner::INFORMED_RRTSTAR: return irrtstar_plan(arm_group, node, q_goal);
+        case Planner::PRM:              return prm_plan(arm_group, node, q_goal);
+        case Planner::RRT_CONNECT:
+        default:                        return crrt_plan(arm_group, node, q_goal);
+    }
+}
+
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -336,7 +432,7 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
 
     // ── Configure planner ────────────────────────────────────
     arm_group.setPlanningPipelineId("ompl");
-    arm_group.setPlannerId("RRTConnect");
+    arm_group.setPlannerId("RRTConnect"); // Dummy — we override the planner with our own CRRT implementation
     arm_group.setPlanningTime(ARM_PLANNING_TIME_SEC);           // match GUI exactly
     arm_group.setNumPlanningAttempts(20);     // match GUI exactly
     arm_group.setPoseReferenceFrame("world");
@@ -358,6 +454,32 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
         RCLCPP_ERROR(node->get_logger(),
                     "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
                     target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+        // ── Diagnose why ──────────────────────────────────────
+        const auto &q = target_pose.orientation;
+        const double qn = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+        if (std::abs(qn - 1.0) > 1e-3)
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] BAD ORIENTATION: quaternion (%.3f, %.3f, %.3f, %.3f) has norm %.3f, not 1.",
+                q.x, q.y, q.z, q.w, qn);
+
+        const auto &p = target_pose.position;
+        if (p.x < -0.15 || p.x > 0.85 || p.y < -0.50 || p.y > 0.50 || p.z < 0.90 || p.z > 1.30)
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] OUTSIDE PLANNER WORKSPACE: (%.3f, %.3f, %.3f) not in x[-0.15,0.85] y[-0.50,0.50] z[0.90,1.30].",
+                p.x, p.y, p.z);
+
+        // Retry from the current state with a much longer timeout
+        moveit::core::RobotState retry_state(*current_state);
+        if (retry_state.setFromIK(jmg, target_pose, 5.0))
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] TIMEOUT: IK succeeds with a 5 s timeout, so the pose is reachable but hard "
+                "(near a singularity / joint limit). Raise the timeout at this call.");
+        else
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] UNREACHABLE: no solution even with 5 s. The pose is out of reach, or the "
+                "orientation is not achievable by the arm (or it is in the wrong frame — IK uses the "
+                "model root frame, currently expected to be 'world').");
         return std::nullopt;
     }
     std::vector<double> joint_values;
@@ -377,11 +499,11 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
     try
     {
         // ── Plan ──────────────────────────────────────────────
-        moveit::planning_interface::MoveGroupInterface::Plan plan;
-        auto crrt_opt = prm_plan(arm_group, node, joint_values);
+        moveit::planning_interface::MoveGroupInterface::Plan plan; // 
+        auto crrt_opt = run_planner(arm_group, node, joint_values);
         if (!crrt_opt)
         {
-            RCLCPP_ERROR(node->get_logger(), "[Path Planning] CRRT planning failed.");
+            RCLCPP_ERROR(node->get_logger(), "[Path Planning] Planning failed.");
             return std::nullopt;
         }
         plan = std::move(*crrt_opt);
@@ -634,7 +756,7 @@ int main(int argc, char *argv[])
         if (opt.has_value()) {
             publish_state("SUCCESS");
         } else {
-            RCLCPP_ERROR(node->get_logger(), "RRT* failed — aborting pipeline.");
+            RCLCPP_ERROR(node->get_logger(), "Planner failed — aborting pipeline.");
             publish_state("ERROR");
         }
         std::lock_guard<std::mutex> lock(cmd_mutex);
@@ -781,10 +903,10 @@ int main(int argc, char *argv[])
             const double PREGRASP_Z_OFFSET = 0.00;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            const double PREGRASP_Y_OFFSET = 0.1;
+            const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
             pregrasp_pose.position.y += PREGRASP_Y_OFFSET;
 
-            const double PREGRASP_X_OFFSET = 0.1;
+            const double PREGRASP_X_OFFSET = 0.0; //  0.1;
             pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
 
 
@@ -833,7 +955,7 @@ int main(int argc, char *argv[])
             const JointVec home_offset_joints = {1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284};
 
             publish_state("PLANNING");
-            auto rrt_plan_opt = prm_plan(arm_group, node, home_offset_joints);
+            auto rrt_plan_opt = run_planner(arm_group, node, home_offset_joints);
 
             if (rrt_plan_opt) {
                 publish_state("EXECUTING");

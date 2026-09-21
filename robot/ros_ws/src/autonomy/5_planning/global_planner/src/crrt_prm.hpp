@@ -107,10 +107,10 @@ void build_prm_roadmap(
     int num_samples = 500,
     int k_neighbors = 10)
 {
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
 
+    auto& psm_holder = crrt_internal::get_psm(node);
     RCLCPP_INFO(node->get_logger(), "[PRM] Waiting for octomap...");
     rclcpp::Rate wait_rate(2);
     for (int i = 0; i < 30; ++i) {
@@ -126,12 +126,10 @@ void build_prm_roadmap(
         wait_rate.sleep();
     }
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -507,13 +505,10 @@ void inject_waypoints_into_roadmap(
     }
 
     // Get scene snapshot for edge validation
-    auto& psm_holder = crrt_internal::get_psm(node);
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();

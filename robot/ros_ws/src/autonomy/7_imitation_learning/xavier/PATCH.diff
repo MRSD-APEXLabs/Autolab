@@ -1,0 +1,225 @@
+--- a/config.py
++++ b/config.py
+@@ -73,3 +73,12 @@
+ TARGET_TOLERANCE  = 20    # "around 400" window
+ GRIPPER_CLOSE = 50
+ GRIPPER_STEP = 20
++
++
++# --- record mode (ACT data collection): wrist camera left + right + depth streamed on RECORD_PORT ---
++RECORD_PORT = 8768
++RECORD_SCALE = 0.6667         # image/depth downscale before streaming. The Xavier's Ethernet link is only 100 Mb/s (~11.8 MB/s):
++RECORD_JPEG_QUALITY = 90      # 640x400 q90 + PNG16 depth = ~260 KB/frame = ~8 MB/s at 30 Hz. Can be overridden per session by the client.
++WRIST_DEPTH_MODE = "NEURAL"   # sl.DEPTH_MODE name used when the wrist camera is opened (depth only computed in record mode)
++WRIST_DEPTH_MIN_MM = -1       # -1 = SDK default. The wrist camera keeps the default millimetre coordinate units.
++WRIST_DEPTH_MAX_MM = -1
+--- a/image_worker.py
++++ b/image_worker.py
+@@ -34,11 +34,19 @@
+         self.stream_hub = stream_hub
+         self.stop_event = threading.Event()
+         self.wrist_runtime = sl.RuntimeParameters()
++        self.wrist_runtime.enable_depth = False  # wrist depth is only computed by record mode
++        self.wrist_paused = threading.Event()  # set while record mode owns the wrist camera
+         self.base_runtime = sl.RuntimeParameters()
+         self.base_runtime.enable_depth = False  # raw stream needs image only, not NEURAL depth
+         self.wrist_mat = sl.Mat()
+         self.base_mat = sl.Mat()
+ 
++    def set_wrist_paused(self, paused: bool):
++        if paused:
++            self.wrist_paused.set()
++        else:
++            self.wrist_paused.clear()
++
+     def stop(self):
+         self.stop_event.set()
+ 
+@@ -46,7 +54,7 @@
+         logger.info("raw image worker starting (wrist + base)")
+         while not self.stop_event.is_set():
+             wrist_ok = False
+-            if self.wrist_cam is not None:
++            if self.wrist_cam is not None and not self.wrist_paused.is_set():
+                 with self.wrist_lock:
+                     err = self.wrist_cam.grab(self.wrist_runtime)
+                     if err == sl.ERROR_CODE.SUCCESS:
+--- a/main.py
++++ b/main.py
+@@ -29,6 +29,7 @@
+ import logging
+ import sys
+ import threading
++import time
+ from typing import Optional
+ 
+ import pyzed.sl as sl
+@@ -39,6 +40,7 @@
+ from visual_servo import ZEDYOLOServo
+ from config import *
+ from streamhub import StreamHub
++from record_worker import RecordFeed, ZEDRecordWorker, handle_record_client
+ 
+ 
+ # =============================================================================
+@@ -72,7 +74,11 @@
+         wrist_init.set_from_serial_number(SERIAL_CAM1)
+         wrist_init.camera_resolution = sl.RESOLUTION.SVGA
+         wrist_init.camera_fps = CAMERA_FPS
+-        wrist_init.depth_mode = sl.DEPTH_MODE.NONE
++        wrist_init.depth_mode = getattr(sl.DEPTH_MODE, WRIST_DEPTH_MODE)  # depth only computed in record mode
++        if WRIST_DEPTH_MIN_MM > 0:
++            wrist_init.depth_minimum_distance = WRIST_DEPTH_MIN_MM
++        if WRIST_DEPTH_MAX_MM > 0:
++            wrist_init.depth_maximum_distance = WRIST_DEPTH_MAX_MM
+         cam = sl.Camera()
+         err = cam.open(wrist_init)
+         if err != sl.ERROR_CODE.SUCCESS:
+@@ -129,6 +135,15 @@
+             )
+             self._inspect_worker.start()
+ 
++        self._record_worker = None
++        if self._wrist_cam is not None:
++            self._record_worker = ZEDRecordWorker(
++                self._wrist_cam, self._wrist_lock,
++                feed=RECORD_FEED,
++                stream_hub=stream_hub,
++            )
++            self._record_worker.start()
++
+     def _on_servo_complete(self):
+         with self.lock:
+             self.current_mode = "idle"
+@@ -141,17 +156,22 @@
+                 self._servo_worker.abort_run()
+             elif self.current_mode == "inspect" and self._inspect_worker is not None:
+                 self._inspect_worker.abort_run()
++            elif self.current_mode == "record" and self._record_worker is not None:
++                self._record_worker.abort_run()
++            self._idle_worker.set_wrist_paused(False)
+             self.current_mode = "idle"
+             self.stream_hub.set_active_mode("idle")
+ 
+     def switch_mode(self, mode: str):
+         mode = mode.lower().strip()
+-        if mode not in {"idle", "servo", "inspect"}:
++        if mode not in {"idle", "servo", "inspect", "record"}:
+             raise ValueError(f"Unsupported mode: {mode}")
+         if mode == "servo" and self._servo_worker is None:
+             raise ValueError("servo mode unavailable: wrist camera not connected")
+         if mode == "inspect" and self._inspect_worker is None:
+             raise ValueError("inspect mode unavailable: base camera not connected")
++        if mode == "record" and self._record_worker is None:
++            raise ValueError("record mode unavailable: wrist camera not connected")
+ 
+         with self.lock:
+             if mode == self.current_mode:
+@@ -163,16 +183,28 @@
+                 self._servo_worker.abort_run()
+             elif self.current_mode == "inspect" and self._inspect_worker is not None:
+                 self._inspect_worker.abort_run()
++            elif self.current_mode == "record" and self._record_worker is not None:
++                self._record_worker.abort_run()
++
++            # The idle worker must not grab the wrist camera while record mode owns it
++            self._idle_worker.set_wrist_paused(mode == "record")
+ 
+             if mode == "servo":
+                 self._servo_worker.start_run(on_complete=self._on_servo_complete)
+             elif mode == "inspect":
+                 self._inspect_worker.start_run()
++            elif mode == "record":
++                self._record_worker.start_run()
+ 
+             self.current_mode = mode
+             self.stream_hub.set_active_mode(mode)
+             return self.current_mode
+ 
++    def configure_record(self, scale=None, jpeg_quality=None):
++        if self._record_worker is None:
++            raise ValueError("record mode unavailable: wrist camera not connected")
++        return self._record_worker.configure(scale=scale, jpeg_quality=jpeg_quality)
++
+     def status(self):
+         with self.lock:
+             return {
+@@ -180,6 +212,7 @@
+                 "worker_alive": True,
+                 "wrist_camera_connected": self._wrist_cam is not None,
+                 "base_camera_connected": self._base_cam is not None,
++                "record_available": self._record_worker is not None,
+             }
+ 
+     def shutdown(self):
+@@ -192,6 +225,10 @@
+             self._inspect_worker.stop()
+             self._inspect_worker.join(timeout=10.0)
+ 
++        if self._record_worker is not None:
++            self._record_worker.stop()
++            self._record_worker.join(timeout=5.0)
++
+         self._idle_worker.stop()
+         self._idle_worker.join(timeout=5.0)
+ 
+@@ -219,6 +256,7 @@
+ STREAM_SNAPSHOT_INTERVAL = 1.0 / STREAM_HZ
+ MANAGER: Optional[ModeManager] = None
+ STREAM_HUB = StreamHub()
++RECORD_FEED = RecordFeed()
+ 
+ 
+ async def control_handler(ws, *args):
+@@ -242,6 +280,11 @@
+                 elif cmd == "stop":
+                     MANAGER.stop()
+                     await ws.send(json.dumps({"ok": True, "mode": "idle"}))
++                elif cmd == "time":
++                    await ws.send(json.dumps({"ok": True, "t_ns": time.time_ns()}))
++                elif cmd == "record_config":
++                    cfg = MANAGER.configure_record(data.get("scale"), data.get("jpeg_quality"))
++                    await ws.send(json.dumps({"ok": True, "record": cfg}))
+                 elif cmd == "status":
+                     await ws.send(json.dumps({"ok": True, **MANAGER.status()}))
+                 else:
+@@ -321,6 +364,11 @@
+         pass
+ 
+ 
++async def record_handler(ws, *args):
++    """Binary left/right/depth frames of the wrist camera while record mode is active."""
++    await handle_record_client(ws, RECORD_FEED)
++
++
+ # =============================================================================
+ # Entry point
+ # =============================================================================
+@@ -342,12 +390,16 @@
+     raw_server = websockets.serve(
+         raw_stream_handler, "0.0.0.0", RAW_STREAM_PORT, max_size=None
+     )
++    record_server = websockets.serve(
++        record_handler, "0.0.0.0", RECORD_PORT, max_size=None, compression=None, ping_interval=None
++    )
+ 
+     log = logging.getLogger(__name__)
+-    async with control_server, stream_server, raw_server:
++    async with control_server, stream_server, raw_server, record_server:
+         log.info("Control server:    ws://0.0.0.0:%d", CONTROL_PORT)
+         log.info("Stream server:     ws://0.0.0.0:%d", STREAM_PORT)
+         log.info("Raw stream server: ws://0.0.0.0:%d", RAW_STREAM_PORT)
++        log.info("Record server:     ws://0.0.0.0:%d", RECORD_PORT)
+         await asyncio.Future()
+ 
+ 
+--- a/visual_servo.py
++++ b/visual_servo.py
+@@ -29,6 +29,7 @@
+         self.debug = debug
+         self.stream_hub = stream_hub
+         self.runtime = sl.RuntimeParameters()
++        self.runtime.enable_depth = False  # wrist camera is opened with depth for record mode; servo does not use it
+         self.view = sl.VIEW.RIGHT
+         self.model = YOLO(MODEL_SERVO)
+         self.model.to("cuda")

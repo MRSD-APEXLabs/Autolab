@@ -68,8 +68,17 @@ services:
         - *l4t_image
     # we use tmux send-keys so that the session stays alive
     ipc: host
+    # `caniv -a -s` brings up the CANivore's SocketCAN interface (can0 on the
+    # current hardware) — it is NOT automatic on boot/container start, and
+    # `canivore_setup` (the other CLI in the canivore-usb apt package) is a
+    # no-op stub, not a real bring-up tool (confirmed via strace — see
+    # swerve_hardware_interface/README.txt). The sleep gives the bus time to
+    # settle before the swerve hardware interface node starts configuring
+    # devices on it; skipping the wait was observed to cause persistent
+    # "CAN frame not received/too-stale" status-signal errors even once the
+    # bus itself was up.
     command: >
-      bash -c "ssh service restart; tmux new -d -s robot_bringup && tmux send-keys -t robot_bringup  'bws && sws &&  DATE=$(date | sed \"s/ /_/g\" | sed \"s/:/_/g\") ros2 launch ${ROBOT_LAUNCH_PACKAGE} ${ROBOT_LAUNCH_FILE} sim:="false" ' ENTER && sleep infinity"
+      bash -c "ssh service restart; tmux new -d -s robot_bringup && tmux send-keys -t robot_bringup  'sudo caniv -a -s; sleep 45; bws && sws &&  DATE=$(date | sed \"s/ /_/g\" | sed \"s/:/_/g\") ros2 launch ${ROBOT_LAUNCH_PACKAGE} ${ROBOT_LAUNCH_FILE} sim:="false" ' ENTER && sleep infinity"
     runtime: nvidia
     # assumes network isolation via a physical router, so uses network_mode=host
     network_mode: host

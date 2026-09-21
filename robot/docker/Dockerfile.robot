@@ -50,6 +50,7 @@ RUN sudo add-apt-repository universe \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null \
   && apt-get ${UPDATE_FLAGS} update -y && apt-get ${INSTALL_FLAGS} install -y --no-install-recommends \
     ros-humble-desktop \
+    ros-humble-ros2run \
     python3-argcomplete \
   && rm -rf /var/lib/apt/lists/*
 
@@ -76,6 +77,7 @@ RUN apt update && apt install -y \
   gdb \
   libpng-dev \
   libgomp1 \
+  libdc1394-dev \
   zstd
 
 # Install any additional ROS2 packages
@@ -241,12 +243,62 @@ RUN addgroup --gid 1000 robot && \
   echo "robot:robot" | chpasswd
 
 
-RUN if [ "$REAL_ROBOT"  = "true" ]; then \
+RUN set -e; \
+  # this block chains a lot of steps with a bare `;` between the REAL_ROBOT
+  # branch and the shared fixuid setup below — without set -e, a failure
+  # anywhere in the branch (e.g. an apt install) is silently skipped over
+  # instead of failing the build, rather than aborting it.
+  if [ "$REAL_ROBOT"  = "true" ]; then \
   # Put commands here that should run for the real robot but not the sim
   echo "REAL_ROBOT is true"; \
-  apt-get ${UPDATE_FLAGS} update && apt-get ${INSTALL_FLAGS} install -y libimath-dev; \
-  groupadd -g 20 dialout; \
-  usermod -aG dialout robot; \
+  curl -s --compressed -o /usr/share/keyrings/ctr-pubkey.gpg "https://deb.ctr-electronics.com/ctr-pubkey.gpg" && \
+  curl -s --compressed -o /etc/apt/sources.list.d/ctr2026.list "https://deb.ctr-electronics.com/ctr2026.list" && \
+  # only the CANivore `tools` repo ships an L4T/jetson suite; the phoenix6
+  # `libs/2026` repo is stable-suite-only for L4T (jetson suite 403s there),
+  # so scope the substitution to the tools line
+  sed -i '/deb.ctr-electronics.com\/tools/s/stable/jetson/' /etc/apt/sources.list.d/ctr2026.list && \
+  apt-get ${UPDATE_FLAGS} update && \
+  # canivore-usb-kernel's postinst DKMS-builds and modprobes its .ko against
+  # the running kernel. Build-time kernel identity inside the container
+  # doesn't reliably match the deploy host's real kernel (observed: DKMS
+  # built for 5.15.0-191-generic, then modprobe looked in
+  # /lib/modules/6.8.12-tegra and failed, killing the whole install). The
+  # module is loaded for real at container start via `caniv -a -s` (see
+  # docker-compose.yaml), so stub out modprobe just for this install to let
+  # dpkg configure cleanly without actually loading anything at build time.
+  # kmod (which owns /usr/sbin/modprobe) isn't installed yet at this point —
+  # it comes in transitively as a dependency of canivore-usb-kernel during
+  # the install below — so a plain mv-aside would just get overwritten
+  # mid-transaction. dpkg-divert redirects any package's attempt to write
+  # that path for the duration of the install, no matter install order.
+  dpkg-divert --local --rename --add /usr/sbin/modprobe && \
+  printf '#!/bin/sh\nexit 0\n' > /usr/sbin/modprobe && chmod +x /usr/sbin/modprobe && \
+  apt-get ${INSTALL_FLAGS} install -y libimath-dev canivore-usb phoenix6 && \
+  rm -f /usr/sbin/modprobe && \
+  dpkg-divert --local --rename --remove /usr/sbin/modprobe && \
+  (getent group dialout || groupadd -g 20 dialout) && \
+  usermod -aG dialout robot && \
+  # phoenix6's .so lives in a non-default dir, and the ROS2 workspace binary
+  # that links it (swerve_hardware_interface_node) gets `setcap
+  # cap_net_admin,cap_net_raw+ep` applied after each build (see .bashrc's
+  # bws()) so it can bring up and use the CANivore's SocketCAN interface
+  # without sudo (cap_net_admin for interface up/down, cap_net_raw for raw
+  # frame TX/RX). File capabilities put the binary into glibc secure-exec
+  # mode, which makes the dynamic loader ignore LD_LIBRARY_PATH entirely —
+  # so both phoenix6's lib dir and ROS2's own core lib dir (normally found
+  # only via the LD_LIBRARY_PATH set by sourcing setup.bash) must be
+  # registered with ldconfig instead, or that binary can't find its own
+  # dependencies. NOTE: if a running robot-l4t container throws
+  # "error while loading shared libraries: librcl_interfaces__rosidl_typesupport_cpp.so"
+  # even though this Dockerfile already registers /opt/ros/humble/lib below,
+  # the container was built from an image older than this fix — rebuild the
+  # image (don't just patch /etc/ld.so.conf.d by hand in the running
+  # container, it won't survive the next recreate). See
+  # swerve_hardware_interface/README.txt for the full bring-up sequence and
+  # debugging history.
+  echo "/usr/lib/phoenix6" > /etc/ld.so.conf.d/phoenix6.conf && \
+  echo "/opt/ros/humble/lib" > /etc/ld.so.conf.d/ros-humble.conf && \
+  ldconfig; \
   USER=robot && \
   GROUP=robot && \
   curl -SsL https://github.com/boxboat/fixuid/releases/download/v0.6.0/fixuid-0.6.0-linux-arm64.tar.gz | tar -C /usr/local/bin -xzf - && \

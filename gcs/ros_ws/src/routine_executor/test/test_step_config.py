@@ -61,6 +61,14 @@ def test_make_msg_ot2_uses_parameters_json():
     assert msg.parameters_json == payload
 
 
+def test_make_msg_ot2_serializes_dict_parameters_json():
+    from behavior_tree_msgs.msg import LabMachineCommand
+    payload = {'steps': []}
+    msg = STEPS['ot2']['make_msg']({'name': 'ot2', 'parameters_json': payload})
+    assert isinstance(msg, LabMachineCommand)
+    assert msg.parameters_json == json.dumps(payload)
+
+
 def test_watch_topic_format():
     for name, config in STEPS.items():
         topic = config['watch_topic']
@@ -98,6 +106,28 @@ def test_shaker_watch_topic():
 def test_place_ot2_and_place_shaker_removed():
     assert 'place_ot2' not in STEPS
     assert 'place_shaker' not in STEPS
+
+
+def test_make_msg_pick_uses_target_machine():
+    from behavior_tree_msgs.msg import ManipulationCommand
+    msg = STEPS['pick']['make_msg']({'name': 'pick', 'target_machine': 'ot2'})
+    assert isinstance(msg, ManipulationCommand)
+    assert msg.type == 'pick'
+    assert msg.target_machine == 'ot2'
+
+
+def test_make_msg_pick_shaker_target():
+    from behavior_tree_msgs.msg import ManipulationCommand
+    msg = STEPS['pick']['make_msg']({'name': 'pick', 'target_machine': 'shaker'})
+    assert msg.target_machine == 'shaker'
+
+
+def test_pick_watch_topic():
+    assert STEPS['pick']['watch_topic'] == 'behavior/pick_object_status'
+
+
+def test_pick_required_params():
+    assert 'target_machine' in STEPS['pick']['required_params']
 
 
 def test_place_required_params():

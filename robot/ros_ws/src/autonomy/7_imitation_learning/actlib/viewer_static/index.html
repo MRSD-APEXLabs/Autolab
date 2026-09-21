@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACT demo viewer</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#2a313c; --text:#d6dde6; --dim:#8b96a5; --accent:#58a6ff; --warn:#e3b341; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 650; }
+  .spacer { flex: 1; }
+  .dim { color: var(--dim); font-size: 12px; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--accent); }
+  select { min-width: 300px; }
+  .videos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px 16px 0; }
+  figure { margin: 0; position: relative; background: #000; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  figure canvas { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; background: #000; }
+  figcaption { position: absolute; left: 8px; top: 7px; font-size: 12px; background: rgba(0,0,0,.6); padding: 2px 9px; border-radius: 10px; display: flex; gap: 8px; align-items: center; }
+  .bar { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg,#7a0403,#f66b19,#c7ef34,#31f299,#2ab9f5,#4662d7,#30123b); }
+  .controls { display: flex; gap: 8px; align-items: center; padding: 10px 16px; flex-wrap: wrap; }
+  .controls .btn { width: 40px; padding: 5px 0; text-align: center; }
+  #play { width: 52px; font-size: 15px; }
+  #scrub { flex: 1; min-width: 200px; accent-color: var(--accent); }
+  #time { font-variant-numeric: tabular-nums; min-width: 150px; }
+  #frameNo { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 12px; min-width: 190px; }
+  #info { padding: 0 16px; }
+  .infogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; }
+  .infogrid span { display: block; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .infogrid b { font-weight: 550; font-variant-numeric: tabular-nums; }
+  .warn { margin-top: 8px; padding: 6px 12px; border: 1px solid #5a4a12; background: #2a230c; color: var(--warn); border-radius: 6px; }
+  .chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12px; padding: 2px 9px; border-radius: 12px; }
+  .plots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px 16px 28px; }
+  .plotbox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px 6px; min-width: 0; }
+  .plotbox h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--dim); }
+  .plotbox canvas { display: block; width: 100%; height: 175px; cursor: crosshair; touch-action: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+  .legend b { font-weight: 600; display: inline-block; min-width: 56px; }
+  @media (max-width: 1000px) { .videos, .plots { grid-template-columns: 1fr; } select { min-width: 200px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ACT demos</h1>
+  <button id="prevEp" title="previous episode ( [ )">◀</button>
+  <select id="episode"></select>
+  <button id="nextEp" title="next episode ( ] )">▶</button>
+  <span id="count" class="dim"></span>
+  <span class="spacer"></span>
+  <span class="dim">space play/pause · ← → step a frame · shift+← → ±1 s · click or drag a plot to seek</span>
+</header>
+<main>
+  <section class="videos">
+    <figure><canvas id="cv-left" width="640" height="400"></canvas><figcaption>left camera</figcaption></figure>
+    <figure><canvas id="cv-right" width="640" height="400"></canvas><figcaption>right camera</figcaption></figure>
+    <figure><canvas id="cv-depth" width="640" height="400"></canvas><figcaption>depth <span class="bar"></span><span class="dim">0.1 m → 1.5 m, black = no depth</span></figcaption></figure>
+  </section>
+  <section class="controls">
+    <button id="step-1" class="btn" title="previous frame">⏪</button>
+    <button id="play" title="play / pause (space)">▶</button>
+    <button id="step+1" class="btn" title="next frame">⏩</button>
+    <select id="speed" title="playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    <input id="scrub" type="range" min="0" max="1000" value="0" step="1">
+    <span id="time">00:00.00 / 00:00.00</span>
+    <span id="frameNo"></span>
+  </section>
+  <section id="info"></section>
+  <section class="plots" id="plots"></section>
+</main>
+<script>
+"use strict";
+const STREAMS = ["left", "right", "depth"];
+const AHEAD = 24;
+const COLORS = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#4dabf7", "#b197fc"];
+const $ = (id) => document.getElementById(id);
+const S = { eps: [], id: null, d: null, t: 0, playing: false, speed: 1, last: 0, dragging: false,
+            cache: { left: new Map(), right: new Map(), depth: new Map() }, drawn: { left: -1, right: -1, depth: -1 }, plots: [] };
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function bsearch(arr, x) {                 // index of the last element <= x (0 when none)
+  let lo = 0, hi = arr.length - 1, ans = 0;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+function interp(t, y, x) {
+  if (!t.length) return NaN;
+  if (x <= t[0]) return y[0];
+  if (x >= t[t.length - 1]) return y[y.length - 1];
+  const i = bsearch(t, x), f = (x - t[i]) / (t[i + 1] - t[i] || 1);
+  return y[i] + (y[i + 1] - y[i]) * f;
+}
+function fmtTime(s) { const m = Math.floor(s / 60); return String(m).padStart(2, "0") + ":" + (s - m * 60).toFixed(2).padStart(5, "0"); }
+function niceStep(range, n) { const raw = range / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+
+class Plot {
+  constructor(parent, title, series, duration, events) {
+    this.series = series; this.duration = duration; this.events = events;
+    this.L = 46; this.R = 10; this.T = 8; this.B = 20;
+    this.box = document.createElement("div"); this.box.className = "plotbox";
+    this.box.innerHTML = "<h3>" + escapeHtml(title) + "</h3><canvas></canvas><div class=\"legend\"></div>";
+    parent.appendChild(this.box);
+    this.cv = this.box.querySelector("canvas"); this.legend = this.box.querySelector(".legend");
+    this.vals = series.map((s) => { const el = document.createElement("span"); el.innerHTML = "<i style=\"background:" + s.color + "\"></i>" + escapeHtml(s.name) + " <b>-</b>"; this.legend.appendChild(el); return el.querySelector("b"); });
+    const seek = (e) => { const r = this.cv.getBoundingClientRect(); const x = (e.clientX - r.left - this.L) / (r.width - this.L - this.R); seekTo(Math.min(1, Math.max(0, x)) * this.duration); };
+    this.cv.addEventListener("pointerdown", (e) => { this.cv.setPointerCapture(e.pointerId); seek(e); });
+    this.cv.addEventListener("pointermove", (e) => { if (e.buttons & 1) seek(e); });
+    this.layout();
+  }
+  layout() {
+    const dpr = window.devicePixelRatio || 1, r = this.cv.getBoundingClientRect();
+    this.dpr = dpr; this.w = Math.max(80, Math.round(r.width)); this.h = Math.max(80, Math.round(r.height));
+    this.cv.width = Math.round(this.w * dpr); this.cv.height = Math.round(this.h * dpr);
+    this.base = document.createElement("canvas"); this.base.width = this.cv.width; this.base.height = this.cv.height;
+    this.renderBase();
+  }
+  x(t) { return this.L + (t / this.duration) * (this.w - this.L - this.R); }
+  renderBase() {
+    const g = this.base.getContext("2d"); g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); g.clearRect(0, 0, this.w, this.h);
+    let lo = Infinity, hi = -Infinity;
+    for (const s of this.series) for (const v of s.y) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const yy = (v) => this.T + (1 - (v - lo) / (hi - lo)) * (this.h - this.T - this.B);
+    this.yy = yy;
+    g.font = "11px system-ui, sans-serif"; g.lineWidth = 1;
+    const step = niceStep(hi - lo, 4);
+    g.textAlign = "right"; g.textBaseline = "middle";
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      const y = Math.round(yy(v)) + 0.5;
+      g.strokeStyle = "#252c36"; g.beginPath(); g.moveTo(this.L, y); g.lineTo(this.w - this.R, y); g.stroke();
+      g.fillStyle = "#8b96a5"; g.fillText(step >= 1 ? v.toFixed(0) : v.toFixed(2), this.L - 6, y);
+    }
+    g.textAlign = "center"; g.textBaseline = "top";
+    const xs = niceStep(this.duration, 6);
+    for (let t = 0; t <= this.duration + 1e-9; t += xs) {
+      const x = Math.round(this.x(t)) + 0.5;
+      g.strokeStyle = "#252c36"; g.beginPath(); g.moveTo(x, this.T); g.lineTo(x, this.h - this.B); g.stroke();
+      g.fillStyle = "#8b96a5"; g.fillText(t.toFixed(xs < 1 ? 1 : 0) + "s", x, this.h - this.B + 4);
+    }
+    g.setLineDash([3, 3]); g.strokeStyle = "#7d8590";
+    for (const e of this.events) { const x = Math.round(this.x(e[0])) + 0.5; g.beginPath(); g.moveTo(x, this.T); g.lineTo(x, this.h - this.B); g.stroke(); }
+    g.setLineDash([]); g.lineWidth = 1.6;
+    for (const s of this.series) {
+      g.strokeStyle = s.color; g.beginPath();
+      for (let i = 0; i < s.t.length; i++) { const x = this.x(s.t[i]), y = yy(s.y[i]); if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+      g.stroke();
+    }
+  }
+  draw(t) {
+    const c = this.cv.getContext("2d"); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.cv.width, this.cv.height); c.drawImage(this.base, 0, 0);
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const x = this.x(t);
+    c.strokeStyle = "#ffffff"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x, this.T); c.lineTo(x, this.h - this.B); c.stroke();
+    this.series.forEach((s, i) => {
+      const v = interp(s.t, s.y, t);
+      if (isFinite(v)) { c.fillStyle = s.color; c.beginPath(); c.arc(x, this.yy(v), 3.2, 0, 6.2832); c.fill(); }
+      this.vals[i].textContent = isFinite(v) ? v.toFixed(s.dec === undefined ? 1 : s.dec) : "-";
+    });
+  }
+}
+
+function buildPlots() {
+  const host = $("plots"); host.innerHTML = ""; S.plots = [];
+  const d = S.d, ev = d.events;
+  S.plots.push(new Plot(host, "Joint angles (deg)", d.robot.q.map((y, j) => ({ name: "J" + (j + 1), color: COLORS[j], t: d.robot.t, y: y, dec: 2 })), d.duration, ev));
+  S.plots.push(new Plot(host, "TCP position (mm, xArm base frame)", ["x", "y", "z"].map((n, j) => ({ name: n, color: COLORS[j * 2 % 6], t: d.robot.t, y: d.robot.tcp[j], dec: 1 })), d.duration, ev));
+  const vcol = [COLORS[0], COLORS[3], COLORS[4], COLORS[5]];
+  S.plots.push(new Plot(host, "Commanded velocity (keys, after ramping)", ["vx mm/s", "vy mm/s", "vz mm/s", "wz deg/s"].map((n, j) => ({ name: n, color: vcol[j], t: d.control.t, y: d.control.cmd[j], dec: 1 })), d.duration, ev));
+  if (d.gripper.t.length) {
+    S.plots.push(new Plot(host, "Gripper (state only)", [
+      { name: "FSR A", color: COLORS[1], t: d.gripper.t, y: d.gripper.fsr[0], dec: 0 },
+      { name: "FSR B", color: COLORS[4], t: d.gripper.t, y: d.gripper.fsr[1], dec: 0 },
+      { name: "setpoint", color: COLORS[3], t: d.gripper.t, y: d.gripper.setpoint, dec: 0 }], d.duration, ev));
+  }
+}
+
+function fillInfo() {
+  const i = S.d.info;
+  const chips = S.d.events.map((e) => "<button class=\"chip\" data-t=\"" + e[0] + "\">" + e[0].toFixed(1) + "s · " + escapeHtml(e[1]) + "</button>").join("");
+  $("info").innerHTML =
+    "<div class=\"infogrid\">" +
+    "<div><span>duration</span><b>" + i.duration_s.toFixed(1) + " s</b></div>" +
+    "<div><span>camera frames</span><b>" + i.kept + " kept / " + i.recorded + " recorded</b></div>" +
+    "<div><span>camera stream</span><b>" + i.cam_hz.toFixed(1) + " Hz · max gap " + i.max_frame_gap_ms.toFixed(0) + " ms · " + i.frames_lost + " lost</b></div>" +
+    "<div><span>robot state</span><b>" + i.robot_hz.toFixed(0) + " Hz</b></div>" +
+    "<div><span>image</span><b>" + i.image[0] + "×" + i.image[1] + "</b></div>" +
+    "<div><span>clock offset</span><b>" + i.clock_offset_ms.map((x) => x.toFixed(1)).join(" → ") + " ms</b></div>" +
+    "<div><span>faults</span><b>" + i.faults + "</b></div>" +
+    "<div><span>saved</span><b>" + escapeHtml(S.d.created) + "</b></div></div>" +
+    (i.warnings ? "<div class=\"warn\">⚠ " + escapeHtml(i.warnings) + "</div>" : "") +
+    (chips ? "<div class=\"chips\">" + chips + "</div>" : "");
+  for (const b of $("info").querySelectorAll(".chip")) b.addEventListener("click", () => seekTo(parseFloat(b.dataset.t)));
+}
+
+function getImg(s, i) {
+  let im = S.cache[s].get(i);
+  if (!im) { im = new Image(); im.src = "/frame/" + S.id + "/" + i + "/" + s + ".jpg"; S.cache[s].set(i, im); }
+  return im;
+}
+function ensureWindow(idx) {
+  const n = S.d.frames.t.length;
+  for (let i = Math.max(0, idx - 2); i < Math.min(n, idx + AHEAD); i++) for (const s of STREAMS) getImg(s, i);
+  for (const s of STREAMS) for (const k of Array.from(S.cache[s].keys())) if (k < idx - 30 || k > idx + AHEAD + 30) S.cache[s].delete(k);
+}
+function drawVideos(idx) {
+  for (const s of STREAMS) {
+    let im = null, j = idx;
+    for (; j >= Math.max(0, idx - 20); j--) { const c = S.cache[s].get(j); if (c && c.complete && c.naturalWidth) { im = c; break; } }
+    if (im && S.drawn[s] !== j) {
+      const cv = $("cv-" + s);
+      if (cv.width !== im.naturalWidth || cv.height !== im.naturalHeight) { cv.width = im.naturalWidth; cv.height = im.naturalHeight; }
+      cv.getContext("2d").drawImage(im, 0, 0); S.drawn[s] = j;
+    }
+  }
+}
+
+function seekTo(t) { S.t = S.d ? Math.min(Math.max(0, t), S.d.duration) : 0; }
+function setPlaying(p) { S.playing = p; $("play").textContent = p ? "⏸" : "▶"; if (p && S.d && S.t >= S.d.duration - 1e-3) S.t = 0; }
+function stepFrame(k) {
+  if (!S.d) return;
+  const ft = S.d.frames.t, i = Math.min(ft.length - 1, Math.max(0, bsearch(ft, S.t) + k));
+  setPlaying(false); S.t = ft[i];
+}
+
+function tick(ts) {
+  if (S.d) {
+    if (S.playing) {
+      S.t += ((ts - S.last) / 1000) * S.speed;
+      if (S.t >= S.d.duration) { S.t = S.d.duration; setPlaying(false); }
+    }
+    const idx = bsearch(S.d.frames.t, S.t);
+    ensureWindow(idx); drawVideos(idx);
+    for (const p of S.plots) p.draw(S.t);
+    $("time").textContent = fmtTime(S.t) + " / " + fmtTime(S.d.duration);
+    $("frameNo").textContent = "frame " + (idx + 1) + " / " + S.d.frames.t.length + " (id " + S.d.frames.frame_id[idx] + ")";
+    if (!S.dragging) $("scrub").value = Math.round(S.t * 1000);
+  }
+  S.last = ts;
+  requestAnimationFrame(tick);
+}
+
+async function loadEpisodes() {
+  const r = await fetch("/api/episodes"); const all = await r.json();
+  const eps = all.filter((e) => !e.error);
+  if (eps.length !== S.eps.length) {
+    const sel = $("episode"); sel.innerHTML = "";
+    for (const e of eps) {
+      const o = document.createElement("option"); o.value = e.id;
+      o.textContent = "episode " + String(e.id).padStart(4, "0") + " · " + e.duration_s.toFixed(1) + " s · " + e.n_frames + "/" + e.n_recorded + " frames" + (e.faults ? " · faults " + e.faults : "");
+      sel.appendChild(o);
+    }
+    if (S.id !== null) sel.value = S.id;
+    $("count").textContent = eps.length + " episode" + (eps.length === 1 ? "" : "s");
+  }
+  S.eps = eps; return eps;
+}
+async function openEpisode(id, t) {
+  setPlaying(false);
+  const r = await fetch("/api/episode/" + id);
+  if (!r.ok) { $("info").innerHTML = "<div class=\"warn\">could not load episode " + id + ": " + escapeHtml(await r.text()) + "</div>"; return; }
+  S.d = await r.json(); S.id = id;
+  for (const s of STREAMS) { S.cache[s].clear(); S.drawn[s] = -1; }
+  $("scrub").max = Math.round(S.d.duration * 1000);
+  $("episode").value = id;
+  history.replaceState(null, "", "?episode=" + id);
+  buildPlots(); fillInfo(); seekTo(t || 0);
+}
+function otherEpisode(k) {
+  const i = S.eps.findIndex((e) => e.id === S.id), j = Math.min(S.eps.length - 1, Math.max(0, i + k));
+  if (S.eps[j] && S.eps[j].id !== S.id) openEpisode(S.eps[j].id, 0);
+}
+
+$("play").addEventListener("click", () => setPlaying(!S.playing));
+$("step-1").addEventListener("click", () => stepFrame(-1));
+$("step+1").addEventListener("click", () => stepFrame(1));
+$("speed").addEventListener("change", (e) => { S.speed = parseFloat(e.target.value); });
+$("scrub").addEventListener("pointerdown", () => { S.dragging = true; });
+window.addEventListener("pointerup", () => { S.dragging = false; });
+$("scrub").addEventListener("input", (e) => seekTo(parseInt(e.target.value, 10) / 1000));
+$("episode").addEventListener("change", (e) => openEpisode(parseInt(e.target.value, 10), 0));
+$("prevEp").addEventListener("click", () => otherEpisode(-1));
+$("nextEp").addEventListener("click", () => otherEpisode(1));
+window.addEventListener("resize", () => S.plots.forEach((p) => p.layout()));
+window.addEventListener("keydown", (e) => {
+  if (e.target && e.target.tagName === "SELECT") return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!S.playing); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); if (e.shiftKey) seekTo(S.t + 1); else stepFrame(1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); if (e.shiftKey) seekTo(S.t - 1); else stepFrame(-1); }
+  else if (e.key === "[") otherEpisode(-1);
+  else if (e.key === "]") otherEpisode(1);
+});
+
+async function poll() {
+  try {
+    const before = S.eps.length, eps = await loadEpisodes();
+    if (S.d === null && eps.length) await openEpisode(eps[eps.length - 1].id, 0);
+    else if (eps.length > before) $("count").textContent += " (new episode saved)";
+  } catch (e) { /* server restarting: try again on the next poll */ }
+}
+(async function init() {
+  const q = new URLSearchParams(location.search);
+  try {
+    const eps = await loadEpisodes();
+    if (eps.length) {
+      const want = parseInt(q.get("episode"), 10);
+      await openEpisode(eps.some((e) => e.id === want) ? want : eps[eps.length - 1].id, parseFloat(q.get("t")) || 0);
+    } else {
+      $("info").innerHTML = "<div class=\"warn\">No saved episodes in this dataset yet. They show up here a few seconds after you keep one.</div>";
+    }
+  } catch (e) { $("info").innerHTML = "<div class=\"warn\">cannot reach the viewer server: " + escapeHtml(e) + "</div>"; }
+  requestAnimationFrame(tick);
+  setInterval(poll, 4000);
+})();
+</script>
+</body>
+</html>

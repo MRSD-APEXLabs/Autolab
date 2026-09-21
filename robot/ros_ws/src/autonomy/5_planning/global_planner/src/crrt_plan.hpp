@@ -13,6 +13,7 @@
 
 #pragma once
 #include "crrt_prm.hpp"
+#include "crrt_viz.hpp"
 static const JointVec best_mid = {0.0611, -0.0977, -0.2164, -0.0436, 0.3159, 0.1012};
 static std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
 prm_plan_from_to(
@@ -21,19 +22,18 @@ prm_plan_from_to(
     const JointVec& q_from,
     const JointVec& q_to)
 {
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
 
     const auto& joint_names = jmg->getVariableNames();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -166,7 +166,6 @@ prm_plan(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
@@ -174,12 +173,12 @@ prm_plan(
     const auto& joint_names = jmg->getVariableNames();
     const size_t dof = joint_names.size();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -465,7 +464,7 @@ prm_plan(
 
     if (ratio > 3.0) {  // tune this threshold
         RCLCPP_WARN(node->get_logger(),
-            "[PRM] Path looks suspicious (ratio %.2f) — trying midpoint fallback...");
+            "[PRM] Path looks suspicious (ratio %.2f) — trying midpoint fallback...", ratio);
         
         auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
         if (!plan1) return std::nullopt;
@@ -506,16 +505,35 @@ prm_plan(
 //  Grows two trees simultaneously from start and goal,
 //  projecting each step onto the ee_down constraint manifold.
 // ─────────────────────────────────────────────────────────────
-std::vector<JointVec> load_manual_library() {
+std::vector<JointVec> load_manual_library(rclcpp::Node::SharedPtr node,
+                                          size_t expected_dof) {
     std::vector<JointVec> library;
+    int skipped = 0;
     try {
         std::ifstream f(MANUAL_WAYPOINTS_FILE);
-        if (!f.is_open()) return library;
+        if (!f.is_open()) {
+            RCLCPP_WARN(node->get_logger(),
+                "[CRRT] Manual waypoints file not found: %s", MANUAL_WAYPOINTS_FILE.c_str());
+            return library;
+        }
         nlohmann::json data = nlohmann::json::parse(f);
         for (auto& item : data) {
-            library.push_back(item["q"].get<std::vector<double>>());
+            if (!item.contains("angles_rad")) { ++skipped; continue; }
+            auto q = item["angles_rad"].get<std::vector<double>>();
+            // Slice to expected_dof — recordings may carry extra joints.
+            if (q.size() < expected_dof) { ++skipped; continue; }
+            library.emplace_back(q.begin(), q.begin() + expected_dof);
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node->get_logger(),
+            "[CRRT] Failed to parse manual waypoints: %s", e.what());
+        library.clear();
+        return library;
+    }
+
+    RCLCPP_INFO(node->get_logger(),
+        "[CRRT] Manual library: %zu waypoints loaded, %d skipped.",
+        library.size(), skipped);
     return library;
 }
 
@@ -539,18 +557,17 @@ crrt_plan_from_to(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
     const auto& joint_names = jmg->getVariableNames();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -571,23 +588,31 @@ crrt_plan_from_to(
 
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<double> unit(0.0, 1.0);
-    static auto library = load_manual_library();
+    // static auto library = load_manual_library(node, limits.size());  // unused while library sampling is disabled
 
     int connect_a_idx = -1, connect_b_idx = -1;
     bool connected = false;
 
+    auto& viz = crrt_viz::get(node, robot_model, jmg);
+
     for (int iter = 0; iter < crrt_cfg::MAX_ITER && !connected; ++iter) {
-        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() > 5.0)
+        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
+            > crrt_cfg::STAGE_TIME_SEC)
             break;
 
         JointVec q_rand(limits.size());
         double r = unit(rng);
         if (r < crrt_cfg::GOAL_BIAS) {
             q_rand = tree_b[0].q;
-        } else if (r < (crrt_cfg::GOAL_BIAS + 0.15) && !library.empty()) {
-            std::uniform_int_distribution<int> dist_lib(0, library.size() - 1);
-            q_rand = library[dist_lib(rng)];
-        } else {
+        }
+        // Disabled: the taught waypoints are recorded against one scene, and the
+        // scene changes between planning maneuvers, so biasing toward them just
+        // steers extends into corridors that may no longer be open.
+        // else if (r < (crrt_cfg::GOAL_BIAS + 0.15) && !library.empty()) {
+        //     std::uniform_int_distribution<int> dist_lib(0, library.size() - 1);
+        //     q_rand = library[dist_lib(rng)];
+        // }
+        else {
             for (size_t j = 0; j < limits.size(); ++j) {
                 std::uniform_real_distribution<double> d(limits[j].first, limits[j].second);
                 q_rand[j] = d(rng);
@@ -625,11 +650,20 @@ crrt_plan_from_to(
         full_path.insert(full_path.end(), path_goal.begin(), path_goal.end());
     }
 
+    viz.path(full_path, false);
+
     moveit::core::RobotState rs_check(robot_model);
     rs_check.setToDefaultValues();
     for (const auto& q : full_path)
         if (!is_valid(q, rs_check, jmg, scene_snapshot)) return std::nullopt;
 
+    {
+        const size_t n_raw = full_path.size();
+        shortcut(full_path, rs_check, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+        RCLCPP_INFO(node->get_logger(),
+            "[CRRT] from_to shortcut: %zu -> %zu waypoints.", n_raw, full_path.size());
+    }
+    viz.path(full_path, true);
     // full_path = densify_path(full_path, 0.01);
     auto plan = build_plan(
         full_path,
@@ -646,6 +680,211 @@ crrt_plan_from_to(
 
 
 
+// ─────────────────────────────────────────────────────────────
+//  POST-SEARCH PIPELINE  (shared by crrt_plan and irrtstar_plan)
+//  wrap-normalise → raw-path viz → per-waypoint validation (midpoint
+//  fallback on collision) → shortcut → shortcut viz → ratio check → TOTG
+// ─────────────────────────────────────────────────────────────
+static std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
+crrt_finish_path(
+    std::vector<JointVec> full_path,
+    const JointVec& q_start,
+    const JointVec& q_goal,
+    moveit::planning_interface::MoveGroupInterface& arm_group,
+    rclcpp::Node::SharedPtr node,
+    const moveit::core::RobotModelConstPtr& robot_model,
+    const moveit::core::JointModelGroup* jmg,
+    const std::vector<std::string>& joint_names,
+    const planning_scene::PlanningScenePtr& scene_snapshot,
+    crrt_viz::Viz& viz,
+    std::chrono::steady_clock::time_point t0)
+{
+    // Normalize joint wrapping across the path
+    for (size_t i = 1; i < full_path.size(); ++i) {
+        for (size_t j = 0; j < full_path[i].size(); ++j) {
+            double diff = full_path[i][j] - full_path[i-1][j];
+            while (diff >  M_PI) diff -= 2*M_PI;
+            while (diff < -M_PI) diff += 2*M_PI;
+            full_path[i][j] = full_path[i-1][j] + diff;
+        }
+    }
+
+    viz.path(full_path, false);
+
+    moveit::core::RobotState rs_check(robot_model);
+    rs_check.setToDefaultValues();
+
+    int wp_idx = 0;
+    for (const auto& q : full_path) {
+        rs_check.setJointGroupPositions(jmg, q);
+        rs_check.updateLinkTransforms();
+
+        // Check constraint separately
+        if (!satisfies_ee_down(rs_check)) {
+            RCLCPP_ERROR(node->get_logger(),
+                "[CRRT] Waypoint %d FAILED ee_down constraint.", wp_idx);
+            return std::nullopt;
+        }
+
+        // Check collision with contact info
+        collision_detection::CollisionRequest req;
+        collision_detection::CollisionResult  res;
+        req.group_name = crrt_cfg::GROUP_NAME;
+        req.contacts   = true;
+        req.max_contacts = 5;
+        scene_snapshot->checkCollision(req, res, rs_check);
+        if (res.collision) {
+            std::string pairs;
+            bool has_octomap = false;
+            for (const auto& [key, _] : res.contacts) {
+                pairs += key.first + " <-> " + key.second + "  ";
+                if (key.first.find("octomap") != std::string::npos ||
+                    key.second.find("octomap") != std::string::npos)
+                    has_octomap = true;
+            }
+            RCLCPP_ERROR(node->get_logger(),
+                "[CRRT] Waypoint %d FAILED collision  octomap=%s  pairs: %s",
+                wp_idx, has_octomap ? "YES" : "NO", pairs.c_str());
+            RCLCPP_ERROR(node->get_logger(),
+                "[CRRT] Waypoint %d angles: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
+                wp_idx, q[0], q[1], q[2], q[3], q[4], q[5]);
+            RCLCPP_WARN(node->get_logger(),
+                "[CRRT] Path validation failed — trying midpoint fallback...");
+
+            auto plan1 = crrt_plan_from_to(arm_group, node, q_start, best_mid);
+            if (!plan1) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 1 failed."); return std::nullopt; }
+            auto plan2 = crrt_plan_from_to(arm_group, node, best_mid, q_goal);
+            if (!plan2) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 2 failed."); return std::nullopt; }
+
+            std::vector<JointVec> stitched;
+            for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+                stitched.push_back(pt.positions);
+            for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
+                // seg1 ends on best_mid and seg2 starts on it - drop the repeat,
+                // a zero-length segment upsets time parameterisation.
+                if (!stitched.empty() &&
+                    joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
+                stitched.push_back(pt.positions);
+            }
+
+            moveit::core::RobotState rs_short(robot_model);
+            rs_short.setToDefaultValues();
+            shortcut(stitched, rs_short, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+
+            // Draw what actually executes. Without this the last thing published
+            // is segment 2 from crrt_plan_from_to, so RViz shows half the motion.
+            viz.path(stitched, true);
+
+            return build_plan(
+                stitched,
+                std::vector<std::string>(joint_names.begin(), joint_names.end()),
+                arm_group);
+        }
+        ++wp_idx;
+    }
+
+    RCLCPP_INFO(node->get_logger(), "[CRRT] Raw path: %zu waypoints.", full_path.size());
+    {
+        const size_t n_raw = full_path.size();
+        auto t_sc = std::chrono::steady_clock::now();
+        shortcut(full_path, rs_check, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+        RCLCPP_INFO(node->get_logger(),
+            "[CRRT] Shortcut: %zu -> %zu waypoints in %.2f s.",
+            n_raw, full_path.size(),
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - t_sc).count());
+    }
+    viz.path(full_path, true);
+
+    // Path-quality sanity check — a path far longer than the straight-line
+    // distance usually means the search wandered; retry via the midpoint.
+    {
+        double path_length = 0.0;
+        for (size_t i = 1; i < full_path.size(); ++i)
+            path_length += joint_dist(full_path[i], full_path[i-1]);
+
+        double direct_dist = joint_dist(q_start, q_goal);
+        double ratio = path_length / (direct_dist + 1e-6);
+
+        RCLCPP_INFO(node->get_logger(),
+            "[CRRT] Path length: %.3f  Direct: %.3f  Ratio: %.2f",
+            path_length, direct_dist, ratio);
+
+        if (ratio > 3.0) {
+            RCLCPP_WARN(node->get_logger(),
+                "[CRRT] Path looks suspicious (ratio %.2f) — trying midpoint fallback...", ratio);
+
+            auto plan1 = crrt_plan_from_to(arm_group, node, q_start, best_mid);
+            auto plan2 = plan1 ? crrt_plan_from_to(arm_group, node, best_mid, q_goal)
+                               : std::nullopt;
+
+            if (plan1 && plan2) {
+                // Stitch FIRST, then shortcut the whole thing. Shortcutting the
+                // two segments separately can never remove best_mid, because no
+                // candidate segment spans the junction - so the detour through
+                // that one hardcoded pose survives however redundant it is. A
+                // global pass can delete it outright, and shortcut() collision-
+                // and constraint-checks every segment it replaces, so dropping
+                // the midpoint only happens when the direct route is genuinely
+                // clear.
+                std::vector<JointVec> stitched;
+                for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+                    stitched.push_back(pt.positions);
+                for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
+                    if (!stitched.empty() &&
+                        joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
+                    stitched.push_back(pt.positions);
+                }
+
+                const size_t n_raw = stitched.size();
+                moveit::core::RobotState rs_sc(robot_model);
+                rs_sc.setToDefaultValues();
+                shortcut(stitched, rs_sc, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+
+                double mid_length = 0.0;
+                for (size_t i = 1; i < stitched.size(); ++i)
+                    mid_length += joint_dist(stitched[i], stitched[i-1]);
+
+                RCLCPP_INFO(node->get_logger(),
+                    "[CRRT] Midpoint path: %zu -> %zu waypoints, length %.3f vs original %.3f.",
+                    n_raw, stitched.size(), mid_length, path_length);
+
+                // This branch fired because the path looked too LONG. Routing
+                // through a fixed pose is quite capable of being longer still,
+                // and nothing used to check - so only take it if it wins.
+                if (mid_length < path_length) {
+                    viz.path(stitched, true);
+                    return build_plan(
+                        stitched,
+                        std::vector<std::string>(joint_names.begin(), joint_names.end()),
+                        arm_group);
+                }
+                RCLCPP_INFO(node->get_logger(),
+                    "[CRRT] Midpoint path is no shorter - keeping the original.");
+            } else {
+                // full_path is still valid and already shortcut; a long path
+                // beats no path, so do not fail here.
+                RCLCPP_WARN(node->get_logger(),
+                    "[CRRT] Midpoint fallback failed to plan - keeping the original path.");
+            }
+
+            // Falling through: crrt_plan_from_to overwrote the markers with its
+            // own segments, so republish the path we are actually executing.
+            viz.path(full_path, true);
+        }
+    }
+    // full_path = densify_path(full_path, 0.01);
+    auto plan = build_plan(
+        full_path,
+        std::vector<std::string>(joint_names.begin(), joint_names.end()),
+        arm_group);
+
+    double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    plan.planning_time_ = elapsed;
+    RCLCPP_INFO(node->get_logger(), "[CRRT] Done in %.2f s.", elapsed);
+    return plan;
+}
+
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
 crrt_plan(
     moveit::planning_interface::MoveGroupInterface& arm_group,
@@ -654,7 +893,6 @@ crrt_plan(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) {
@@ -672,23 +910,31 @@ crrt_plan(
     JointVec q_start;
     current_state->copyJointGroupPositions(jmg, q_start);
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
 
+    // Start: collision only — arm may not satisfy ee_down at rest
+    if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
+        RCLCPP_ERROR(node->get_logger(), "[CRRT] Start state is in collision.");
+        return std::nullopt;
+    }
+    // Goal: full validation including ee_down
     if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
         RCLCPP_ERROR(node->get_logger(),
             "[CRRT] Goal violates constraint or is in collision — aborting.");
         return std::nullopt;
     }
 
+
     std::vector<std::pair<double,double>> limits;
+    // Populate joint limits for sampling
     for (const auto* j : jmg->getActiveJointModels()) {
         const auto& bnd = j->getVariableBounds()[0];
         limits.push_back({bnd.min_position_, bnd.max_position_});
@@ -699,19 +945,24 @@ crrt_plan(
         crrt_cfg::MAX_ITER, crrt_cfg::MAX_TIME_SEC);
 
     std::vector<RRTNode> tree_a = {{ q_start, -1 }};
-    std::vector<RRTNode> tree_b = {{ q_goal,  -1 }};
+    std::vector<RRTNode> tree_b = {{ q_goal,  -1 }}; 
 
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<double> unit(0.0, 1.0);
 
     int  connect_a_idx = -1, connect_b_idx = -1;
     bool connected = false;
-    static auto library = load_manual_library(); 
+    // static auto library = load_manual_library(node, limits.size());  // unused while library sampling is disabled
+
+    auto& viz = crrt_viz::get(node, robot_model, jmg);
+    viz.begin();
+
     for (int iter = 0; iter < crrt_cfg::MAX_ITER && !connected; ++iter)
     {
-                // NEW: 5s timeout
-        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() > 5.0) {
-            RCLCPP_WARN(node->get_logger(), "[CRRT] 5s timeout — trying midpoint fallback...");
+        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
+            > crrt_cfg::MAX_TIME_SEC) {
+            RCLCPP_WARN(node->get_logger(),
+                "[CRRT] %.1fs timeout — trying midpoint fallback...", crrt_cfg::MAX_TIME_SEC);
             break;
         }
         
@@ -719,16 +970,16 @@ crrt_plan(
             RCLCPP_INFO(node->get_logger(), "[CRRT] Step 1: Iter %d", iter);
         }    
 
-        JointVec q_rand(limits.size());
-        double r = unit(rng);
+        JointVec q_rand(limits.size()); // Random sample of joint angles
+        double r = unit(rng);  // Random number for sampling strategy
 
         if (r < crrt_cfg::GOAL_BIAS) {
-            q_rand = tree_b[0].q;
+            q_rand = tree_b[0].q; // Bias towards goal, sample the goal configuration 
         } 
-        else if (r < (crrt_cfg::GOAL_BIAS + 0.15) && !library.empty()) {
-            std::uniform_int_distribution<int> dist_lib(0, library.size() - 1);
-            q_rand = library[dist_lib(rng)];
-        } 
+        // else if (r < (crrt_cfg::GOAL_BIAS + 0.15) && !library.empty()) { // 15% chance to sample from manual library
+        //     std::uniform_int_distribution<int> dist_lib(0, library.size() - 1);
+        //     q_rand = library[dist_lib(rng)];
+        // } 
         else {
             for (size_t j = 0; j < limits.size(); ++j) {
                 std::uniform_real_distribution<double> d(limits[j].first, limits[j].second);
@@ -801,26 +1052,6 @@ crrt_plan(
         full_path.insert(full_path.end(), path_goal.begin(), path_goal.end());
     }
 
-    moveit::core::RobotState rs_check(robot_model);
-    rs_check.setToDefaultValues();
-    for (const auto& q : full_path) {
-        if (!is_valid(q, rs_check, jmg, scene_snapshot)) {
-            RCLCPP_ERROR(node->get_logger(),
-                "[CRRT] Final path contains invalid waypoint — aborting.");
-            return std::nullopt;
-        }
-    }
-
-    RCLCPP_INFO(node->get_logger(), "[CRRT] Raw path: %zu waypoints.", full_path.size());
-    // full_path = densify_path(full_path, 0.01);
-    auto plan = build_plan(
-        full_path,
-        std::vector<std::string>(joint_names.begin(), joint_names.end()),
-        arm_group);
-
-    double elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - t0).count();
-    plan.planning_time_ = elapsed;
-    RCLCPP_INFO(node->get_logger(), "[CRRT] Done in %.2f s.", elapsed);
-    return plan;
+    return crrt_finish_path(std::move(full_path), q_start, q_goal, arm_group, node,
+                            robot_model, jmg, joint_names, scene_snapshot, viz, t0);
 }

@@ -32,7 +32,9 @@
 
   <!-- Autonomy -->
   <include
-    file="$(find-pkg-share $(env AUTONOMY_LAUNCH_PACKAGE))/launch/$(env AUTONOMY_LAUNCH_FILE)" />
+    file="$(find-pkg-share $(env AUTONOMY_LAUNCH_PACKAGE))/launch/$(env AUTONOMY_LAUNCH_FILE)">
+    <arg name="sim" value="$(var sim)" />
+  </include>
 
   <!-- Logging -->
   <!-- <include file="$(find-pkg-share logging_bringup)/launch/logging.launch.xml" /> -->

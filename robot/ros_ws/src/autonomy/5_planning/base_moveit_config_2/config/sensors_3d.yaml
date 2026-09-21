@@ -6,11 +6,19 @@ my_pointcloud:
   point_cloud_topic: /zed_pointcloud
   max_range: 1.5
   point_subsample: 1
-  padding_offset: 0.0
-  padding_scale: 0.0
+  # Self-filter: each robot link body is scaled by padding_scale and grown by
+  # padding_offset (metres) before its points are removed from the cloud.
+  # A scale of 0.0 collapses every body to nothing, so the arm was never
+  # filtered and showed up in the octomap as an obstacle.
+  padding_offset: 0.01
+  padding_scale: 1.0
   max_update_rate: 0.0
-  octomap_resolution: 0.05
   filtered_cloud_topic: /zed_pointcloud_filtered
-  transform_tolerance:  0.1
-octomap_resolution: 0.02
+  # How long to wait for TF of each link at the cloud's timestamp before the
+  # shape_mask gives up on it ("Missing transform for shape ... handle N").
+  transform_tolerance: 0.5
+# Only the top-level keys below are read by the occupancy map monitor; an
+# octomap_resolution nested under the sensor entry is ignored.
+octomap_frame: world
+octomap_resolution: 0.04
   

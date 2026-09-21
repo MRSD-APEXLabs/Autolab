@@ -1,9 +1,20 @@
 <!-- NAVIGATION -->
 <launch>
+    <arg name="sim" default="true" />
+
     <group>
 
         <node pkg="navigation_controller" exec="navigation_controller" namespace="navigation_controller"
         output="screen">
+        </node>
+
+        <include file="$(find-pkg-share nav2_bringup_config)/launch/nav2.launch.xml">
+            <arg name="use_sim_time" value="$(var sim)" />
+        </include>
+
+        <node pkg="swerve_hardware_interface" exec="swerve_hardware_interface_node"
+              namespace="swerve_hardware_interface" output="screen" unless="$(var sim)">
+            <param from="$(find-pkg-share swerve_hardware_interface)/config/swerve_modules.yaml" />
         </node>
 
     </group>  
