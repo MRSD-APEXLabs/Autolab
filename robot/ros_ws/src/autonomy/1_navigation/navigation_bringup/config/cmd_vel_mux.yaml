@@ -1,0 +1,14 @@
+# cmd_vel_mux: /cmd_vel_teleop + /cmd_vel_nav -> /cmd_vel. Priority: e_stop > teleop > nav > silence.
+cmd_vel_mux:
+  ros__parameters:
+    teleop_timeout: 0.5   # [s] a teleop command older than this is dropped
+    nav_timeout: 0.5      # [s] a Nav2 command older than this is dropped
+    teleop_hold: 1.0      # [s] Nav2 stays locked out this long after the last teleop message, so releasing the
+                          #     deadman never hands the robot straight back to a running navigation goal
+    rate_hz: 30.0         # output rate while a source is active; must beat the swerve_bridge cmd_timeout (0.3 s)
+
+    # Stiction compensation, Nav2 commands only (the joystick keeps its fine control). The real drive does not move
+    # at very low speed (drive k_s = 0), so Nav2's small final corrections stalled just short of the goal tolerance
+    # while the azimuths chased noise. Module speed = |v| + 0.359 * |wz|.
+    nav_min_speed: 0.12     # [m/s] smaller Nav2 commands are scaled up to this (0.33 rad/s when turning in place)
+    nav_zero_below: 0.03    # [m/s] smaller Nav2 commands are noise: true zero, the modules hold their angle

@@ -1,0 +1,1 @@
+/home/labx/bckp_Autolab/robot/ros_ws/src/autonomy/1_navigation/navigation_bringup/launch/navigation.launch.py

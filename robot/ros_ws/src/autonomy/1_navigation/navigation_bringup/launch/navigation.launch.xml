@@ -1,21 +1,36 @@
 <!-- NAVIGATION -->
+<!--
+  Autolab entry point (NAVIGATION_LAUNCH_PACKAGE / NAVIGATION_LAUNCH_FILE in .env).
+  It wraps navigation.launch.py, which starts the whole navigation stack: VLP-16 -> /scan,
+  swerve_bridge -> /odom + the drivetrain, AMCL in the saved map, Nav2, and nav_api (the /nav
+  topic API the rest of the system talks to).
+
+  hardware:=false (default) runs the phoenix6 SIMULATOR: every topic behaves normally and the
+  robot cannot move.  hardware:=true ENABLES THE DRIVETRAIN - it is never turned on by the robot
+  bringup, only by someone who types it.
+
+  Navigation runs on the HOST (ROS 2 Jazzy): the drivetrain needs the phoenix6 Python package
+  (3.12) and the VLP-16 driver, neither of which exists in the Humble robot container.  Started
+  in the container, navigation.launch.py finds those packages missing, logs it and starts
+  nothing - the rest of the autonomy bringup is unaffected.  See ../README.md.
+-->
 <launch>
     <arg name="sim" default="true" />
 
+    <arg name="hardware" default="false"
+         description="true ENABLES THE REAL DRIVETRAIN. false = phoenix6 simulator." />
+    <arg name="map" default=""
+         description="map yaml; empty = navigation_bringup/maps/map.yaml" />
+    <arg name="rviz" default="false" description="RViz (off inside the autonomy bringup)" />
+    <arg name="api_namespace" default="/"
+         description="where the /nav API appears: / -> /nav/state, /robot_1 -> /robot_1/nav/state" />
+
     <group>
-
-        <node pkg="navigation_controller" exec="navigation_controller" namespace="navigation_controller"
-        output="screen">
-        </node>
-
-        <include file="$(find-pkg-share nav2_bringup_config)/launch/nav2.launch.xml">
-            <arg name="use_sim_time" value="$(var sim)" />
+        <include file="$(find-pkg-share navigation_bringup)/launch/navigation.launch.py">
+            <arg name="hardware" value="$(var hardware)" />
+            <arg name="map" value="$(var map)" />
+            <arg name="rviz" value="$(var rviz)" />
+            <arg name="api_namespace" value="$(var api_namespace)" />
         </include>
-
-        <node pkg="swerve_hardware_interface" exec="swerve_hardware_interface_node"
-              namespace="swerve_hardware_interface" output="screen" unless="$(var sim)">
-            <param from="$(find-pkg-share swerve_hardware_interface)/config/swerve_modules.yaml" />
-        </node>
-
-    </group>  
+    </group>
 </launch>

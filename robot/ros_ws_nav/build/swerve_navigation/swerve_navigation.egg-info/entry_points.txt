@@ -1,0 +1,8 @@
+[console_scripts]
+cloud_to_scan = swerve_navigation.cloud_to_scan:main
+cmd_vel_mux = swerve_navigation.cmd_vel_mux:main
+joy_teleop = swerve_navigation.joy_teleop:main
+location_markers = swerve_navigation.location_markers:main
+nav_api = swerve_navigation.nav_api:main
+point_to_goal = swerve_navigation.point_to_goal:main
+swerve_bridge = swerve_navigation.swerve_bridge:main
