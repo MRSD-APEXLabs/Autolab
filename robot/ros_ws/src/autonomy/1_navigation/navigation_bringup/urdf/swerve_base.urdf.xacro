@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<robot name="swerve_base" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- height of the base centre (base_link origin, the CAD datum the lidar offsets are measured from) above the floor [m] -->
+  <xacro:arg name="base_centre_height" default="0.152"/>
+  <!-- lidar mounting pose relative to base_link (REP-103: x forward, y left, z up) [m, rad] -->
+  <xacro:arg name="lidar_x"   default="0.250"/>
+  <xacro:arg name="lidar_y"   default="0.250"/>
+  <xacro:arg name="lidar_z"   default="0.178"/>
+  <!-- yaw of the velodyne frame in base_link. velodyne +X points directly AWAY from the VLP-16 cable exit.
+       0 = cable exits toward the robot's rear; +1.5708 = cable exits toward the robot's right;
+       3.14159 = cable exits toward the front; -1.5708 = cable exits toward the robot's left. -->
+  <xacro:arg name="lidar_yaw" default="0.0"/>
+  <xacro:arg name="lidar_frame" default="velodyne"/>
+  <!-- visual-only footprint box (does not affect Nav2; set Nav2 footprint separately) -->
+  <xacro:arg name="base_length" default="0.60"/>
+  <xacro:arg name="base_width"  default="0.60"/>
+  <xacro:arg name="base_box_height" default="0.10"/>
+
+  <!-- ground projection of the robot centre: root of the robot TF tree, child of odom -->
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <geometry><box size="$(arg base_length) $(arg base_width) $(arg base_box_height)"/></geometry>
+      <material name="base_grey"><color rgba="0.4 0.4 0.4 0.6"/></material>
+    </visual>
+  </link>
+
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 $(arg base_centre_height)" rpy="0 0 0"/>
+  </joint>
+
+  <link name="$(arg lidar_frame)">
+    <visual>
+      <!-- VLP-16: 103 mm dia x 72 mm tall; data origin is 37.7 mm above the sensor base -->
+      <origin xyz="0 0 -0.0017" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.0517" length="0.0717"/></geometry>
+      <material name="lidar_dark"><color rgba="0.1 0.1 0.1 1.0"/></material>
+    </visual>
+  </link>
+
+  <joint name="base_link_to_$(arg lidar_frame)" type="fixed">
+    <parent link="base_link"/>
+    <child link="$(arg lidar_frame)"/>
+    <origin xyz="$(arg lidar_x) $(arg lidar_y) $(arg lidar_z)" rpy="0 0 $(arg lidar_yaw)"/>
+  </joint>
+
+</robot>

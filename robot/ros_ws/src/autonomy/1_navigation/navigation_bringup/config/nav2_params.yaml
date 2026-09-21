@@ -1,0 +1,489 @@
+# Nav2 1.3.13 (Jazzy) parameters for the MK5 swerve base. Parameter names were verified against the 1.3.13 sources.
+#
+# Facts that shape this file:
+#   * Base frame is base_footprint everywhere (URDF root, child frame of the swerve_bridge odometry).
+#   * Footprint: 0.68 m square (inscribed radius 0.34 m, circumscribed 0.481 m).
+#   * The lidar sits on the front-left corner and is BLIND over ~136 deg behind / to the right of the robot (own
+#     body). Default motion is therefore "forward": the controller behaves like a diff-drive and always travels into
+#     its field of view. nav2_omni_overlay.yaml (nav_motion:=omni) is loaded AFTER this file and enables strafing.
+#   * Velocity chain (remaps are in navigation.launch.py); Nav2 NEVER publishes /cmd_vel itself:
+#       controller_server, behavior_server -> /cmd_vel_nav_raw -> velocity_smoother -> /cmd_vel_smoothed
+#       -> collision_monitor -> /cmd_vel_nav -> cmd_vel_mux (teleop has priority, e-stop wins) -> /cmd_vel
+#   * All velocity topics are unstamped geometry_msgs/Twist (enable_stamped_cmd_vel: false on every node of the chain).
+#   * navigation.launch.py overrides: map_server.yaml_filename, amcl.initial_pose.*, bt_navigator.default_nav_to_pose_bt_xml.
+
+amcl:
+  ros__parameters:
+    global_frame_id: "map"
+    odom_frame_id: "odom"
+    base_frame_id: "base_footprint"
+    scan_topic: scan
+    # Localisation tuning (2026-09-21). With the Nav2 stock values (alpha 0.2, sigma_hit 0.2, z_rand 0.5, update every
+    # 0.25 m) the filter never tightened: on the robot, after 8 m of driving, it reported std 0.7 m / 0.32 rad and sat
+    # 0.58 m / 3.8 deg away from the pose where the live scan fits the map (95 % of points within 10 cm). alpha 0.2
+    # injects 0.11 m and 6 deg of noise per 0.25 m step - far more than this base (Pigeon2 + wheel odometry) drifts.
+    robot_model_type: "nav2_amcl::OmniMotionModel"   # swerve = holonomic; alpha5 is the strafe noise
+    alpha1: 0.05
+    alpha2: 0.05
+    alpha3: 0.05
+    alpha4: 0.05
+    alpha5: 0.05
+    laser_model_type: "likelihood_field"
+    laser_likelihood_max_dist: 2.0
+    laser_max_range: 25.0            # = /scan range_max
+    laser_min_range: 0.55            # = /scan range_min
+    max_beams: 180   # of the 433 beams; the scan only covers 216 deg
+    z_hit: 0.85
+    z_rand: 0.15   # likelihood_field uses z_hit + z_rand only; 0.15 tolerates people / moved chairs
+    z_max: 0.05
+    z_short: 0.05
+    sigma_hit: 0.1   # [m] sharper than the stock 0.2: the map walls are 1-2 cells thick
+    lambda_short: 0.1
+    do_beamskip: false
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    recovery_alpha_fast: 0.0
+    recovery_alpha_slow: 0.0
+    resample_interval: 1
+    update_min_d: 0.10   # [m] was 0.25: converge within a short nudge after a pose estimate
+    update_min_a: 0.10   # [rad]
+    save_pose_rate: 0.5
+    tf_broadcast: true
+    transform_tolerance: 1.0
+    # Start localised without waiting for a "2D Pose Estimate". The default pose (0, 0, 0) is where mapping started,
+    # i.e. the map origin written by slam_toolbox; navigation.launch.py overrides it from its x / y / yaw arguments.
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
+
+map_server:
+  ros__parameters:
+    yaml_filename: ""                # placeholder: navigation.launch.py passes the (checked) absolute map path
+    topic_name: "map"
+    frame_id: "map"
+
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    action_server_result_timeout: 900.0
+    # Only NavigateToPose is offered. The stock NavigateThroughPoses tree backs up 0.30 m at 0.15 m/s, which is not
+    # acceptable for a robot that is blind behind; only the vetted tree below may command this base.
+    navigators: ["navigate_to_pose"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    # default_nav_to_pose_bt_xml is set by navigation.launch.py to
+    # <navigation_bringup share>/behavior_trees/navigate_to_pose_cautious.xml (a params file cannot hold the path).
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0       # MPPI requires controller period <= model_dt (0.05 s)
+    costmap_update_timeout: 0.30
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001  # stock 0.5 is a diff-drive value that would zero the measured vy of a swerve base
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    odom_topic: /odom
+    use_realtime_priority: false
+    enable_stamped_cmd_vel: false
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]   # the BT's ControllerSelector expects this id
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      # At 0.4 m/s, turns and collision-monitor slowdown can consume most of a
+      # stock 0.5 m / 10 s window. Count smaller real translations as progress.
+      # Keep a translation check: endless spinning must still time out.
+      required_movement_radius: 0.15
+      movement_time_allowance: 15.0
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.15
+
+    FollowPath:
+      # Explicit heading phases prevent MPPI from trading translation against
+      # rotation at startup and circling a goal to satisfy its final yaw.
+      # The shim delegates path tracking to MPPI under this SAME parameter name.
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "nav2_mppi_controller::MPPIController"
+      angular_dist_threshold: 0.60
+      angular_disengage_threshold: 0.20
+      forward_sampling_distance: 0.50
+      rotate_to_heading_angular_vel: 0.60
+      max_angular_accel: 2.0
+      simulate_ahead_time: 1.0
+      rotate_to_goal_heading: true
+      rotate_to_heading_once: false
+      closed_loop: true
+      use_path_orientations: false
+      # "DiffDrive" = forward-only travel into the lidar's field of view. nav2_omni_overlay.yaml switches to "Omni".
+      motion_model: "DiffDrive"
+      time_steps: 56                 # horizon 56 * 0.05 s = 2.8 s (1.1 m at vx_max) < half the 5 m local costmap
+      model_dt: 0.05
+      batch_size: 1000
+      iteration_count: 1
+      temperature: 0.3
+      gamma: 0.015
+      vx_max: 0.40
+      vx_min: -0.10                  # the robot is blind behind: reversing is only a slow escape move
+      vy_max: 0.0                    # no strafing in forward mode (symmetric limit; Jazzy has no vy_min)
+      wz_max: 1.0
+      # These limits are anchored to the MEASURED velocity: MPPI 1.3.13 clamps every sampled control to
+      # measured speed +/- a*model_dt (motion_models.hpp predict()). With the smoother's 1.0 m/s^2 here, a robot at
+      # rest could never be sent more than ~0.1 m/s; the real drive does not move at that speed (drive k_s = 0), the
+      # measured speed stayed 0 and the command stayed tiny for ever: "Failed to make progress" with the azimuths
+      # chasing noise (hardware logs 2026-09-21, reproduced with sim_dead_speed:=0.12). Nav2 defaults: from rest
+      # the controller can ask for 0.3 m/s at once. The REAL ramp is still set by velocity_smoother (1.0 m/s^2).
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_max: 3.0                    # used only by the omni overlay
+      ay_min: -3.0
+      az_max: 3.5
+      vx_std: 0.2
+      vy_std: 0.2
+      wz_std: 0.4
+      prune_distance: 1.7
+      transform_tolerance: 0.1
+      visualize: false               # the /trajectories markers are expensive; enable only for debugging
+      regenerate_noises: false
+      critics: [
+        "ConstraintCritic", "CostCritic", "GoalCritic",
+        "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic",
+        "PathAngleCritic", "PreferForwardCritic"]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 8.0             # reach the position instead of lingering just outside tolerance
+        threshold_to_consider: 1.0  # handoff from PathFollow within the ~1.1 m prediction horizon
+      GoalAngleCritic:
+        # The rotation shim handles final yaw inside the XY goal tolerance.
+        # Omni uses MPPI directly and re-enables this critic in its overlay.
+        enabled: false
+        cost_power: 1
+        cost_weight: 3.0
+        # Used by the omni overlay only.
+        threshold_to_consider: 0.20
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.5
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        near_collision_cost: 253
+        critical_cost: 300.0
+        consider_footprint: true     # square footprint (must match the costmap, else MPPI warns and is less safe)
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 8.0             # maintain progress through inflated but collision-free passages
+        offset_from_furthest: 5
+        threshold_to_consider: 1.0
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        mode: 0                      # forward preference
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: odom
+      robot_base_frame: base_footprint
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      rolling_window: true
+      width: 5                       # integer metres
+      height: 5
+      resolution: 0.05
+      footprint: "[[0.34, 0.34], [0.34, -0.34], [-0.34, -0.34], [-0.34, 0.34]]"
+      always_send_full_costmap: true
+      plugins: ["voxel_layer", "denoise_layer", "inflation_layer"]
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: true
+        publish_voxel_map: false
+        origin_z: 0.0
+        z_resolution: 0.1
+        z_voxels: 16                 # 1.6 m column >= max_obstacle_height
+        max_obstacle_height: 1.30
+        mark_threshold: 0
+        observation_sources: scan cloud clear
+        # Obstacle heights are tested in the costmap frame (odom, z = 0 on the floor). /scan points arrive at the lidar
+        # height (0.33 m), /obstacle_points carry their true height.
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          # Empty bins are +inf and mean "no return", NOT "free": anything closer than 0.5 m to the VLP-16 (a person
+          # at the front-left corner) gives no return at all. Never raytrace-clear along those beams.
+          inf_is_valid: false
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.30
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.0
+        cloud:
+          topic: /obstacle_points
+          data_type: "PointCloud2"
+          marking: true
+          clearing: true
+          min_obstacle_height: 0.08  # reject residual floor returns (floor noise reaches +0.04 m)
+          max_obstacle_height: 1.30  # robot height envelope: overhangs above this cannot hit the robot
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.0
+        # Clearing only. /obstacle_points is cut to 0.10-1.20 m and 6 m, so after a person walks away almost no ray
+        # passes through their upper/lower voxels to a point that survives that cut: they stayed marked forever.
+        # Every raw return (floor, ceiling, far walls) proves the 3-D ray up to it is empty. Voxel raytracing is 3-D,
+        # so rays passing under a table do not erase its top. The blind wedge still cannot be cleared (no rays).
+        clear:
+          topic: /velodyne_points
+          data_type: "PointCloud2"
+          marking: false
+          clearing: true
+          min_obstacle_height: -1.0  # keep floor returns: they clear the low voxels
+          max_obstacle_height: 10.0  # keep ceiling returns: they clear the high voxels (rays are clipped to the grid)
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.55   # the VLP-16 is blind below 0.5 m: never clear what it cannot see
+      denoise_layer:
+        plugin: "nav2_costmap_2d::DenoiseLayer"
+        enabled: true
+        minimal_group_size: 2        # drop isolated single-cell speckle before it is inflated
+        group_connectivity_type: 8
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.70       # must exceed the circumscribed radius (0.481 m) for the MPPI CostCritic
+        cost_scaling_factor: 3.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      robot_base_frame: base_footprint
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      resolution: 0.05
+      track_unknown_space: true
+      footprint: "[[0.34, 0.34], [0.34, -0.34], [-0.34, -0.34], [-0.34, 0.34]]"
+      always_send_full_costmap: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan clear
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          inf_is_valid: false        # +inf = no return, not free space (see local_costmap)
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.30
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.0
+        # Clearing only (see local_costmap): /scan beams with no return (open doorway behind a person) never cleared
+        # the person. Restricted to obstacle-height returns so floor/ceiling rays in this 2-D layer do not erase
+        # low objects or turn unmapped (unknown) space free.
+        clear:
+          topic: /velodyne_points
+          data_type: "PointCloud2"
+          marking: false
+          clearing: true
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.30
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.55
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.70
+        cost_scaling_factor: 3.0
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 1.0  # compute-time warning budget only; the BT decides when to replan
+    costmap_update_timeout: 1.0
+    planner_plugins: ["GridBased"]   # the BT's PlannerSelector expects this id
+    GridBased:
+      # Cost-aware 2-D A*: suits a holonomic base. NOTE: SmacPlanner2D 1.3.13 logs one spurious ERROR when it is
+      # configured ("Inflation layer either not found or inflation is not set sufficiently ..."): it passes a
+      # hard-coded 0.0 to its collision checker. It is unrelated to the inflation settings here and harmless.
+      # Same Smac search; route poses use current TF so the controller's goal
+      # checker and rotation shim agree after localization updates. The Path
+      # header retains its creation stamp for the BT expiry timer.
+      plugin: "navigation_bringup::LatestFrameSmacPlanner2D"
+      tolerance: 0.25
+      downsample_costmap: false
+      downsampling_factor: 1
+      # Unknown cells are places the lidar never saw while mapping (under tables, behind furniture): do not plan
+      # through them with a robot that cannot see half of its surroundings.
+      allow_unknown: false
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      cost_travel_multiplier: 2.0    # prefer the middle of corridors
+      use_final_approach_orientation: false
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+
+smoother_server:
+  ros__parameters:
+    costmap_topic: global_costmap/costmap_raw
+    footprint_topic: global_costmap/published_footprint
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: true
+
+behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    # No assisted_teleop: it subscribes to "cmd_vel_teleop", which is OUR joystick topic, and teleop on this robot
+    # deliberately bypasses Nav2 (cmd_vel_mux gives it priority).
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors::Spin"
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors::DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 2.0          # = velocity_smoother angular accel limit
+    enable_stamped_cmd_vel: false
+
+waypoint_follower:
+  ros__parameters:
+    loop_rate: 20
+    stop_on_failure: true
+    action_server_result_timeout: 900.0
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200
+
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    feedback: "OPEN_LOOP"
+    scale_velocities: false
+    stamp_smoothed_velocity_with_smoothing_time: false
+    # [x, y, theta]. The y entries are 0.0: forward mode never strafes (the omni overlay sets them).
+    max_velocity: [0.40, 0.0, 1.0]
+    min_velocity: [-0.10, 0.0, -1.0]
+    max_accel: [1.0, 0.0, 2.0]
+    max_decel: [-1.5, 0.0, -3.0]
+    odom_topic: "odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0            # publishes zero once when its input goes silent
+    enable_stamped_cmd_vel: false
+
+collision_monitor:
+  ros__parameters:
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel_nav"   # final output of the Nav2 chain -> cmd_vel_mux (NOT /cmd_vel)
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.2
+    # A silent sensor makes the monitor output STOP (fail-safe): lidar or cloud_to_scan down -> Nav2 cannot drive.
+    source_timeout: 1.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    enable_stamped_cmd_vel: false
+    polygons: ["PolygonStop", "PolygonSlow"]
+    PolygonStop:                       # footprint + 0.08 m
+      type: "polygon"
+      points: "[[0.42, 0.42], [0.42, -0.42], [-0.42, -0.42], [-0.42, 0.42]]"
+      action_type: "stop"
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: "polygon_stop"
+      enabled: true
+    PolygonSlow:                       # footprint + 0.35 m
+      type: "polygon"
+      points: "[[0.69, 0.69], [0.69, -0.69], [-0.69, -0.69], [-0.69, 0.69]]"
+      action_type: "slowdown"
+      slowdown_ratio: 0.4
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: "polygon_slowdown"
+      enabled: true
+    observation_sources: ["scan", "pointcloud"]
+    scan:
+      type: "scan"
+      topic: "/scan"
+      enabled: true
+    pointcloud:
+      type: "pointcloud"
+      topic: "/obstacle_points"
+      min_height: 0.08                 # in base_footprint (z = 0 on the floor)
+      max_height: 1.30
+      enabled: true

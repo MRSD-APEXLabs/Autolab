@@ -1,0 +1,22 @@
+# Named places in the frame of maps/map.yaml (x, y in metres; yaw in radians,
+# counter-clockwise from the map x axis). Written by scripts/locations.sh.
+map: map
+locations:
+  shaker:
+    x: 3.128
+    y: 0.646
+    yaw: 3.1178
+    saved: '2026-09-21T10:45:02'
+    amcl_std_x_y_yaw:
+    - 0.111
+    - 0.115
+    - 0.055
+  ot2:
+    x: 3.561
+    y: 6.4
+    yaw: 3.1136
+    saved: '2026-09-21T10:53:13'
+    amcl_std_x_y_yaw:
+    - 0.056
+    - 0.083
+    - 0.052
