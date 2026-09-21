@@ -22,19 +22,18 @@ prm_plan_from_to(
     const JointVec& q_from,
     const JointVec& q_to)
 {
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
 
     const auto& joint_names = jmg->getVariableNames();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -167,7 +166,6 @@ prm_plan(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
@@ -175,12 +173,12 @@ prm_plan(
     const auto& joint_names = jmg->getVariableNames();
     const size_t dof = joint_names.size();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -559,18 +557,17 @@ crrt_plan_from_to(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
     const auto& joint_names = jmg->getVariableNames();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -762,12 +759,21 @@ crrt_finish_path(
             std::vector<JointVec> stitched;
             for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
                 stitched.push_back(pt.positions);
-            for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
+            for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
+                // seg1 ends on best_mid and seg2 starts on it - drop the repeat,
+                // a zero-length segment upsets time parameterisation.
+                if (!stitched.empty() &&
+                    joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
                 stitched.push_back(pt.positions);
+            }
 
             moveit::core::RobotState rs_short(robot_model);
             rs_short.setToDefaultValues();
             shortcut(stitched, rs_short, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+
+            // Draw what actually executes. Without this the last thing published
+            // is segment 2 from crrt_plan_from_to, so RViz shows half the motion.
+            viz.path(stitched, true);
 
             return build_plan(
                 stitched,
@@ -808,33 +814,62 @@ crrt_finish_path(
                 "[CRRT] Path looks suspicious (ratio %.2f) — trying midpoint fallback...", ratio);
 
             auto plan1 = crrt_plan_from_to(arm_group, node, q_start, best_mid);
-            if (!plan1) return std::nullopt;
-            auto plan2 = crrt_plan_from_to(arm_group, node, best_mid, q_goal);
-            if (!plan2) return std::nullopt;
+            auto plan2 = plan1 ? crrt_plan_from_to(arm_group, node, best_mid, q_goal)
+                               : std::nullopt;
 
-            // Extract segment waypoints
-            std::vector<JointVec> seg1, seg2;
-            for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
-                seg1.push_back(pt.positions);
-            for (const auto& pt : plan2->trajectory_.joint_trajectory.points)
-                seg2.push_back(pt.positions);
+            if (plan1 && plan2) {
+                // Stitch FIRST, then shortcut the whole thing. Shortcutting the
+                // two segments separately can never remove best_mid, because no
+                // candidate segment spans the junction - so the detour through
+                // that one hardcoded pose survives however redundant it is. A
+                // global pass can delete it outright, and shortcut() collision-
+                // and constraint-checks every segment it replaces, so dropping
+                // the midpoint only happens when the direct route is genuinely
+                // clear.
+                std::vector<JointVec> stitched;
+                for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+                    stitched.push_back(pt.positions);
+                for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
+                    if (!stitched.empty() &&
+                        joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
+                    stitched.push_back(pt.positions);
+                }
 
-            // Shortcut each segment independently
-            moveit::core::RobotState rs_sc(robot_model);
-            rs_sc.setToDefaultValues();
-            shortcut(seg1, rs_sc, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
-            rs_sc.setToDefaultValues();  // reset between segments
-            shortcut(seg2, rs_sc, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+                const size_t n_raw = stitched.size();
+                moveit::core::RobotState rs_sc(robot_model);
+                rs_sc.setToDefaultValues();
+                shortcut(stitched, rs_sc, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
 
-            // Then stitch the already-shortened segments
-            std::vector<JointVec> stitched;
-            stitched.insert(stitched.end(), seg1.begin(), seg1.end());
-            stitched.insert(stitched.end(), seg2.begin(), seg2.end());
+                double mid_length = 0.0;
+                for (size_t i = 1; i < stitched.size(); ++i)
+                    mid_length += joint_dist(stitched[i], stitched[i-1]);
 
-            return build_plan(
-                stitched,
-                std::vector<std::string>(joint_names.begin(), joint_names.end()),
-                arm_group);
+                RCLCPP_INFO(node->get_logger(),
+                    "[CRRT] Midpoint path: %zu -> %zu waypoints, length %.3f vs original %.3f.",
+                    n_raw, stitched.size(), mid_length, path_length);
+
+                // This branch fired because the path looked too LONG. Routing
+                // through a fixed pose is quite capable of being longer still,
+                // and nothing used to check - so only take it if it wins.
+                if (mid_length < path_length) {
+                    viz.path(stitched, true);
+                    return build_plan(
+                        stitched,
+                        std::vector<std::string>(joint_names.begin(), joint_names.end()),
+                        arm_group);
+                }
+                RCLCPP_INFO(node->get_logger(),
+                    "[CRRT] Midpoint path is no shorter - keeping the original.");
+            } else {
+                // full_path is still valid and already shortcut; a long path
+                // beats no path, so do not fail here.
+                RCLCPP_WARN(node->get_logger(),
+                    "[CRRT] Midpoint fallback failed to plan - keeping the original path.");
+            }
+
+            // Falling through: crrt_plan_from_to overwrote the markers with its
+            // own segments, so republish the path we are actually executing.
+            viz.path(full_path, true);
         }
     }
     // full_path = densify_path(full_path, 0.01);
@@ -858,7 +893,6 @@ crrt_plan(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) {
@@ -876,12 +910,12 @@ crrt_plan(
     JointVec q_start;
     current_state->copyJointGroupPositions(jmg, q_start);
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One world for the whole planning command. Re-entrant: the midpoint
+    // fallback calls back into crrt_plan_from_to, which reuses this same
+    // snapshot instead of re-cloning a possibly-changed octomap.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();

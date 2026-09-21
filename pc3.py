@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import asyncio
 import base64
 import json
@@ -19,6 +20,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image, PointCloud2, PointField
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import Header
+from std_srvs.srv import Empty
 from cv_bridge import CvBridge
 import sensor_msgs_py.point_cloud2 as pc2
 
@@ -29,9 +31,12 @@ FRAME_ID = "top_camera"
 PC_COUNT = 10
 PC_CACHE_PATH = "./pc3_accumulated.npy"
 
+# --fresh retries the octomap wipe this many frames before giving up.
+CLEAR_MAX_ATTEMPTS = 40
+
 
 class WSVisualizer(Node):
-    def __init__(self):
+    def __init__(self, fresh: bool = False):
         super().__init__("ws_visualizer")
 
         qos = QoSProfile(
@@ -45,7 +50,18 @@ class WSVisualizer(Node):
         self._pc_buffer: List[np.ndarray] = []
         self._pcs: Optional[np.ndarray] = None
 
-        if os.path.exists(PC_CACHE_PATH):
+        # MoveIt's octomap ACCUMULATES: publishing a new cloud unions it with
+        # whatever is already mapped. --fresh therefore has to wipe the octomap
+        # too, or the "fresh" capture is just the old map plus new points.
+        self._clear_client = self.create_client(Empty, "/clear_octomap")
+        self._cleared = not fresh
+        self._clear_attempts = 0
+
+        if fresh:
+            self.get_logger().info(
+                f"--fresh: ignoring cache, will recapture and overwrite {PC_CACHE_PATH}"
+            )
+        elif os.path.exists(PC_CACHE_PATH):
             self._pcs = np.load(PC_CACHE_PATH)
             self.get_logger().info(
                 f"Loaded cached point cloud from {PC_CACHE_PATH} ({self._pcs.shape[0]} points)"
@@ -433,10 +449,51 @@ class WSVisualizer(Node):
                 )
 
         if self._pcs is not None:
+            # Wipe the old octomap before the first publish of the new cloud,
+            # never after - move_group would map the fresh points and then we
+            # would erase them again.
+            if not self._cleared:
+                self._clear_octomap()
+                if not self._cleared:
+                    return      # publishing now would just get unioned in
             self.inspect_pc_pub.publish(self.create_pc2(self._pcs))
 
         self.inspect_wp_pub.publish(self.wellplates_to_markers(data.get("wellplates", [])))
         self.inspect_tag_pub.publish(self.apriltags_to_markers(data.get("apriltags", [])))
+
+    def _clear_octomap(self):
+        """Try to wipe move_group's octomap. Retries across frames, because
+        pc3.py usually comes up before the planning stack and the service is
+        not discoverable yet - a single attempt at startup always loses that
+        race. Nothing else spins this node, so it is safe to drive the future
+        to completion on the executor thread handling this frame."""
+        self._clear_attempts += 1
+
+        if not self._clear_client.service_is_ready():
+            if self._clear_attempts >= CLEAR_MAX_ATTEMPTS:
+                self.get_logger().warn(
+                    f"/clear_octomap never appeared after {self._clear_attempts} tries - "
+                    "publishing anyway, new cloud will UNION with the existing octomap"
+                )
+                self._cleared = True
+            elif self._clear_attempts % 5 == 1:
+                self.get_logger().info(
+                    f"waiting for /clear_octomap (is the planning stack up?) "
+                    f"[{self._clear_attempts}/{CLEAR_MAX_ATTEMPTS}]"
+                )
+            return
+
+        future = self._clear_client.call_async(Empty.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        if future.done():
+            self.get_logger().info("Octomap cleared - publishing the fresh cloud")
+            self._cleared = True
+        elif self._clear_attempts >= CLEAR_MAX_ATTEMPTS:
+            self.get_logger().warn(
+                "/clear_octomap kept timing out - publishing anyway, new cloud "
+                "will UNION with the existing octomap"
+            )
+            self._cleared = True
 
     def _handle_message(self, raw: str):
         try:
@@ -475,8 +532,16 @@ class WSVisualizer(Node):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=f"ignore the cached cloud and recapture, overwriting {PC_CACHE_PATH}",
+    )
+    args, _ = parser.parse_known_args()
+
     rclpy.init()
-    node = WSVisualizer()
+    node = WSVisualizer(fresh=args.fresh)
 
     try:
         asyncio.run(node.run())

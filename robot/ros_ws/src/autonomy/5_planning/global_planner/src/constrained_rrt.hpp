@@ -480,16 +480,13 @@ void build_prm_roadmap(
     int num_samples = 20000,
     int k_neighbors = 8)
 {
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
     
 
     moveit::core::RobotState rs(robot_model);
@@ -750,7 +747,6 @@ prm_plan(
 {
     auto t0 = std::chrono::steady_clock::now();
 
-    auto& psm_holder = crrt_internal::get_psm(node);
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) return std::nullopt;
@@ -758,12 +754,10 @@ prm_plan(
     const auto& joint_names = jmg->getVariableNames();
     const size_t dof = joint_names.size();
 
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
 
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();
@@ -926,7 +920,6 @@ crrt_plan(
     auto t0 = std::chrono::steady_clock::now();
 
     // ── 1. Init PSM (no-op after first call) ──────────────────
-    auto& psm_holder = crrt_internal::get_psm(node);
 
     // ── 2. Robot model + JMG ──────────────────────────────────
     auto robot_model = arm_group.getRobotModel();
@@ -950,12 +943,10 @@ crrt_plan(
     // ── 4. Snapshot planning scene ONCE ───────────────────────
     //  Done before any validity checks so no lock is held
     //  during the RRT hot loop.
-    planning_scene::PlanningScenePtr scene_snapshot;
-    {
-        planning_scene_monitor::LockedPlanningSceneRO ls(psm_holder.psm);
-        scene_snapshot = planning_scene::PlanningScene::clone(
-            psm_holder.psm->getPlanningScene());
-    }
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
     // ── 5. Shared robot state for all validity checks ─────────
     moveit::core::RobotState rs(robot_model);
     rs.setToDefaultValues();

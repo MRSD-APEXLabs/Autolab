@@ -20,5 +20,5 @@ my_pointcloud:
 # Only the top-level keys below are read by the occupancy map monitor; an
 # octomap_resolution nested under the sensor entry is ignored.
 octomap_frame: world
-octomap_resolution: 0.02
+octomap_resolution: 0.04
   

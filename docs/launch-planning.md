@@ -24,6 +24,8 @@ tmux new -s edged
 cd ~/Autolab-Camera-Edge && python3 main.py     # wait for the three "ws://0.0.0.0:876x" lines
 # Ctrl-b d  then  exit
 ```
+To see the camera feed go to http://192.168.1.101:8080/test.html in the browser and type 192.168.1.101 as the host
+
 
 ## 3. Put the camera in Inspect (Jetson)
 

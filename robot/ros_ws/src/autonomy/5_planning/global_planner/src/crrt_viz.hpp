@@ -8,6 +8,9 @@
 #pragma once
 #include "crrt_types.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
@@ -52,14 +55,42 @@ struct Viz {
     Marker strip(int id, const std::vector<JointVec>& path, Rgb c, double width)
     {
         Marker m = base(id, Marker::LINE_STRIP, c, width);
-        m.points.reserve(path.size());
-        for (const auto& q : path) {
+        if (path.empty()) return m;
+
+        auto fk_push = [&](const JointVec& q) {
             rs->setJointGroupPositions(jmg, q);
             rs->updateLinkTransforms();
             const auto& t = rs->getGlobalLinkTransform(crrt_cfg::EE_LINK).translation();
             geometry_msgs::msg::Point p;
             p.x = t.x(); p.y = t.y(); p.z = t.z();
             m.points.push_back(p);
+        };
+
+        // The controller interpolates LINEARLY IN JOINT SPACE between waypoints,
+        // and a straight line in joint space is a CURVE in Cartesian space. Doing
+        // FK on the waypoints alone and joining them with straight segments draws
+        // a path the end effector never takes. It is worst right after
+        // shortcutting: a 2-waypoint path renders as a single straight chord
+        // while the arm actually swings along an arc, which reads as "it executed
+        // the raw path, not the shortcut one" when in fact the shortcut is what
+        // ran. Sample the same interpolation the controller will perform.
+        constexpr double VIZ_STEP = 0.02;   // rad between samples
+
+        fk_push(path[0]);
+        for (size_t i = 0; i + 1 < path.size(); ++i) {
+            double d2 = 0.0;
+            for (size_t j = 0; j < path[i].size(); ++j) {
+                const double dj = path[i+1][j] - path[i][j];
+                d2 += dj * dj;
+            }
+            const int steps = std::max(1, (int)std::ceil(std::sqrt(d2) / VIZ_STEP));
+            for (int s = 1; s <= steps; ++s) {
+                const double f = (double)s / steps;
+                JointVec q(path[i].size());
+                for (size_t j = 0; j < path[i].size(); ++j)
+                    q[j] = path[i][j] + f * (path[i+1][j] - path[i][j]);
+                fk_push(q);
+            }
         }
         return m;
     }

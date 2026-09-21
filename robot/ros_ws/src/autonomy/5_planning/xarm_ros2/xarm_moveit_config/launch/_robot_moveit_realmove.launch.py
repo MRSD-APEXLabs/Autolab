@@ -227,8 +227,8 @@ def launch_setup(context, *args, **kwargs):
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments=['0.012652', '0.265518', '-0.584171',
-                    '-1.5708', '0', '1.0472',   # yaw pitch roll
+        arguments=['0.008595', '0.282195', '-0.600188',
+                   '-1.650408', '-0.049855', '1.019755',   # yaw pitch roll
                    'Chassis_1', 'top_camera']
     )
 

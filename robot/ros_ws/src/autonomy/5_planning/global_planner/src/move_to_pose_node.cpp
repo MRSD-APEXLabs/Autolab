@@ -454,6 +454,32 @@ std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_pub
         RCLCPP_ERROR(node->get_logger(),
                     "[Path Planning] IK FAILED for (%.3f, %.3f, %.3f) — aborting.",
                     target_pose.position.x, target_pose.position.y, target_pose.position.z);
+
+        // ── Diagnose why ──────────────────────────────────────
+        const auto &q = target_pose.orientation;
+        const double qn = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+        if (std::abs(qn - 1.0) > 1e-3)
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] BAD ORIENTATION: quaternion (%.3f, %.3f, %.3f, %.3f) has norm %.3f, not 1.",
+                q.x, q.y, q.z, q.w, qn);
+
+        const auto &p = target_pose.position;
+        if (p.x < -0.15 || p.x > 0.85 || p.y < -0.50 || p.y > 0.50 || p.z < 0.90 || p.z > 1.30)
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] OUTSIDE PLANNER WORKSPACE: (%.3f, %.3f, %.3f) not in x[-0.15,0.85] y[-0.50,0.50] z[0.90,1.30].",
+                p.x, p.y, p.z);
+
+        // Retry from the current state with a much longer timeout
+        moveit::core::RobotState retry_state(*current_state);
+        if (retry_state.setFromIK(jmg, target_pose, 5.0))
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] TIMEOUT: IK succeeds with a 5 s timeout, so the pose is reachable but hard "
+                "(near a singularity / joint limit). Raise the timeout at this call.");
+        else
+            RCLCPP_ERROR(node->get_logger(),
+                "[IK diag] UNREACHABLE: no solution even with 5 s. The pose is out of reach, or the "
+                "orientation is not achievable by the arm (or it is in the wrong frame — IK uses the "
+                "model root frame, currently expected to be 'world').");
         return std::nullopt;
     }
     std::vector<double> joint_values;
@@ -877,10 +903,10 @@ int main(int argc, char *argv[])
             const double PREGRASP_Z_OFFSET = 0.00;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
-            const double PREGRASP_Y_OFFSET = 0.1;
+            const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
             pregrasp_pose.position.y += PREGRASP_Y_OFFSET;
 
-            const double PREGRASP_X_OFFSET = 0.1;
+            const double PREGRASP_X_OFFSET = 0.0; //  0.1;
             pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
 
 
