@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/labx/bckp_Autolab/robot/ros_ws_nav/build/navigation_bringup/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

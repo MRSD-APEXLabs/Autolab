@@ -1,1 +1,0 @@
-ament_cmake_symlink_install_targets("TARGET_FILES" "/home/labx/bckp_Autolab/robot/ros_ws_nav/build/navigation_bringup/liblatest_frame_smac_planner.so" "TARGETS" "latest_frame_smac_planner" "LIBRARY_DESTINATION" "lib")

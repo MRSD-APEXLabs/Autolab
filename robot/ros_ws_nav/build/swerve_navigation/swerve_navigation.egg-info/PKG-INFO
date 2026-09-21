@@ -1,7 +1,0 @@
-Metadata-Version: 2.1
-Name: swerve-navigation
-Version: 1.0.0
-Summary: Navigation nodes for the MK5 swerve base: hardware bridge, lidar pipeline, teleop, cmd_vel mux, goal helpers and the /nav topic API.
-Maintainer: labx
-Maintainer-email: arnavkha@andrew.cmu.edu
-License: Apache-2.0
