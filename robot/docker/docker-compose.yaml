@@ -55,6 +55,9 @@ services:
       - deploy
     group_add:
       - "20"
+      # host gid of the "input" group: /dev/input/event* is root:input 0660, so without this the
+      # container user cannot read the gamepad (joy_node then finds no joystick at all).
+      - "996"
     extends:
       file: ./robot-base-docker-compose.yaml
       service: robot_base

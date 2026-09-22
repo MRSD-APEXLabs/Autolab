@@ -299,14 +299,16 @@ class LocationMarkers(Node):
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info('staging reached: driving straight in')
             self._send(self._final, 'final')
-        elif status == GoalStatus.STATUS_ABORTED and wrapped.result.error_code != 0:
+        elif status == GoalStatus.STATUS_ABORTED and getattr(wrapped.result, 'error_code', 0) != 0:
             # a real failure (no path to the staging pose, ...): try the goal itself
             self.get_logger().warning(
                 f'staging leg failed (error {wrapped.result.error_code}): '
                 'going to the goal directly')
             self._send(self._final, 'final')
         else:
-            # cancelled, or preempted by another goal (Nav2 aborts it with error 0): stop here
+            # cancelled, or preempted by another goal (Nav2 aborts it with error 0): stop here.
+            # Humble's result has no error_code, so there a failure cannot be told from a
+            # preemption by another client and every abort stops the approach.
             self.get_logger().info(f'staging leg ended (status {status}): approach stopped')
 
 

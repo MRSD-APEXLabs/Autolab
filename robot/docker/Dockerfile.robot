@@ -107,6 +107,8 @@ RUN apt update -y && apt install -y \
   libopencv-dev \
   ros-humble-navigation2 \
   ros-humble-nav2-bringup \
+  ros-humble-rmw-cyclonedds-cpp \
+  ros-humble-velodyne \
   libpcl-dev \
   ros-humble-image-geometry \
   ros-humble-pcl-conversions \
@@ -157,6 +159,13 @@ RUN if [ "${REAL_ROBOT}" = "true" ]; then \
 # ARG CUDA_MINOR=8
 # ARG ZED_SDK_MAJOR=5
 # ARG ZED_SDK_MINOR=1
+
+# phoenix6 for PYTHON, used by autonomy/1_navigation's swerve_bridge (the apt "phoenix6" package
+# below is the C++ one).  Its own directory, not site-packages: only that node puts it on its path,
+# so nothing else in the container can pick it up.  Keep the version in step with the apt package
+# and the firmware; autonomy/1_navigation/scripts/install_deps.sh installs the same thing into an
+# already-running container.
+RUN pip3 install --no-cache-dir --target /opt/phoenix6_python phoenix6==26.3.0
 
 # Install Python dependencies
 RUN pip3 install \

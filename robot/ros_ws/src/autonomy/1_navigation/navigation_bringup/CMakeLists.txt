@@ -21,7 +21,7 @@ pluginlib_export_plugin_description_file(nav2_core planner_plugins.xml)
 install(TARGETS latest_frame_smac_planner LIBRARY DESTINATION lib)
 
 install(
-  DIRECTORY launch config rviz urdf behavior_trees maps
+  DIRECTORY launch config rviz urdf behavior_trees maps phoenix6
   DESTINATION share/${PROJECT_NAME}
 )
 

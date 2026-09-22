@@ -3,7 +3,8 @@ sensors:
   - my_pointcloud
 my_pointcloud:
   sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-  point_cloud_topic: /zed_pointcloud
+  # move_to_pose_node republishes /zed_pointcloud here once, at the first plan.
+  point_cloud_topic: /zed_pointcloud_frozen
   max_range: 1.5
   point_subsample: 1
   # Self-filter: each robot link body is scaled by padding_scale and grown by

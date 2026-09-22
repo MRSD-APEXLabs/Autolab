@@ -26,11 +26,11 @@ No docking_server / route_server: the stock docking_server publishes straight to
     ros2 launch navigation_bringup navigation.launch.py hardware:=true    REAL ROBOT - it moves
 
 navigation.launch.xml wraps this file for Autolab's autonomy bringup (NAVIGATION_LAUNCH_* in
-.env). Run it on the HOST, on ROS 2 Jazzy: swerve_bridge needs the phoenix6 Python package from
-../../../../../../nav_nav/Navigation/generated, which is built for Python 3.12 - the robot
-container is Humble/Python 3.10 and has only the C++ phoenix6. Inside the container this launch
-therefore finds its packages missing, says so, and starts nothing instead of failing the whole
-autonomy bringup. See ../README.md.
+.env). It runs on ROS 2 Humble (the Autolab robot container) and on Jazzy (the host); on Humble
+it adds config/nav2_humble_overlay.yaml and the BehaviorTree.CPP v3 copy of the tree. Besides
+Nav2 it needs the velodyne driver and the phoenix6 PYTHON package (the container image ships only
+the C++ one): ../scripts/install_deps.sh installs both. Where they are missing this launch says so
+and starts nothing, instead of failing the whole autonomy bringup. See ../README.md.
 """
 
 import os
@@ -51,7 +51,18 @@ PKG = 'navigation_bringup'
 DEFAULT_MAP_NAME = 'map.yaml'
 
 RUNTIME_PACKAGES = ('swerve_navigation', 'velodyne_driver', 'velodyne_pointcloud', 'joy',
-                    'robot_state_publisher')
+                    'robot_state_publisher', 'topic_tools')
+
+# swerve_bridge imports the phoenix6 PYTHON package from the first of these that has it (the
+# environment variable PHOENIX6_SITE_PACKAGES, read by the node itself, wins over all of them):
+# the robot container (scripts/install_deps.sh), then the host venv the stack was developed in.
+PHOENIX6_SITE_PACKAGES = (
+    '/opt/phoenix6_python',
+    '/home/labx/nav_nav/Navigation/generated/venv/lib/python3.12/site-packages',
+)
+
+# Humble's Nav2 spells a few parameters differently and its BehaviorTree.CPP is v3.
+HUMBLE = os.environ.get('ROS_DISTRO') == 'humble'
 
 NAV2_PACKAGES = (
     'nav2_map_server', 'nav2_amcl', 'nav2_lifecycle_manager', 'nav2_controller',
@@ -100,6 +111,15 @@ def missing_packages(names):
     return missing
 
 
+def find_phoenix6():
+    """Directory holding the phoenix6 Python package, or None."""
+    candidates = [os.environ.get('PHOENIX6_SITE_PACKAGES', '')] + list(PHOENIX6_SITE_PACKAGES)
+    for directory in candidates:
+        if directory and os.path.isfile(os.path.join(directory, 'phoenix6', '__init__.py')):
+            return directory
+    return None
+
+
 def resolve_goal_heading(nav_motion, goal_heading):
     """A point click in forward mode should not request a return to the starting yaw."""
     if goal_heading == 'auto':
@@ -127,14 +147,16 @@ def _nodes(context):
 
     share = get_package_share_directory(PKG)
 
-    # Missing packages mean "this is not the machine navigation runs on" (the robot container has
-    # no Nav2 Python stack, no velodyne driver and no phoenix6 for Python 3.10). Say so and start
-    # nothing: raising here would take the whole Autolab autonomy bringup down with us.
+    # Missing dependencies (a container built before they were added to the image): say so and
+    # start nothing - raising here would take the whole Autolab autonomy bringup down with us.
     missing = missing_packages(NAV2_PACKAGES + RUNTIME_PACKAGES)
+    phoenix6_dir = find_phoenix6()
+    if phoenix6_dir is None:
+        missing.append('phoenix6 (Python)')
     if missing:
-        return [LogInfo(msg='[navigation] NOT STARTED: these ROS packages are missing here: '
-                            f"{', '.join(missing)}. Navigation runs on the host (ROS 2 Jazzy) - "
-                            'see autonomy/1_navigation/README.md. Nothing was started.')]
+        return [LogInfo(msg='[navigation] NOT STARTED, missing here: '
+                            f"{', '.join(missing)}. Install them with "
+                            'autonomy/1_navigation/scripts/install_deps.sh. Nothing was started.')]
 
     hardware = parse_bool('hardware', arg('hardware'))
     map_yaml = os.path.abspath(os.path.expanduser(
@@ -145,15 +167,18 @@ def _nodes(context):
             'the mapping mode in nav_ws and save it next to this one   -- nothing was started.')
 
     params = [os.path.join(share, 'config', 'nav2_params.yaml')]
+    # overlays come after the base file, so their values win
+    if HUMBLE:
+        params.append(os.path.join(share, 'config', 'nav2_humble_overlay.yaml'))
     if arg('nav_motion') == 'omni':
-        # after the base file, so its values win
         params.append(os.path.join(share, 'config', 'nav2_omni_overlay.yaml'))
     params.append(WALL_TIME)
 
     x, y, yaw = (parse_float(name, arg(name)) for name in ('x', 'y', 'yaw'))
     goal_heading = resolve_goal_heading(arg('nav_motion'), arg('goal_heading'))
     approach = parse_float('approach_distance', arg('approach_distance'))
-    bt_xml = os.path.join(share, 'behavior_trees', 'navigate_to_pose_cautious.xml')
+    bt_xml = os.path.join(share, 'behavior_trees', 'navigate_to_pose_cautious_humble.xml'
+                          if HUMBLE else 'navigate_to_pose_cautious.xml')
     locations_file = os.path.splitext(map_yaml)[0] + '.locations.yaml'
 
     def nav2_node(package, executable, *, name=None, overrides=None, remappings=None):
@@ -165,6 +190,10 @@ def _nodes(context):
 
     # Every node that commands velocity is remapped away from /cmd_vel (see module docstring).
     to_nav_raw = [('cmd_vel', 'cmd_vel_nav_raw')]
+    # Humble's controller_server TF buffer repeatedly stopped accepting map->odom from AMCL while
+    # continuing to receive the other /tf writers. Feed that process a single DDS writer instead;
+    # the serialized TFMessage is unchanged and every other consumer stays on the original /tf.
+    controller_remaps = to_nav_raw + [('/tf', '/tf_controller')]
 
     actions = [
         LogInfo(msg=f"[navigation] map={map_yaml} nav_motion={arg('nav_motion')} "
@@ -197,7 +226,10 @@ def _nodes(context):
         Node(package='swerve_navigation', executable='swerve_bridge', name='swerve_bridge', output='both',
              # The launch argument always overrides the yaml: "hardware" has exactly one switch.
              parameters=[_share('config', 'swerve_bridge.yaml'), WALL_TIME,
-                         {'hardware': hardware}],
+                         {'hardware': hardware,
+                          'phoenix6_site_packages': phoenix6_dir,
+                          # generated by Tuner X for this robot; re-copy it after re-tuning
+                          'tuner_constants_dir': os.path.join(share, 'phoenix6')}],
              respawn=False),
 
         # ---- localisation ----
@@ -209,9 +241,11 @@ def _nodes(context):
         _lifecycle_manager('lifecycle_manager_localization', LOCALIZATION_NODES),
 
         # ---- Nav2 ----
+        Node(package='topic_tools', executable='relay', name='controller_tf_relay', output='both',
+             arguments=['/tf', '/tf_controller']),
         # controller_server is left unnamed as in nav2_bringup: its process also hosts the
         # local_costmap node.
-        nav2_node('nav2_controller', 'controller_server', remappings=to_nav_raw),
+        nav2_node('nav2_controller', 'controller_server', remappings=controller_remaps),
         nav2_node('nav2_smoother', 'smoother_server', name='smoother_server'),
         nav2_node('nav2_planner', 'planner_server', name='planner_server'),
         nav2_node('nav2_behaviors', 'behavior_server', name='behavior_server',
@@ -238,6 +272,35 @@ def _nodes(context):
                                      'approach_distance': approach}]),
     ]
 
+    # ---- description, operator, visualisation ----
+    robot_description = ParameterValue(
+        Command([FindExecutable(name='xacro'), ' ', _share('urdf', 'swerve_base.urdf.xacro'),
+                 ' base_centre_height:=', LaunchConfiguration('base_centre_height'),
+                 ' lidar_yaw:=', LaunchConfiguration('lidar_yaw')]),
+        value_type=str)
+    with_joy = IfCondition(LaunchConfiguration('joy'))
+    actions += [
+        Node(package='robot_state_publisher', executable='robot_state_publisher',
+             name='robot_state_publisher', output='both',
+             parameters=[WALL_TIME, {'robot_description': robot_description}]),
+
+        Node(package='swerve_navigation', executable='cmd_vel_mux', name='cmd_vel_mux', output='both',
+             parameters=[_share('config', 'cmd_vel_mux.yaml'), WALL_TIME]),
+
+        # If the pad is not found after a reboot with nobody logged in on the local display (no
+        # uaccess ACL on /dev/input/event*), SDL can fall back to the world-readable legacy
+        # /dev/input/js* devices:  additional_env={'SDL_LINUX_JOYSTICK_CLASSIC': '1'}
+        Node(package='joy', executable='joy_node', name='joy_node', output='both',
+             parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
+        Node(package='swerve_navigation', executable='joy_teleop', name='joy_teleop', output='both',
+             parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
+
+        Node(package='rviz2', executable='rviz2', name='rviz2', output='log',
+             arguments=['-d', LaunchConfiguration('rviz_config'),
+                        '-f', LaunchConfiguration('rviz_fixed_frame')],
+             parameters=[WALL_TIME], condition=IfCondition(LaunchConfiguration('rviz'))),
+    ]
+
     if parse_bool('nav_api', arg('nav_api')):
         # The API topic names are relative ('nav/state', ...), so api_namespace decides where they
         # appear: '/' -> /nav/state (default), '/robot_1' -> /robot_1/nav/state for a system that
@@ -255,14 +318,6 @@ def _nodes(context):
 
 
 def generate_launch_description():
-    robot_description = ParameterValue(
-        Command([FindExecutable(name='xacro'), ' ', _share('urdf', 'swerve_base.urdf.xacro'),
-                 ' base_centre_height:=', LaunchConfiguration('base_centre_height'),
-                 ' lidar_yaw:=', LaunchConfiguration('lidar_yaw')]),
-        value_type=str)
-
-    with_joy = IfCondition(LaunchConfiguration('joy'))
-
     return LaunchDescription([
         DeclareLaunchArgument(
             'hardware', default_value='false',
@@ -331,26 +386,6 @@ def generate_launch_description():
                         '[m]. With the lidar z offset 0.178 it puts the optical centre at the '
                         'measured 0.330 m.'),
 
-        # First action: validates everything and raises before ANY process is started.
+        # The only action: validates everything and raises before ANY process is started.
         OpaqueFunction(function=_nodes),
-
-        Node(package='robot_state_publisher', executable='robot_state_publisher',
-             name='robot_state_publisher', output='both',
-             parameters=[WALL_TIME, {'robot_description': robot_description}]),
-
-        Node(package='swerve_navigation', executable='cmd_vel_mux', name='cmd_vel_mux', output='both',
-             parameters=[_share('config', 'cmd_vel_mux.yaml'), WALL_TIME]),
-
-        # If the pad is not found after a reboot with nobody logged in on the local display (no
-        # uaccess ACL on /dev/input/event*), SDL can fall back to the world-readable legacy
-        # /dev/input/js* devices:  additional_env={'SDL_LINUX_JOYSTICK_CLASSIC': '1'}
-        Node(package='joy', executable='joy_node', name='joy_node', output='both',
-             parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
-        Node(package='swerve_navigation', executable='joy_teleop', name='joy_teleop', output='both',
-             parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
-
-        Node(package='rviz2', executable='rviz2', name='rviz2', output='log',
-             arguments=['-d', LaunchConfiguration('rviz_config'),
-                        '-f', LaunchConfiguration('rviz_fixed_frame')],
-             parameters=[WALL_TIME], condition=IfCondition(LaunchConfiguration('rviz'))),
     ])

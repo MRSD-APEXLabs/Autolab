@@ -21,6 +21,7 @@
   <exec_depend>joy</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>topic_tools</exec_depend>
   <exec_depend>velodyne_driver</exec_depend>
   <exec_depend>velodyne_pointcloud</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>

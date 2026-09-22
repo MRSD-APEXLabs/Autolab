@@ -1,0 +1,24 @@
+# ROS 2 Humble (the Autolab robot container): loaded after nav2_params.yaml when ROS_DISTRO=humble, so these
+# values win. Only what Humble's Nav2 spells differently; parameters Humble does not know are ignored by it.
+behavior_server:
+  ros__parameters:
+    # Humble registers the behaviors under "package/Class", Jazzy under "package::Class".
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+collision_monitor:
+  ros__parameters:
+    # Humble: act when MORE than max_points are inside. Jazzy's min_points: 4 (act at 4 or more) == max_points: 3.
+    # Humble: points is a flat [x1, y1, x2, y2, ...] array, not Jazzy's "[[x, y], ...]" string. Same polygons.
+    PolygonStop:
+      points: [0.42, 0.42, 0.42, -0.42, -0.42, -0.42, -0.42, 0.42]
+      max_points: 3
+    PolygonSlow:
+      points: [0.69, 0.69, 0.69, -0.69, -0.69, -0.69, -0.69, 0.69]
+      max_points: 3

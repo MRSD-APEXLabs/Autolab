@@ -34,7 +34,14 @@ canivore_ifaces() {
   return 0
 }
 
-iface_is_up() { ip -br link show dev "$1" 2> /dev/null | grep -qw UP; }
+# From sysfs, not `ip`: the robot container has no iproute2, and an "is it up?" test that
+# errors out reads as DOWN - which made this script report "still DOWN" for an interface that
+# was up all along.  Bit 0 of flags is IFF_UP.
+iface_is_up() {
+  local flags
+  flags="$(cat "/sys/class/net/$1/flags" 2> /dev/null)" || return 1
+  (((flags & 1) != 0))
+}
 
 mapfile -t ifaces < <(canivore_ifaces)
 
@@ -72,8 +79,13 @@ if ! iface_is_up "${ifaces[0]}"; then
   exit 1
 fi
 
-state="$(ip -details link show dev "${ifaces[0]}" 2> /dev/null | sed -n 's/.*can .*state \([A-Z-]*\).*/\1/p' | head -1)"
-say "CANivore network up on ${ifaces[0]} (controller state ${state:-unknown})"
+# The CAN controller state (ERROR-ACTIVE / BUS-OFF / ...) is only exposed over netlink, so it
+# can be read where iproute2 exists and simply goes unreported where it does not.
+state=""
+if command -v ip > /dev/null; then
+  state="$(ip -details link show dev "${ifaces[0]}" 2> /dev/null | sed -n 's/.*can .*state \([A-Z-]*\).*/\1/p' | head -1)"
+fi
+say "CANivore network up on ${ifaces[0]} (controller state ${state:-not checked})"
 [[ "$state" == ERROR-ACTIVE || "$state" == "" ]] && exit 0
 echo "canivore_up: warning - controller state $state (wiring / termination / robot power?)" >&2
 exit 0
