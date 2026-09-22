@@ -2,6 +2,10 @@
 # counter-clockwise from the map x axis). Written by scripts/locations.sh.
 map: map
 locations:
+  home:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
   shaker:
     x: 3.128
     y: 0.646

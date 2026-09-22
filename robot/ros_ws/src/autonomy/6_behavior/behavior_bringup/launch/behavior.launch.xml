@@ -31,6 +31,9 @@
         <!-- Lab Machine Executive -->
         <include file="$(find-pkg-share lab_machine_executive)/launch/lab_machine_executive.launch.xml" />
 
+        <!-- Navigation Executive -->
+        <include file="$(find-pkg-share navigation_executive)/launch/navigation_executive.launch.xml" />
+
         <!-- Manipulation Executive -->
         <include file="$(find-pkg-share manipulation_executive)/launch/manipulation_executive.launch.xml" />
 

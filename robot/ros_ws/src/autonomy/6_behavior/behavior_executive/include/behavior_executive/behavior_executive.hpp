@@ -26,10 +26,6 @@
 #include <std_msgs/msg/empty.hpp>
 #include <vector>
 
-#include "rclcpp_action/rclcpp_action.hpp"
-#include <nav2_msgs/action/navigate_to_pose.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-
 class BehaviorExecutive : public rclcpp::Node {
    private:
     bt::Condition* armed_condition;
@@ -44,7 +40,6 @@ class BehaviorExecutive : public rclcpp::Node {
     bt::Condition* state_estimate_timed_out_condition;
     bt::Condition* stuck_condition;
     bt::Condition* autonomously_explore_condition;
-    bt::Condition* navigate_to_pose_commanded_condition;
     std::vector<bt::Condition*> conditions;
 
     // Action variables
@@ -55,15 +50,7 @@ class BehaviorExecutive : public rclcpp::Node {
     bt::Action* global_plan_action;
     bt::Action* request_control_action;
     bt::Action* disarm_action;
-    bt::Action* navigate_to_pose_action;
     std::vector<bt::Action*> actions;
-
-    // Navigate To Pose action client
-    rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr navigate_to_pose_client;
-    rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>::SharedPtr navigate_to_pose_goal_handle;
-    bool navigate_to_pose_goal_in_flight{false};
-    geometry_msgs::msg::PoseStamped navigate_to_pose_goal_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr navigate_to_pose_goal_sub;
 
     // subscribers
     rclcpp::Subscription<behavior_tree_msgs::msg::BehaviorTreeCommands>::SharedPtr
