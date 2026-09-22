@@ -9,7 +9,7 @@
 <launch>
   <arg name="zedx" default="true" description="run perception on the ZED X (/zedx)"/>
   <arg name="zedx_nano" default="true" description="run perception on the ZED X Nano (/zedx_nano)"/>
-  <arg name="yolo_models_dir" default="/home/labx/apple_server_manip/data/models/yolo"/>
+  <arg name="yolo_models_dir" default="$(find-pkg-share camera_perception)/models/yolo"/>
   <arg name="zedx_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the ZED X (see zedx.yaml)"/>
   <arg name="zedx_nano_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the Nano"/>
   <arg name="device" default="cuda:0" description="YOLO device (cpu without CUDA)"/>
