@@ -32,7 +32,7 @@
     <arg name="zedx_params_file" value="$(var zedx_params_file)"/>
     <arg name="zedx_nano_params_file" value="$(var zedx_nano_params_file)"/>
     <!-- with_cameras starts camera_ui's cameras.launch.xml: camera_hub_node + a camera and depth node per
-         camera. It does NOT start camera_ui's web page -- that only runs from camera_ui.launch.xml. -->
+         camera. It does NOT start camera_ui's web page; that only runs from camera_ui.launch.xml. -->
     <arg name="with_cameras" value="true"/>
     <arg name="host" value="$(var host)"/>
     <arg name="port" value="$(var port)"/>
