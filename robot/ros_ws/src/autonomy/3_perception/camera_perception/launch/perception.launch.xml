@@ -1,0 +1,68 @@
+<!-- Perception on the camera stack's rectified image + depth, under the topic names the Autolab pc3.py bridge used:
+
+     ZED X (base)       /inspect/apriltags, /inspect/wellplates, /inspect/image, /inspect/annotated_image, /inspect/json,
+                        /zed_pointcloud (frame top_camera), service /inspect/capture_snapshot (cloud_mode snapshot)
+     ZED X Nano (wrist) /servo/apriltags, /servo/detections, /servo/image, /servo/annotated_image, /servo/json
+
+     The camera hub streams one camera at a time; the other camera's node idles until it is selected.
+     with_cameras:=true also starts camera_ui's cameras.launch.xml (hub bridge, camera and depth nodes). -->
+<launch>
+  <arg name="zedx" default="true" description="run perception on the ZED X (/zedx)"/>
+  <arg name="zedx_nano" default="true" description="run perception on the ZED X Nano (/zedx_nano)"/>
+  <arg name="yolo_models_dir" default="/home/labx/apple_server_manip/data/models/yolo"/>
+  <arg name="zedx_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the ZED X (see zedx.yaml)"/>
+  <arg name="zedx_nano_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the Nano"/>
+  <arg name="device" default="cuda:0" description="YOLO device (cpu without CUDA)"/>
+  <arg name="cloud_mode" default="live" description="ZED X point cloud: live or snapshot"/>
+  <arg name="fresh" default="false" description="snapshot: ignore the cached cloud; clear the octomap before the first cloud"/>
+  <arg name="top_camera_tf" default="true" description="publish top_camera -> zedx_left_camera_optical_frame (identity)"/>
+  <arg name="zedx_params_file" default="$(find-pkg-share camera_perception)/config/zedx.yaml"/>
+  <arg name="zedx_nano_params_file" default="$(find-pkg-share camera_perception)/config/zedx_nano.yaml"/>
+  <!-- with_cameras only; an included file also sees this file's arguments, so they are passed explicitly -->
+  <arg name="with_cameras" default="false" description="also launch camera_ui's cameras.launch.xml"/>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub (with_cameras only)"/>
+  <arg name="port" default="8090"/>
+  <arg name="depth_backend" default="neural" description="neural or sgbm (with_cameras only)"/>
+  <arg name="depth_models_dir" default="" description="RAFT weights directory (with_cameras only)"/>
+
+  <include file="$(find-pkg-share camera_ui)/launch/cameras.launch.xml" if="$(var with_cameras)">
+    <arg name="host" value="$(var host)"/>
+    <arg name="port" value="$(var port)"/>
+    <arg name="backend" value="$(var depth_backend)"/>
+    <arg name="models_dir" value="$(var depth_models_dir)"/>
+  </include>
+
+  <group if="$(var zedx)">
+    <node pkg="camera_perception" exec="perception_node" name="zedx_perception" namespace="zedx" output="screen">
+      <param from="$(var zedx_params_file)"/>
+      <param name="yolo.model" value="$(var yolo_models_dir)/$(var zedx_model)"/>
+      <param name="yolo.device" value="$(var device)"/>
+      <param name="pointcloud.mode" value="$(var cloud_mode)"/>
+      <param name="pointcloud.fresh" value="$(var fresh)"/>
+      <remap from="perception/apriltags" to="/inspect/apriltags"/>
+      <remap from="perception/detections" to="/inspect/wellplates"/>
+      <remap from="perception/image" to="/inspect/image"/>
+      <remap from="perception/annotated_image" to="/inspect/annotated_image"/>
+      <remap from="perception/json" to="/inspect/json"/>
+      <remap from="perception/points" to="/zed_pointcloud"/>
+      <remap from="perception/capture_snapshot" to="/inspect/capture_snapshot"/>
+    </node>
+    <!-- The ZED X outputs are labelled top_camera, the frame the robot's TF tree (Chassis_1 -> top_camera) and the
+         planner use for this camera; this makes the camera stack's /zedx topics usable in that tree too. -->
+    <node pkg="tf2_ros" exec="static_transform_publisher" name="top_camera_to_zedx" if="$(var top_camera_tf)"
+          args="--frame-id top_camera --child-frame-id zedx_left_camera_optical_frame"/>
+  </group>
+
+  <group if="$(var zedx_nano)">
+    <node pkg="camera_perception" exec="perception_node" name="zedx_nano_perception" namespace="zedx_nano" output="screen">
+      <param from="$(var zedx_nano_params_file)"/>
+      <param name="yolo.model" value="$(var yolo_models_dir)/$(var zedx_nano_model)"/>
+      <param name="yolo.device" value="$(var device)"/>
+      <remap from="perception/apriltags" to="/servo/apriltags"/>
+      <remap from="perception/detections" to="/servo/detections"/>
+      <remap from="perception/image" to="/servo/image"/>
+      <remap from="perception/annotated_image" to="/servo/annotated_image"/>
+      <remap from="perception/json" to="/servo/json"/>
+    </node>
+  </group>
+</launch>

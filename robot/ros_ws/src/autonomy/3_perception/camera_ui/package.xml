@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>camera_ui</name>
+  <version>0.1.0</version>
+  <description>Browser UI for the Xavier camera hub: switches between the ZED X and the ZED X Nano and shows the active camera's RGB and depth. Also holds the launch file that brings up the hub node plus camera and depth nodes of both cameras.</description>
+  <maintainer email="arnavkha@andrew.cmu.edu">Arker123</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <!-- launch/cameras.launch.xml starts their nodes; the depth colormap comes from zedx_nano_depth.stereo -->
+  <exec_depend>zedx_nano_camera</exec_depend>
+  <exec_depend>zedx_nano_depth</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

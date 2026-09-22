@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera viewer</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  --bg: #0c0e12; --panel: #14171d; --panel-2: #1a1e26; --line: #252a34; --line-2: #313744;
+  --text: #e6e8ed; --muted: #8e96a6; --faint: #5f6676;
+  --accent: #4b8bff; --accent-bg: #1c3563; --ok: #3fb96f; --warn: #e0a73a; --err: #f06a62;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  /* TURBO as zedx_nano_depth.stereo.colorize_depth draws it: near (left) red, far (right) blue */
+  --turbo: linear-gradient(90deg, #7a0403 0%, #c32503 10%, #f05b12 20%, #fea732 30%, #e1dd37 40%, #a4fc3c 50%,
+           #46f884 60%, #18d7ca 70%, #3e9bfe 80%, #4559cb 90%, #321543 100%);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif; padding: 16px 20px 24px; }
+button, input { font: inherit; color: inherit; }
+.wrap { max-width: 1680px; margin: 0 auto; }
+
+/* header */
+.bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "title seg release";
+  align-items: center; gap: 12px 10px; margin-bottom: 14px; }
+.title { grid-area: title; min-width: 0; }
+h1 { font-size: 18px; font-weight: 600; margin: 0 0 2px; letter-spacing: .01em; }
+.hubline { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.hubline .hint { margin-left: 8px; color: var(--faint); font-family: var(--mono); font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--faint); vertical-align: 1px; }
+.dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(63, 185, 111, .15); }
+.dot.warn { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.dot.bad { background: var(--err); }
+@keyframes pulse { 50% { opacity: .35; } }
+.seg { grid-area: seg; display: flex; padding: 3px; gap: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.seg button { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 7px 14px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s; }
+.seg button:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+.seg button.on { background: var(--accent-bg); color: #fff; box-shadow: inset 0 0 0 1px rgba(75, 139, 255, .45); }
+.seg button:disabled { cursor: default; }
+.seg button .label { overflow: hidden; text-overflow: ellipsis; }
+.seg .sdot { flex: none; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--faint); }
+.seg .on .sdot { border-color: transparent; background: var(--faint); }
+.seg .on .sdot.ok { background: var(--ok); }
+.seg .on .sdot.warn { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.seg .on .sdot.bad { background: var(--err); }
+#release { grid-area: release; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--panel); color: var(--text); cursor: pointer; text-decoration: none; white-space: nowrap; font-size: 13px; }
+.btn:hover:not(:disabled) { background: var(--panel-2); border-color: #414959; }
+.btn:disabled, .btn.off { opacity: .4; cursor: default; pointer-events: none; }
+.btn.small { padding: 4px 9px; font-size: 12px; color: var(--muted); }
+.btn.small:hover { color: var(--text); }
+.btn svg { width: 14px; height: 14px; }
+.spin { flex: none; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff; border-radius: 50%;
+  animation: rot .8s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.notice { display: flex; gap: 10px; align-items: flex-start; margin: -2px 0 14px; padding: 9px 12px; border-radius: 8px;
+  background: rgba(240, 106, 98, .09); border: 1px solid rgba(240, 106, 98, .35); color: #ffb4ae; font-size: 13px; }
+.notice[hidden] { display: none; }
+.notice b { color: var(--err); font-weight: 600; flex: none; }
+.notice span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.notice .x { flex: none; margin: -3px -4px -3px 0; padding: 1px 6px; border: 0; border-radius: 5px; background: none; color: inherit;
+  font-size: 16px; line-height: 1.2; cursor: pointer; opacity: .75; }
+.notice .x:hover { opacity: 1; background: rgba(240, 106, 98, .15); }
+.notice .x[hidden] { display: none; }
+
+/* panels */
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.panel { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; min-width: 0; }
+.phead { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; min-height: 46px; border-bottom: 1px solid var(--line); }
+h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.spacer { flex: 1; }
+.badge { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+.badge.ok { color: #8fe0ad; border-color: rgba(63, 185, 111, .4); background: rgba(63, 185, 111, .08); }
+.badge.warn { color: #f3cd82; border-color: rgba(224, 167, 58, .45); background: rgba(224, 167, 58, .08); }
+.badge[hidden] { display: none; }
+.view { position: relative; aspect-ratio: 16 / 10; background: #06070a; overflow: hidden; touch-action: manipulation; cursor: crosshair; }
+.view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; }
+.view img:not([src]), .view img.other { visibility: hidden; }   /* .other: still showing the previous camera */
+.overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  padding: 16px; text-align: center; background: rgba(6, 7, 10, .78); backdrop-filter: blur(2px); cursor: default; }
+.overlay[hidden] { display: none; }
+.overlay .spin { width: 20px; height: 20px; }
+.overlay b { font-size: 15px; font-weight: 600; }
+.overlay span { color: var(--muted); font-size: 13px; max-width: 46ch; overflow-wrap: anywhere; }
+.overlay.error b { color: var(--err); }
+.cross { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; pointer-events: none; }
+.cross::before, .cross::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .7); }
+.cross::before { left: 10px; top: 0; width: 2px; height: 22px; }
+.cross::after { top: 10px; left: 0; width: 22px; height: 2px; }
+.cross[hidden] { display: none; }
+.pfoot { padding: 10px 14px 12px; display: grid; gap: 10px; border-top: 1px solid var(--line); }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12.5px; color: var(--muted); }
+.stats span { white-space: nowrap; }
+.stats b { font-family: var(--mono); font-weight: 500; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; margin-left: 5px; }
+.stats.stale b { color: var(--faint); }   /* the last frames' numbers, not live */
+.probe { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; min-height: 22px; font-size: 12.5px; color: var(--faint); }
+.probe .z { font-family: var(--mono); font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
+.probe .xyz { font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px;
+  color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale .ramp { height: 10px; border-radius: 5px; background: var(--turbo); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); }
+.controls label { display: inline-flex; align-items: center; gap: 7px; }
+.controls .range { display: inline-flex; gap: 14px; }
+.switch { position: relative; width: 32px; height: 18px; flex: none; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--line-2); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(14px); }
+.switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { width: 78px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--bg); font-family: var(--mono);
+  font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.num:disabled { color: var(--faint); border-color: var(--line); }
+.num.bad { border-color: var(--err); }
+.unit { color: var(--faint); }
+.chip { position: fixed; z-index: 10; pointer-events: none; padding: 6px 9px; border-radius: 7px; background: rgba(12, 14, 18, .92);
+  border: 1px solid var(--line-2); font-family: var(--mono); font-size: 12px; line-height: 1.35; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45); font-variant-numeric: tabular-nums; }
+.chip[hidden] { display: none; }
+.chip .z { font-size: 13.5px; color: #fff; }
+.chip .xyz { color: var(--muted); }
+footer { margin-top: 14px; color: var(--faint); font-size: 12px; }
+footer code { font-family: var(--mono); font-size: 11.5px; }
+
+@media (max-width: 960px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  body { padding: 12px 16px 20px; }
+  .bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title release" "seg seg"; align-items: start; }
+  .seg button { flex: 1 1 0; padding: 8px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <div class="title">
+      <h1>Cameras</h1>
+      <div class="hubline"><span id="hubDot" class="dot"></span><span id="hubText">Connecting&hellip;</span><span id="hubHint" class="hint"></span></div>
+    </div>
+    <div id="seg" class="seg" role="group" aria-label="Active camera"></div>
+    <button id="release" class="btn" type="button" title="Stop streaming: release the active camera on the Xavier">Release</button>
+  </header>
+  <div id="notice" class="notice" role="alert" hidden><b>Error</b><span id="noticeText"></span><button id="noticeClose" class="x" type="button" title="Dismiss" aria-label="Dismiss">&times;</button></div>
+
+  <main class="grid">
+    <section class="panel" aria-label="RGB">
+      <div class="phead">
+        <h2>RGB</h2><span id="rgbBadge" class="badge" hidden></span>
+        <span class="spacer"></span>
+        <a id="rgbSnap" class="btn small off" download aria-disabled="true" title="Download the current image as PNG">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11"/></svg>PNG</a>
+      </div>
+      <div class="view" id="rgbView">
+        <img id="rgbImg" alt="RGB stream">
+        <div class="cross" hidden></div>
+        <div class="overlay" hidden><div class="spin"></div><b></b><span></span></div>
+      </div>
+      <div class="pfoot">
+        <div class="stats" id="rgbStats"></div>
+        <div class="probe" id="probe"></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Depth">
+      <div class="phead">
+        <h2>Depth</h2>
+        <span class="spacer"></span>
+        <a id="depthSnap" class="btn small off" download aria-disabled="true" title="Download the depth as a 16-bit PNG in millimetres">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M2.5 13.5h11"/></svg>PNG 16-bit</a>
+      </div>
+      <div class="view" id="depthView">
+        <img id="depthImg" alt="Depth stream">
+        <div class="cross" hidden></div>
+        <div class="overlay" hidden><div class="spin"></div><b></b><span></span></div>
+      </div>
+      <div class="pfoot">
+        <div class="stats" id="depthStats"></div>
+        <div class="scale"><span id="nearLabel">&ndash;</span><div class="ramp" title="near (red) to far (blue); invalid depth is black"></div><span id="farLabel">&ndash;</span></div>
+        <div class="controls">
+          <label><span class="switch"><input type="checkbox" id="auto"><i></i></span>Auto range</label>
+          <span class="range">
+            <label>Near <input id="near" class="num" type="number" min="0" max="65534" step="10" inputmode="numeric"><span class="unit">mm</span></label>
+            <label>Far <input id="far" class="num" type="number" min="1" max="65535" step="10" inputmode="numeric"><span class="unit">mm</span></label>
+          </span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer id="footer"></footer>
+</div>
+<div id="chip" class="chip" hidden></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const HUB_STALE_S = 5;           // camera_hub publishes every second
+const POLL_MS = 500;
+const DEFAULTS = {auto: true, near: 200, far: 2000};
+// the server refuses anything else (400); integers, as the stream URL carries them
+const validRange = (near, far) => Number.isInteger(near) && Number.isInteger(far) && near >= 0 && far > near && far <= 65535;
+
+const prefs = (() => {           // per-viewer depth range; storage may be unavailable
+  let p;
+  try { p = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('camera_ui.depth') || '{}')); }
+  catch (e) { p = Object.assign({}, DEFAULTS); }
+  p.auto = p.auto !== false;
+  if (!validRange(p.near, p.far)) { p.near = DEFAULTS.near; p.far = DEFAULTS.far; }
+  return p;
+})();
+function savePrefs() { try { localStorage.setItem('camera_ui.depth', JSON.stringify(prefs)); } catch (e) {} }
+
+const PROBE_HINT = 'Hover or tap an image to read the depth there';
+const round10 = v => Math.round(v / 10) * 10;
+// pending: the camera (or 'release') of this page's newest switch request still waiting for its reply;
+// notice: {text, target} of a failed switch (target null for a release)
+const ui = {status: null, view: null, pending: null, notice: null, built: '', offline: false, reconnect: false, probe: null};
+
+// -- formatting -----------------------------------------------------------------------------
+const fmtFps = v => v == null ? '–' : v.toFixed(1);
+function fmtAge(s) { return s == null ? '–' : s < 1 ? `${Math.round(s * 1000)} ms` : s < 120 ? `${s.toFixed(1)} s` : `${Math.round(s / 60)} min`; }
+const fmtMm = v => v == null ? '–' : `${Math.round(v)} mm`;
+function stat(label, value) {
+  const span = document.createElement('span');
+  const b = document.createElement('b');
+  span.textContent = label; b.textContent = value; span.appendChild(b);
+  return span;
+}
+
+// -- hub ------------------------------------------------------------------------------------
+const isFresh = (stream, s) => stream.age_s != null && stream.age_s <= s.stale_after;
+function hubOf(s) { return s && s.hub && s.hub_age_s != null && s.hub_age_s <= HUB_STALE_S ? s.hub : null; }
+function label(cam) { const c = ui.status && ui.status.cameras[cam]; return c ? c.label : cam; }
+function hubLine(s) {
+  if (ui.offline) return ['bad', 'Camera UI node not reachable', 'retrying'];
+  if (!s.hub) return ['bad', 'camera_hub node not running', 'ros2 launch camera_ui cameras.launch.xml'];
+  if (s.hub_age_s > HUB_STALE_S) return ['warn', `camera_hub node not responding (last status ${fmtAge(s.hub_age_s)} ago)`, ''];
+  const hub = s.hub, where = (hub.hub_url || 'camera hub').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!hub.reachable) return ['bad', `Camera hub at ${where} unreachable`, hub.poll_error || ''];
+  if (!hub.active) return ['idle', `${where} · no camera selected`, ''];
+  const hc = (hub.cameras || {})[hub.active] || {};
+  const fps = hub.state === 'streaming' && hc.fps != null ? ` · ${hc.fps.toFixed(1)} fps` : '';
+  const cls = {streaming: 'ok', starting: 'warn', error: 'bad'}[hub.state] || 'idle';
+  return [cls, `${where} · ${label(hub.active)} ${hub.state}${fps}`, ''];
+}
+
+// -- camera switch --------------------------------------------------------------------------
+function buildSwitch(cams) {
+  const key = cams.join(',');
+  if (ui.built === key) return;
+  ui.built = key;
+  const seg = $('seg');
+  seg.textContent = '';
+  for (const cam of cams) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.cam = cam;
+    b.innerHTML = '<span class="sdot"></span><span class="label"></span>';
+    b.querySelector('.label').textContent = label(cam);
+    b.onclick = () => select(cam);
+    seg.appendChild(b);
+  }
+}
+// A click while a switch still waits (a camera that never delivers, say) is sent right away: the hub
+// supersedes the waiting switch, and only the newest request's reply is reported.
+let selectSeq = 0;
+async function select(cam) {
+  const hub = hubOf(ui.status), target = cam === null ? 'release' : cam;
+  if (switchTarget(ui.status) === target) return;   // on its way already
+  if (!switchTarget(ui.status) && hub && hub.active === cam && hub.state !== 'error') return;   // there already
+  const seq = ++selectSeq;
+  ui.pending = target;
+  if (cam !== null) ui.view = cam;
+  ui.notice = null;
+  render();
+  let failure = '';
+  try {
+    const r = await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({camera: cam})});
+    const j = await r.json();
+    if (!j.ok) failure = j.message || `HTTP ${r.status}`;
+  } catch (e) {
+    failure = String(e);
+  }
+  if (seq !== selectSeq) return;   // superseded by a newer click, which reports instead
+  ui.pending = null;
+  if (failure) ui.notice = {text: `${cam === null ? 'Release' : 'Switching to ' + label(cam)} failed: ${failure}`, target: cam};
+  poll();
+}
+$('release').onclick = () => select(null);
+$('noticeClose').onclick = () => { ui.notice = null; render(); };
+
+function switchTarget(s) {   // where a switch in progress goes: a camera, 'release' or null; this page's own first
+  if (ui.pending !== null) return ui.pending;
+  const sw = s && s.switching;
+  return sw ? (sw.camera === null ? 'release' : sw.camera) : null;
+}
+
+function chooseView(s) {
+  const cams = Object.keys(s.cameras), hub = hubOf(s), target = switchTarget(s);
+  if (target && target !== 'release') return target;
+  if (hub && cams.includes(hub.active)) return hub.active;
+  if (ui.view && cams.includes(ui.view)) return ui.view;
+  // no hub decision: the camera with the newest image
+  const age = cam => { const a = s.cameras[cam].rgb.age_s; return a == null ? Infinity : a; };
+  return cams.slice().sort((a, b) => age(a) - age(b))[0];
+}
+
+// -- streams --------------------------------------------------------------------------------
+function rangeQuery() { return prefs.auto ? 'auto=1' : `near=${prefs.near}&far=${prefs.far}`; }
+function setStream(img, url) {
+  if (img.dataset.url === url) return;
+  // an <img> keeps its old picture until the new stream delivers: hide it until this camera has fresh frames
+  if (url.split('/')[2] !== (img.dataset.url || '').split('/')[2]) img.classList.add('other');
+  img.dataset.url = url;
+  if (url) img.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  else img.removeAttribute('src');
+}
+function updateStreams(force) {
+  const cam = ui.view, on = cam && document.visibilityState !== 'hidden';
+  for (const img of [$('rgbImg'), $('depthImg')]) if (force) img.dataset.url = '';
+  setStream($('rgbImg'), on ? `/stream/${cam}/rgb.mjpg` : '');
+  setStream($('depthImg'), on ? `/stream/${cam}/depth.mjpg?${rangeQuery()}` : '');
+}
+function setSnapshot(a, url) {   // without a current frame the server answers 503 JSON: no link then
+  if (a.getAttribute('href') === (url || null)) return;
+  if (url) a.href = url; else a.removeAttribute('href');
+  a.classList.toggle('off', !url);
+  a.setAttribute('aria-disabled', String(!url));
+}
+for (const img of [$('rgbImg'), $('depthImg')]) {
+  img.onerror = () => setTimeout(() => { const url = img.dataset.url; if (url) { img.dataset.url = ''; setStream(img, url); } }, 1500);
+}
+document.addEventListener('visibilitychange', () => updateStreams(false));   // hidden tabs free their connections
+
+// -- panels ---------------------------------------------------------------------------------
+function overlayFor(kind, s) {
+  const cam = ui.view, c = s.cameras[cam], hub = hubOf(s);
+  const fresh = stream => isFresh(stream, s), target = switchTarget(s);
+  if (target === cam) return {spin: true, title: `Switching to ${c.label}…`, text: hub && hub.state === 'starting' ? 'Starting the camera on the Xavier' : ''};
+  if (target === 'release') return {spin: true, title: 'Releasing the camera…', text: ''};
+  if (fresh(kind === 'rgb' ? c.rgb : c.depth)) return null;
+  if (hub && hub.reachable && !hub.active) return {title: 'No camera selected', text: 'Choose a camera above to start streaming.'};
+  if (hub && hub.reachable && hub.active !== cam) return {title: 'Camera inactive', text: `The hub is streaming ${label(hub.active)}.`};
+  if (hub && hub.active === cam && hub.state === 'error') return {error: true, title: 'Camera error', text: 'The hub keeps retrying; the error is shown above.'};
+  if (hub && hub.active === cam && hub.state === 'starting') return {spin: true, title: 'Camera starting…', text: ''};
+  if (kind === 'depth' && fresh(c.rgb)) return {title: 'No depth', text: `Nothing on /${cam}/depth/image_rect. Is the depth node for /${cam} running?`};
+  return {spin: true, title: 'Waiting for frames…', text: `/${cam}/left/image_rect_color or /${cam}/left/image_raw/compressed`};
+}
+function showOverlay(view, o) {
+  const el = view.querySelector('.overlay');
+  el.hidden = !o;
+  if (!o) return;
+  el.classList.toggle('error', !!o.error);
+  el.querySelector('.spin').style.display = o.spin ? '' : 'none';
+  el.querySelector('b').textContent = o.title;
+  el.querySelector('span').textContent = o.text;
+}
+function setStats(el, items) { el.replaceChildren(...items.map(([k, v]) => stat(k, v))); }
+
+function render() {
+  const s = ui.status;
+  const [cls, text, hint] = s ? hubLine(s) : ['idle', 'Connecting…', ''];
+  $('hubDot').className = `dot ${cls}`;
+  $('hubText').textContent = text;
+  $('hubHint').textContent = hint;
+  const hub = hubOf(s), n = ui.notice;
+  // the hub keeps retrying a camera that failed to start: once it streams (or the release went through) the failure is old news
+  if (n && hub && hub.reachable && hub.active === n.target && (n.target === null || hub.state === 'streaming')) ui.notice = null;
+  const notice = ui.notice ? ui.notice.text : hub && hub.active && hub.state === 'error' && hub.error ? `${label(hub.active)}: ${hub.error}` : '';
+  $('notice').hidden = !notice;
+  $('noticeText').textContent = notice;
+  $('noticeClose').hidden = !ui.notice;   // the hub's own error goes when the hub recovers
+  if (!s) return;
+
+  const cams = Object.keys(s.cameras);
+  buildSwitch(cams);
+  const target = switchTarget(s);
+  for (const b of $('seg').children) {
+    const cam = b.dataset.cam, active = hub && hub.active === cam, going = target === cam;
+    b.classList.toggle('on', target ? going : !!active);
+    b.setAttribute('aria-pressed', String(!!active));
+    b.disabled = going;   // the others stay clickable: a newer switch supersedes the waiting one
+    const dot = b.querySelector('.sdot, .spin');
+    const want = going ? 'spin' : `sdot ${active ? ({streaming: 'ok', starting: 'warn', error: 'bad'}[hub.state] || '') : ''}`;
+    if (dot.className !== want) dot.className = want;
+  }
+  $('release').disabled = target === 'release' || (!target && !(hub && hub.active));
+
+  const view = chooseView(s);
+  if (view !== ui.view) { ui.view = view; hideProbe(); }
+  updateStreams(false);
+  const c = s.cameras[ui.view];
+
+  const badge = $('rgbBadge');
+  badge.hidden = !c.rgb.source || !isFresh(c.rgb, s);
+  badge.className = `badge ${c.rgb.source === 'rectified' ? 'ok' : 'warn'}`;
+  badge.textContent = c.rgb.source === 'rectified' ? 'rectified' : 'unrectified · no depth';
+  if (c.rgb.width) $('rgbView').style.aspectRatio = `${c.rgb.width} / ${c.rgb.height}`;
+  $('depthView').style.aspectRatio = $('rgbView').style.aspectRatio;
+  setStats($('rgbStats'), [['fps', fmtFps(c.rgb.fps)], ['age', fmtAge(c.rgb.age_s)],
+                           ['size', c.rgb.width ? `${c.rgb.width}×${c.rgb.height}` : '–']]);
+  const d = c.depth;
+  setStats($('depthStats'), [['fps', fmtFps(d.fps)], ['age', fmtAge(d.age_s)],
+                             ['valid', d.valid_fraction == null ? '–' : `${Math.round(d.valid_fraction * 100)}%`],
+                             ['median', fmtMm(d.median_mm)], ['min–max', d.min_mm == null ? '–' : `${d.min_mm}–${d.max_mm} mm`]]);
+  const rgbLive = !ui.offline && isFresh(c.rgb, s), depthLive = !ui.offline && isFresh(d, s);
+  $('rgbStats').classList.toggle('stale', !rgbLive);
+  $('depthStats').classList.toggle('stale', !depthLive);
+  setSnapshot($('rgbSnap'), rgbLive ? `/snapshot/${ui.view}/rgb.png` : '');
+  setSnapshot($('depthSnap'), depthLive ? `/snapshot/${ui.view}/depth.png` : '');
+  showOverlay($('rgbView'), overlayFor('rgb', s));
+  showOverlay($('depthView'), overlayFor('depth', s));
+  if (rgbLive) $('rgbImg').classList.remove('other');
+  if (depthLive) $('depthImg').classList.remove('other');
+
+  const range = prefs.auto ? (d.auto_range_mm ? d.auto_range_mm.map(round10) : null) : [prefs.near, prefs.far];
+  $('nearLabel').textContent = range ? `${range[0]} mm` : '–';
+  $('farLabel').textContent = range ? `${range[1]} mm` : '–';
+  if (prefs.auto) {
+    $('near').value = range ? range[0] : '';
+    $('far').value = range ? range[1] : '';
+  }
+  $('footer').textContent = `Topics /${ui.view}/left/image_rect_color (or left/image_raw/compressed) · /${ui.view}/depth/image_rect`;
+}
+
+async function poll() {
+  clearTimeout(poll.timer);
+  try {
+    const r = await fetch('/api/status', {cache: 'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    ui.status = await r.json();
+    if (ui.offline) { ui.offline = false; ui.reconnect = true; }
+  } catch (e) {
+    ui.offline = true;
+  }
+  render();
+  if (ui.reconnect && ui.status) { ui.reconnect = false; updateStreams(true); }   // the node restarted: reopen the streams
+  poll.timer = setTimeout(poll, POLL_MS);
+}
+
+// -- depth range controls -------------------------------------------------------------------
+function syncControls() {
+  $('auto').checked = prefs.auto;
+  $('near').disabled = $('far').disabled = prefs.auto;
+  if (!prefs.auto) { $('near').value = prefs.near; $('far').value = prefs.far; }
+}
+$('auto').onchange = () => {
+  prefs.auto = $('auto').checked;
+  if (!prefs.auto) {   // freeze the range currently shown
+    const d = ui.status && ui.view && ui.status.cameras[ui.view].depth;
+    const shown = d && d.auto_range_mm ? d.auto_range_mm.map(round10) : null;
+    if (shown && validRange(...shown)) [prefs.near, prefs.far] = shown;
+  }
+  savePrefs(); syncControls(); updateStreams(false); render();
+};
+let rangeTimer = null;
+for (const input of [$('near'), $('far')]) {
+  input.oninput = () => {
+    clearTimeout(rangeTimer);
+    rangeTimer = setTimeout(() => {
+      const near = Math.round(Number($('near').value)), far = Math.round(Number($('far').value));   // rounded as sent
+      const ok = $('near').value !== '' && $('far').value !== '' && validRange(near, far);
+      $('near').classList.toggle('bad', !ok); $('far').classList.toggle('bad', !ok);
+      if (!ok) return;
+      prefs.near = near; prefs.far = far;
+      savePrefs(); updateStreams(false); render();
+    }, 350);
+  };
+}
+
+// -- depth probe ----------------------------------------------------------------------------
+function contentRect(img) {   // the image area inside the object-fit: contain box
+  const r = img.getBoundingClientRect(), iw = img.naturalWidth || 16, ih = img.naturalHeight || 10;
+  const k = Math.min(r.width / iw, r.height / ih), w = iw * k, h = ih * k;
+  return {left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h};
+}
+function hideProbe() {
+  ui.probe = null;
+  $('chip').hidden = true;
+  for (const el of document.querySelectorAll('.cross')) el.hidden = true;
+  $('probe').textContent = PROBE_HINT;
+}
+function drawCross() {
+  for (const view of [$('rgbView'), $('depthView')]) {
+    const img = view.querySelector('img'), cross = view.querySelector('.cross'), vr = view.getBoundingClientRect(), r = contentRect(img);
+    cross.hidden = false;
+    cross.style.left = `${r.left - vr.left + ui.probe.u * r.width}px`;
+    cross.style.top = `${r.top - vr.top + ui.probe.v * r.height}px`;
+  }
+}
+function showReading(j) {
+  const chip = $('chip'), p = $('probe');
+  const z = j.depth_mm == null ? 'no depth' : `${j.depth_mm} mm`;
+  const xyz = j.xyz_mm ? `x ${j.xyz_mm[0].toFixed(0)}  y ${j.xyz_mm[1].toFixed(0)}  z ${j.xyz_mm[2].toFixed(0)} mm` : '';
+  chip.replaceChildren();
+  const zEl = document.createElement('div'); zEl.className = 'z'; zEl.textContent = z; chip.appendChild(zEl);
+  if (xyz) { const x = document.createElement('div'); x.className = 'xyz'; x.textContent = xyz; chip.appendChild(x); }
+  chip.hidden = false;
+  const w = chip.offsetWidth, h = chip.offsetHeight;
+  let left = ui.probe.x + 14, top = ui.probe.y + 14;
+  if (left + w > window.innerWidth - 8) left = ui.probe.x - w - 14;
+  if (top + h > window.innerHeight - 8) top = ui.probe.y - h - 14;
+  chip.style.left = `${Math.max(8, left)}px`; chip.style.top = `${Math.max(8, top)}px`;
+  p.replaceChildren();
+  const pz = document.createElement('span'); pz.className = 'z'; pz.textContent = z; p.appendChild(pz);
+  const px = document.createElement('span'); px.className = 'xyz'; px.textContent = xyz ? `optical frame  ${xyz}` : 'depth unknown at this point'; p.appendChild(px);
+}
+let probeBusy = false;
+async function probe() {
+  if (probeBusy || !ui.probe || !ui.view) return;
+  probeBusy = true;
+  const {u, v} = ui.probe, cam = ui.view;
+  try {
+    const r = await fetch(`/api/depth_at?camera=${encodeURIComponent(cam)}&u=${u.toFixed(4)}&v=${v.toFixed(4)}`, {cache: 'no-store'});
+    const j = await r.json();
+    if (ui.probe && r.ok) showReading(j);
+  } catch (e) {
+  } finally {
+    probeBusy = false;
+    if (ui.probe && (ui.probe.u !== u || ui.probe.v !== v)) probe();
+  }
+}
+for (const view of [$('rgbView'), $('depthView')]) {
+  const img = view.querySelector('img');
+  const track = e => {
+    const r = contentRect(img), u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
+    if (!img.getAttribute('src') || u < 0 || u > 1 || v < 0 || v > 1) { hideProbe(); return; }
+    ui.probe = {u, v, x: e.clientX, y: e.clientY};
+    drawCross();
+    probe();
+  };
+  view.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') track(e); });
+  view.addEventListener('pointerdown', track);   // touch: tap to probe, the reading stays
+  view.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideProbe(); });
+}
+setInterval(() => { if (ui.probe) probe(); }, 300);   // the scene moves under a still cursor
+window.addEventListener('resize', () => { if (ui.probe) drawCross(); });
+window.addEventListener('scroll', () => { $('chip').hidden = true; }, {passive: true});
+
+syncControls();
+hideProbe();
+poll();
+</script>
+</body>
+</html>

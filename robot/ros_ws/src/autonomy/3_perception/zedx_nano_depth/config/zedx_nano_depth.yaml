@@ -1,0 +1,13 @@
+# zedx_nano_depth parameters. launch/zedx_nano_depth.launch.xml sets backend, model and models_dir from its launch arguments,
+# so change those on the ros2 launch command line; the rest are read from here.
+/**:
+  ros__parameters:
+    backend: neural              # neural (RAFT-Stereo on the GPU) or sgbm (OpenCV, CPU)
+    model: raft-realtime         # neural only: raft-realtime, raft-middlebury or fast-foundation
+    models_dir: ''               # neural weights; '' = $ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth (downloaded on first start)
+    repo: ''                     # fast-foundation only: Fast-FoundationStereo checkout ('' = <models_dir>/Fast-FoundationStereo)
+    match_width: 640             # px; disparity is computed at this width and the depth upscaled to the rectified size
+    max_depth_mm: 4000.0         # farther depth is published as 0 (invalid)
+    input_transport: compressed  # compressed (<eye>/image_raw/compressed, JPEG) or raw (<eye>/image_raw)
+    colorize_near_mm: 100.0      # depth/colorized range: red at near, blue at far
+    colorize_far_mm: 1000.0

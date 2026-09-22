@@ -1,0 +1,44 @@
+<!-- Camera bringup for the Xavier camera hub, which streams one camera at a time:
+     /camera_hub/{status,select_zedx,select_zedx_nano,release} and, for each camera, the camera node and the depth node in
+     namespace /<cam> (/<cam>/{left,right}/..., /<cam>/depth/..., /<cam>/left/image_rect_color).
+     The nodes of the inactive camera wait quietly until it is selected. -->
+<launch>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub"/>
+  <arg name="port" default="8090"/>
+  <arg name="backend" default="neural" description="depth backend: neural or sgbm"/>
+  <arg name="model" default="raft-realtime"/>
+  <arg name="models_dir" default="" description="neural weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
+
+  <include file="$(find-pkg-share zedx_nano_camera)/launch/camera_hub.launch.xml">
+    <arg name="host" value="$(var host)"/>
+    <arg name="port" value="$(var port)"/>
+  </include>
+
+  <!-- ZED X, base camera (frames zedx_{left,right}_camera_optical_frame, from the camera name) -->
+  <node pkg="zedx_nano_camera" exec="zedx_nano_camera_node" name="zedx_camera" namespace="zedx" output="screen">
+    <param from="$(find-pkg-share zedx_nano_camera)/config/zedx_nano_camera.yaml"/>
+    <param name="camera" value="zedx"/>
+    <param name="host" value="$(var host)"/>
+    <param name="port" value="$(var port)"/>
+  </node>
+  <node pkg="zedx_nano_depth" exec="zedx_nano_depth_node" name="zedx_depth" namespace="zedx" output="screen">
+    <param from="$(find-pkg-share zedx_nano_depth)/config/zedx_nano_depth.yaml"/>
+    <param name="backend" value="$(var backend)"/>
+    <param name="model" value="$(var model)"/>
+    <param name="models_dir" value="$(var models_dir)"/>
+  </node>
+
+  <!-- ZED X Nano, wrist camera -->
+  <node pkg="zedx_nano_camera" exec="zedx_nano_camera_node" name="zedx_nano_camera" namespace="zedx_nano" output="screen">
+    <param from="$(find-pkg-share zedx_nano_camera)/config/zedx_nano_camera.yaml"/>
+    <param name="camera" value="zedx_nano"/>
+    <param name="host" value="$(var host)"/>
+    <param name="port" value="$(var port)"/>
+  </node>
+  <node pkg="zedx_nano_depth" exec="zedx_nano_depth_node" name="zedx_nano_depth" namespace="zedx_nano" output="screen">
+    <param from="$(find-pkg-share zedx_nano_depth)/config/zedx_nano_depth.yaml"/>
+    <param name="backend" value="$(var backend)"/>
+    <param name="model" value="$(var model)"/>
+    <param name="models_dir" value="$(var models_dir)"/>
+  </node>
+</launch>

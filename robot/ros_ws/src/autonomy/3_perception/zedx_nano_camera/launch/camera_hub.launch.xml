@@ -1,0 +1,12 @@
+<!-- Camera hub bridge: /camera_hub/status, /camera_hub/select_<camera> and /camera_hub/release (std_srvs/Trigger) -->
+<launch>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub"/>
+  <arg name="port" default="8090"/>
+  <arg name="params_file" default="$(find-pkg-share zedx_nano_camera)/config/camera_hub.yaml"/>
+
+  <node pkg="zedx_nano_camera" exec="camera_hub_node" name="camera_hub" namespace="/" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="host" value="$(var host)"/>
+    <param name="port" value="$(var port)"/>
+  </node>
+</launch>
