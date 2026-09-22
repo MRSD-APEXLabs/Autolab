@@ -68,6 +68,7 @@ install(TARGETS
   move_to_pose_node
   DESTINATION lib/${PROJECT_NAME}
 )
+install(PROGRAMS src/cloud_outlier_filter.py DESTINATION lib/${PROJECT_NAME})
 
 # Testing (optional)
 if(BUILD_TESTING)

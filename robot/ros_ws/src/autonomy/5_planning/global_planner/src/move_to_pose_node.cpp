@@ -844,9 +844,16 @@ int main(int argc, char *argv[])
             if (!live_task_type)
                 RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
 
-            const double PREGRASP_Z_OFFSET = 0.00;
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
+            const double PREGRASP_Z_OFFSET = 0.00;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
+
+            const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
+            pregrasp_pose.position.y += PREGRASP_Y_OFFSET;
+
+            const double PREGRASP_X_OFFSET = 0.1; //  0.1;
+            pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
+
 
             publish_state("PLANNING");
             auto rrt_plan_opt = plan_and_publish_rrt(
@@ -906,7 +913,7 @@ int main(int argc, char *argv[])
             const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
             pregrasp_pose.position.y += PREGRASP_Y_OFFSET;
 
-            const double PREGRASP_X_OFFSET = 0.0; //  0.1;
+            const double PREGRASP_X_OFFSET = 0.1; //  0.1;
             pregrasp_pose.position.x -= PREGRASP_X_OFFSET;
 
 

@@ -3,7 +3,7 @@ sensors:
   - my_pointcloud
 my_pointcloud:
   sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-  point_cloud_topic: /zed_pointcloud
+  point_cloud_topic: /zed_pointcloud_clean
   max_range: 1.5
   point_subsample: 1
   # Self-filter: each robot link body is scaled by padding_scale and grown by

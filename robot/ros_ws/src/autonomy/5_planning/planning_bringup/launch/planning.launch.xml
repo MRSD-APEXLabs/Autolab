@@ -4,6 +4,12 @@
     <arg name="hw_ns" default="xarm"/>
     <arg name="show_rviz" default="true"/>
 
+    <!-- Drops isolated noise points: /zed_pointcloud -> /zed_pointcloud_clean (read by MoveIt octomap) -->
+    <node pkg="global_planner" exec="cloud_outlier_filter.py" name="cloud_outlier_filter" output="screen">
+        <param name="search_radius" value="0.06"/>
+        <param name="min_neighbors" value="8"/>
+    </node>
+
     <include file="$(find-pkg-share xarm_moveit_config)/launch/xarm6_moveit_realmove.launch.py">
         <arg name="robot_ip" value="$(var robot_ip)" />
         <arg name="dof" value="6" />
