@@ -159,9 +159,26 @@ void NavigationExecutive::tick_channel(Channel& channel) {
     }
 
     if (!channel.goal_in_flight) {
+        // Defensive fallback only: on the normal path, goal_in_flight is always true here (the
+        // active_has_changed() branch above already returned for a fresh activation). This can
+        // only be reached if a terminal outcome below did not also clear commanded_condition,
+        // leaving the BT thinking we're still active after we already finished.
         action->set_running();
         return;
     }
+
+    // Declares a terminal outcome to BOTH sides: the BT status (so the BT engine sees the
+    // result) AND the "commanded" condition (so the Sequence stops succeeding, the BT engine
+    // ticks this branch inactive, and sends us Active(false) next tick). Skipping the condition
+    // clear would leave the BT engine believing this branch is still active forever: it would
+    // never send Active(false), our own is_active() would never flip, and this channel would be
+    // permanently wedged (a later command would never redispatch: active_has_changed() would
+    // never fire again).
+    auto finish = [&](void (bt::Action::*set_status)()) {
+        (action->*set_status)();
+        channel.commanded_condition->set(false);
+        channel.goal_in_flight = false;
+    };
 
     // An unknown location name never touches /nav/state at all — nav_api only ever reports
     // it as a one-shot /nav/result rejection. Check that first so a typo fails fast instead
@@ -170,8 +187,7 @@ void NavigationExecutive::tick_channel(Channel& channel) {
     if (result_is_fresh && !nav_result_.empty() && nav_result_.rfind(REJECTED_PREFIX, 0) == 0) {
         RCLCPP_WARN(this->get_logger(), "%s: rejected by nav_api: %s", action->get_label().c_str(),
                     nav_result_.c_str());
-        action->set_failure();
-        channel.goal_in_flight = false;
+        finish(&bt::Action::set_failure);
         return;
     }
 
@@ -186,13 +202,11 @@ void NavigationExecutive::tick_channel(Channel& channel) {
 
     if (state_is_fresh && channel.seen_navigating) {
         if (nav_state_ == NAV_STATE_SUCCEEDED) {
-            action->set_success();
-            channel.goal_in_flight = false;
+            finish(&bt::Action::set_success);
             return;
         }
         if (nav_state_ == NAV_STATE_FAILED || nav_state_ == NAV_STATE_CANCELED) {
-            action->set_failure();
-            channel.goal_in_flight = false;
+            finish(&bt::Action::set_failure);
             return;
         }
     }
@@ -203,8 +217,7 @@ void NavigationExecutive::tick_channel(Channel& channel) {
                      "%s: no response from nav_api within %.1f s — is the navigation stack "
                      "running? (it does not autostart; see autonomy/1_navigation/README.md)",
                      action->get_label().c_str(), nav_response_timeout_);
-        action->set_failure();
-        channel.goal_in_flight = false;
+        finish(&bt::Action::set_failure);
         return;
     }
 
