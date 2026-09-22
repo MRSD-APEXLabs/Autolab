@@ -1,5 +1,20 @@
 import json
+import math
 from behavior_tree_msgs.msg import LabMachineCommand, ManipulationCommand
+from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
+
+
+def make_pose_stamped(x: float, y: float, yaw: float) -> PoseStamped:
+    """Build a map-frame PoseStamped from x, y [m] and yaw [rad] (REP-103: CCW from +x)."""
+    pose = PoseStamped()
+    pose.header.frame_id = 'map'
+    pose.pose.position.x = float(x)
+    pose.pose.position.y = float(y)
+    pose.pose.orientation.z = math.sin(float(yaw) / 2.0)
+    pose.pose.orientation.w = math.cos(float(yaw) / 2.0)
+    return pose
+
 
 STEPS = {
     'pick_base': {
@@ -74,6 +89,27 @@ STEPS = {
         'required_params': ['time_s'],
         'make_msg': None,
         'watch_topic': None,
+    },
+    'go_to': {
+        'msg_type': 'string',
+        'publish_topic': 'behavior/go_to_location_command',
+        'required_params': ['target_machine'],
+        'make_msg': lambda params: String(data=params['target_machine']),
+        'watch_topic': 'behavior/go_to_location_status',
+    },
+    'home': {
+        'msg_type': 'string',
+        'publish_topic': 'behavior/go_to_location_command',
+        'required_params': [],
+        'make_msg': lambda params: String(data='home'),
+        'watch_topic': 'behavior/go_to_location_status',
+    },
+    'go_to_pose': {
+        'msg_type': 'pose',
+        'publish_topic': 'behavior/navigate_to_pose_command',
+        'required_params': ['x', 'y', 'yaw'],
+        'make_msg': lambda params: make_pose_stamped(params['x'], params['y'], params['yaw']),
+        'watch_topic': 'behavior/navigate_to_pose_status',
     },
 }
 

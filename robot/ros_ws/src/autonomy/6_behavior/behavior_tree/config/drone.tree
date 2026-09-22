@@ -31,6 +31,10 @@
 			?
 				[Navigate To Pose]
 		->
+			(Go To Location Commanded)
+			?
+				[Go To Location]
+		->
 			(Arm Commanded)
 			?
 				(Armed)
