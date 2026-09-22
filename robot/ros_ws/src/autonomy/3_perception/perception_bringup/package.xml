@@ -3,11 +3,13 @@
 <package format="3">
   <name>perception_bringup</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Brings up the perception stack (camera hub, camera/depth nodes, camera_perception) without camera_ui's web page.</description>
   <maintainer email="arnavkha@andrew.cmu.edu">Arnav</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>camera_perception</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

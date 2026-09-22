@@ -1,4 +1,4 @@
-# 2_manipulation: ZED X / ZED X Nano cameras, stereo depth, camera UI, perception and live ACT inference
+# 3_perception: ZED X / ZED X Nano cameras, stereo depth, camera UI, perception and live ACT inference
 
 This folder is self-contained. It holds the camera stack and the inference half of the teleop/ACT pipeline, ready
 to move into a larger codebase:
@@ -42,7 +42,7 @@ rectification maps, depth pipeline and ACT preprocessing are copies of `teleop/`
 Build the packages (see [Build](#build)), then on the Thor:
 
 ```bash
-source /opt/ros/jazzy/setup.bash && source ~/ros2_ws/install/setup.bash
+source /opt/ros/humble/setup.bash && source ~/ros2_ws/install/setup.bash
 source /home/labx/apple_server_manip/.venv/bin/activate          # torch for the RAFT depth nodes
 ros2 launch camera_ui camera_ui.launch.xml models_dir:=/home/labx/apple_server_manip/data/models
 ```
@@ -116,7 +116,7 @@ The YOLO weights are in `data/models/yolo/`:
 Run it next to the camera stack (the camera UI launch), or start the stack with it:
 
 ```bash
-source /opt/ros/jazzy/setup.bash && source ~/ros2_ws/install/setup.bash
+source /opt/ros/humble/setup.bash && source ~/ros2_ws/install/setup.bash
 source /home/labx/apple_server_manip/.venv/bin/activate
 ros2 launch camera_perception perception.launch.xml                          # camera stack already running
 ros2 launch camera_perception perception.launch.xml with_cameras:=true \
@@ -238,7 +238,7 @@ two depth periods). Orientation is held unless `--enable-rotation` is given. The
 - `--camera-source ros --ros-namespace /zedx_nano` reads `left/image_rect_color`,
   `depth/image_rect` and `depth/camera_info` from a running `zedx_nano_depth` node, so one
   depth network serves both the robot stack and the policy. Source ROS first
-  (`source /opt/ros/jazzy/setup.bash`) and use the same `ROS_DOMAIN_ID` as the nodes. The
+  (`source /opt/ros/humble/setup.bash`) and use the same `ROS_DOMAIN_ID` as the nodes. The
   `--depth-*` options don't apply here; the depth node's parameters do. It runs a private
   rclpy context, so it can be embedded in a process that already uses rclpy.
 
@@ -269,11 +269,14 @@ Lower-level pieces:
 
 ### Build
 
-The packages were tested with ROS 2 Jazzy. For Humble, only the Python 3.10 syntax was checked. Link or copy them into a workspace:
+The packages were originally built and tested against ROS 2 Jazzy (Python 3.12); this repo runs Humble
+(Python 3.10). Audited 2026-09-22: no Jazzy-only rclpy/launch API or Python 3.11+/3.12-only syntax found in
+`zedx_nano_camera`, `zedx_nano_depth`, `camera_ui` or `camera_perception` — none was ever run on Humble though,
+so treat a first build as unverified. Link or copy them into a workspace:
 
 ```bash
 mkdir -p ~/ros2_ws/src && ln -s /home/labx/apple_server_manip/2_manipulation ~/ros2_ws/src/2_manipulation
-cd ~/ros2_ws && source /opt/ros/jazzy/setup.bash
+cd ~/ros2_ws && source /opt/ros/humble/setup.bash
 colcon build --packages-select zedx_nano_camera zedx_nano_depth camera_ui camera_perception
 source install/setup.bash
 ```
@@ -399,7 +402,7 @@ The hub bridge, `camera_hub_node`, is not namespaced:
 
 ```bash
 cd 2_manipulation
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # keep test traffic off the robot network
 ZEDX_NANO_DEPTH_TEST_MODELS=/home/labx/apple_server_manip/data/models \
   ../.venv/bin/python -m pytest -q -p no:cacheprovider zedx_nano_camera/test zedx_nano_depth/test act_inference/tests camera_ui/test
