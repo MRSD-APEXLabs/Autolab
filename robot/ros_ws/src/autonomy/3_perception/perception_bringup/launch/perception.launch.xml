@@ -1,6 +1,6 @@
 <!-- Brings up the full perception stack: camera_hub_node, a camera + depth node per camera (camera_ui's
      cameras.launch.xml, via camera_perception's with_cameras), and camera_perception's AprilTag/YOLO/point-cloud
-     nodes. Deliberately excludes camera_ui's web page (camera_ui.launch.xml / ui_node, port 8001) -- start that
+     nodes. Deliberately excludes camera_ui's web page (camera_ui.launch.xml / ui_node, port 8001); start that
      separately if you want the browser UI. See 3_perception/README.md for the full topic list. -->
 <launch>
   <arg name="zedx" default="true" description="run perception on the ZED X (/zedx)"/>
