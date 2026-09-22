@@ -1,0 +1,10 @@
+# camera_hub parameters. launch/camera_hub.launch.xml sets host and port from its launch arguments,
+# so change those on the ros2 launch command line; the rest are read from here.
+/**:
+  ros__parameters:
+    host: 192.168.1.101          # Xavier running the camera hub (2_manipulation/xavier_camera_hub, camera-hub.service)
+    port: 8090
+    cameras: [zedx, zedx_nano]   # one ~/select_<camera> service each
+    poll_period: 1.0             # s between GET /status polls; ~/status is published after each one
+    timeout: 3.0                 # s; HTTP timeout of a status poll
+    select_timeout: 30.0         # s; how long a select waits for the camera's first frame

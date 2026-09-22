@@ -1,0 +1,19 @@
+<!-- A camera feed from the Xavier stream server: <namespace>/{left,right}/{image_raw,image_raw/compressed,camera_info}.
+     camera:=zedx or zedx_nano picks a camera of the camera hub (use a matching namespace, e.g. namespace:=zedx). -->
+<launch>
+  <arg name="namespace" default="zedx_nano"/>
+  <arg name="camera" default="" description="hub camera: zedx or zedx_nano ('' = the root API, i.e. the Nano); also names the frames"/>
+  <arg name="name" default="zedx_nano_camera" description="node name"/>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub"/>
+  <arg name="port" default="8090"/>
+  <arg name="sensor" default="stereo" description="stereo, left or right"/>
+  <arg name="params_file" default="$(find-pkg-share zedx_nano_camera)/config/zedx_nano_camera.yaml"/>
+
+  <node pkg="zedx_nano_camera" exec="zedx_nano_camera_node" name="$(var name)" namespace="$(var namespace)" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="host" value="$(var host)"/>
+    <param name="port" value="$(var port)"/>
+    <param name="camera" value="$(var camera)"/>
+    <param name="sensor" value="$(var sensor)"/>
+  </node>
+</launch>

@@ -1,0 +1,15 @@
+# zedx_nano_camera parameters. launch/zedx_nano_camera.launch.xml sets host, port, camera and sensor from its launch
+# arguments, so change those on the ros2 launch command line; the rest are read from here.
+/**:
+  ros__parameters:
+    host: 192.168.1.101          # Xavier running the camera hub (camera-hub.service) or the old Nano-only server
+    port: 8090
+    camera: ''                   # hub camera: zedx or zedx_nano; '' = the root API, which serves the Nano
+    sensor: stereo               # stereo (synchronized left+right pairs), left or right
+    timeout: 3.0                 # s; HTTP timeout, also the longest tolerated stall before reconnecting
+    left_frame_id: ''            # '' = <camera>_left_camera_optical_frame (zedx_nano_... for camera '')
+    right_frame_id: ''           # '' = <camera>_right_camera_optical_frame
+    clock_sync_period: 10.0      # s between Xavier clock re-synchronizations (keeps stamps from drifting)
+    max_sync_uncertainty: 0.05   # s; a sync with a larger round-trip half-width is rejected
+    reconnect_delay: 1.0         # s
+    inactive_poll_period: 1.0    # s between checks while the hub streams another camera

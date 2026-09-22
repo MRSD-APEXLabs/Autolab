@@ -1,0 +1,28 @@
+<!-- Camera UI on http://<ui_host>:<ui_port>/: switch the Xavier camera hub between the ZED X and the ZED X Nano and view
+     the active camera's RGB and depth. with_cameras:=true (default) also starts cameras.launch.xml (hub, camera and depth nodes). -->
+<launch>
+  <arg name="with_cameras" default="true" description="also launch cameras.launch.xml"/>
+  <arg name="ui_host" default="0.0.0.0" description="address the page is served on"/>
+  <arg name="ui_port" default="8001"/>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub (with_cameras only)"/>
+  <arg name="port" default="8090"/>
+  <arg name="backend" default="neural" description="depth backend: neural or sgbm (with_cameras only)"/>
+  <arg name="model" default="raft-realtime"/>
+  <arg name="models_dir" default="" description="neural weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
+  <!-- not "params_file": an include sees this file's launch arguments, and camera_hub.launch.xml has its own params_file -->
+  <arg name="ui_params_file" default="$(find-pkg-share camera_ui)/config/camera_ui.yaml"/>
+
+  <include file="$(find-pkg-share camera_ui)/launch/cameras.launch.xml" if="$(var with_cameras)">
+    <arg name="host" value="$(var host)"/>
+    <arg name="port" value="$(var port)"/>
+    <arg name="backend" value="$(var backend)"/>
+    <arg name="model" value="$(var model)"/>
+    <arg name="models_dir" value="$(var models_dir)"/>
+  </include>
+
+  <node pkg="camera_ui" exec="camera_ui_node" name="camera_ui" output="screen">
+    <param from="$(var ui_params_file)"/>
+    <param name="host" value="$(var ui_host)"/>
+    <param name="port" value="$(var ui_port)"/>
+  </node>
+</launch>

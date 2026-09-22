@@ -1,4 +1,42 @@
-<!-- PERCEPTION -->
+<!-- Brings up the full perception stack: camera_hub_node, a camera + depth node per camera (camera_ui's
+     cameras.launch.xml, via camera_perception's with_cameras), and camera_perception's AprilTag/YOLO/point-cloud
+     nodes. Deliberately excludes camera_ui's web page (camera_ui.launch.xml / ui_node, port 8001); start that
+     separately if you want the browser UI. See 3_perception/README.md for the full topic list. -->
 <launch>
+  <arg name="zedx" default="true" description="run perception on the ZED X (/zedx)"/>
+  <arg name="zedx_nano" default="true" description="run perception on the ZED X Nano (/zedx_nano)"/>
+  <arg name="yolo_models_dir" default="$(find-pkg-share camera_perception)/models/yolo"/>
+  <arg name="zedx_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the ZED X"/>
+  <arg name="zedx_nano_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the Nano"/>
+  <arg name="device" default="cuda:0" description="YOLO device (cpu without CUDA)"/>
+  <arg name="cloud_mode" default="live" description="ZED X point cloud: live or snapshot"/>
+  <arg name="fresh" default="false" description="snapshot: ignore the cached cloud; clear the octomap before the first cloud"/>
+  <arg name="top_camera_tf" default="true" description="publish top_camera -> zedx_left_camera_optical_frame (identity)"/>
+  <arg name="zedx_params_file" default="$(find-pkg-share camera_perception)/config/zedx.yaml"/>
+  <arg name="zedx_nano_params_file" default="$(find-pkg-share camera_perception)/config/zedx_nano.yaml"/>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub"/>
+  <arg name="port" default="8090"/>
+  <arg name="depth_backend" default="neural" description="neural or sgbm"/>
+  <arg name="depth_models_dir" default="" description="RAFT weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
 
+  <include file="$(find-pkg-share camera_perception)/launch/perception.launch.xml">
+    <arg name="zedx" value="$(var zedx)"/>
+    <arg name="zedx_nano" value="$(var zedx_nano)"/>
+    <arg name="yolo_models_dir" value="$(var yolo_models_dir)"/>
+    <arg name="zedx_model" value="$(var zedx_model)"/>
+    <arg name="zedx_nano_model" value="$(var zedx_nano_model)"/>
+    <arg name="device" value="$(var device)"/>
+    <arg name="cloud_mode" value="$(var cloud_mode)"/>
+    <arg name="fresh" value="$(var fresh)"/>
+    <arg name="top_camera_tf" value="$(var top_camera_tf)"/>
+    <arg name="zedx_params_file" value="$(var zedx_params_file)"/>
+    <arg name="zedx_nano_params_file" value="$(var zedx_nano_params_file)"/>
+    <!-- with_cameras starts camera_ui's cameras.launch.xml: camera_hub_node + a camera and depth node per
+         camera. It does NOT start camera_ui's web page; that only runs from camera_ui.launch.xml. -->
+    <arg name="with_cameras" value="true"/>
+    <arg name="host" value="$(var host)"/>
+    <arg name="port" value="$(var port)"/>
+    <arg name="depth_backend" value="$(var depth_backend)"/>
+    <arg name="depth_models_dir" value="$(var depth_models_dir)"/>
+  </include>
 </launch>
