@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fast DDS profile used by autonomy/1_navigation/run.sh: UDPv4 only, NO SHARED MEMORY.
+
+  Why.  On 2026-09-22 a hardware run showed controller_server's TF buffer frozen at a fixed
+  timestamp (map->odom 1790106846.652078, map->base_footprint 1790106845.761188) for all 306
+  "Lookup would require extrapolation into the future" errors, while in the SAME run
+  swerve_bridge published odom->base_footprint at 50 Hz throughout and AMCL's own buffer was
+  fresh to the millisecond.  One subscriber stopped receiving /tf, permanently, ~1 s after the
+  Nav2 lifecycle finished activating; everyone else was fine.  That is a per-reader transport
+  failure, not a publisher or a clock problem.
+
+  The robot container runs with ipc:host and net:host, so every ROS process on this machine -
+  this stack, the AutoLab robot_1 stack, the domain_bridge, stray ros2 daemons from other
+  ROS_DOMAIN_IDs - shares one /dev/shm and one set of Fast DDS shared-memory ports.  A reader
+  whose port ring is overrun (rviz2 on a Jetson is the usual candidate: it takes /tf, /odom,
+  costmaps and the Velodyne cloud) can wedge that port, and a process that dies abnormally
+  leaves its segment behind - rviz2 segfaulted here the run before.  Taking the shared-memory
+  transport out of the picture removes the whole failure mode; the cost is that localhost
+  traffic goes through the UDP loopback, which this stack's message rates can afford.
+
+  Opt out with SWERVE_NAV_SHM=1 to get stock Fast DDS behaviour back.
+
+  Buffer sizes are kept under this machine's limits (net.core.rmem_max 1048576,
+  net.core.wmem_max 212992); the kernel silently clamps anything larger.
+-->
+<dds xmlns="http://www.eprosima.com">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>nav_udpv4</transport_id>
+        <type>UDPv4</type>
+        <sendBufferSize>212992</sendBufferSize>
+        <receiveBufferSize>1048576</receiveBufferSize>
+        <maxMessageSize>65500</maxMessageSize>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="nav_udp_only" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>nav_udpv4</transport_id>
+        </userTransports>
+        <!-- false = do not also add the builtin UDPv4 + SHM pair. -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

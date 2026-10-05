@@ -147,3 +147,73 @@ def test_node_rejects_unknown_transport():
                                                Parameter('input_transport', value='theora')])
     finally:
         rclpy.try_shutdown()
+
+
+def test_temporal_median_trades_lag_for_less_flicker():
+    """The static base camera's setting: flicker falls, a zero in the minority does not, the lag is bounded."""
+    from zedx_nano_depth.depth_node import TemporalMedian
+
+    rng = np.random.default_rng(0)
+    truth = 900
+    frames = [(truth + rng.normal(0, 12, (8, 8))).astype(np.uint16) for _ in range(40)]
+
+    assert TemporalMedian(1)(frames[0]) is frames[0]           # off: the same array, no copy
+
+    smooth = TemporalMedian(5)
+    out = [smooth(frame, 0.1 * i) for i, frame in enumerate(frames)]
+    assert np.std(out[5:]) < 0.6 * np.std(frames[5:])          # ~1/sqrt(5) of the flicker
+    assert abs(np.mean(out[5:]) - truth) < 2                   # and no bias
+
+    smooth = TemporalMedian(3)
+    depth = np.full((4, 4), 800, np.uint16)
+    smooth(depth, 1.0), smooth(depth, 1.1)
+    assert (smooth(np.zeros((4, 4), np.uint16), 1.2) == 800).all()   # one invalid frame of three: depth kept
+    assert (smooth(np.zeros((4, 4), np.uint16), 1.3) == 0).all()     # two of three: invalid, as it should be
+
+    # a step in the scene is fully through the median after `frames` frames, not sooner or later
+    smooth = TemporalMedian(3)
+    for stamp in (2.0, 2.1, 2.2):
+        smooth(np.full((4, 4), 500, np.uint16), stamp)
+    steps = [smooth(np.full((4, 4), 700, np.uint16), 2.3 + 0.1 * i).mean() for i in range(3)]
+    assert steps == [500, 700, 700]
+
+
+def test_temporal_median_drops_the_window_on_a_gap_or_a_new_shape():
+    """A camera switch or a new calibration must not average two different scenes."""
+    from zedx_nano_depth.depth_node import TemporalMedian
+
+    smooth = TemporalMedian(3, gap_s=1.0)
+    for stamp in (0.0, 0.1):
+        smooth(np.full((4, 4), 500, np.uint16), stamp)
+    assert (smooth(np.full((4, 4), 900, np.uint16), 5.0) == 900).all()      # 4.9 s gap: nothing older is kept
+    assert (smooth(np.full((6, 6), 300, np.uint16), 5.1) == 300).all()      # new shape: likewise
+    smooth.reset()
+    assert (smooth(np.full((6, 6), 800, np.uint16), 5.2) == 800).all()
+
+
+def test_a_model_that_cannot_be_loaded_falls_back_instead_of_killing_the_node(monkeypatch):
+    """A deployment without the Fast-FoundationStereo checkout still gets depth, and is told why it is noisier."""
+    from zedx_nano_depth import depth_node
+
+    loaded = []
+
+    def fake_backend(backend, model=None, repo=None, models_dir=None, **_):
+        loaded.append(model)
+        if model == 'fast-foundation':
+            raise RuntimeError('Fast-FoundationStereo checkout not found at /nowhere')
+        return object()
+
+    monkeypatch.setattr(depth_node, 'make_backend', fake_backend)
+    rclpy.init()
+    try:
+        node = depth_node.NanoDepthNode(namespace=f'/test_fallback_{os.getpid()}', parameter_overrides=[
+            Parameter('model', value='fast-foundation')])
+        assert loaded == ['fast-foundation', 'raft-realtime']
+        node.stop()
+        node.destroy_node()
+
+        monkeypatch.setattr(depth_node, 'make_backend', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('no GPU')))
+        with pytest.raises(RuntimeError, match='no GPU'):        # the fallback itself failing is still fatal
+            depth_node.NanoDepthNode(namespace=f'/test_fallback2_{os.getpid()}')
+    finally:
+        rclpy.shutdown()

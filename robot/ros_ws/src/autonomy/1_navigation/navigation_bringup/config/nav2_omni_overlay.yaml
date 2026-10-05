@@ -11,7 +11,7 @@ controller_server:
   ros__parameters:
     FollowPath:
       # Holonomic travel does not need a turn-before-driving shim.
-      plugin: "nav2_mppi_controller::MPPIController"
+      plugin: "navigation_bringup::FreshOdomMPPIController"
       motion_model: "Omni"
       vy_max: 0.30
       # FINAL HEADING DURING THE APPROACH (2026-09-21). Before, the goal heading only counted within 0.20 m of the goal

@@ -74,7 +74,11 @@ the raw left/right preview.
 - `ui_host` (0.0.0.0) and `ui_port` (8001): where the page is served. The page can switch cameras, so use
   `ui_host:=127.0.0.1` to keep it off the network.
 - `host` and `port`: the Xavier hub (192.168.1.101, 8090).
-- `backend`, `model` and `models_dir`: passed to both depth nodes.
+- `backend`, `models_dir` and `repo`: passed to both depth nodes.
+- `zedx_depth_model` (fast-foundation) and `zedx_nano_depth_model` (`model`, i.e. raft-realtime): the depth
+  model per camera. The base camera takes accuracy over rate, the wrist camera the rate
+  (see [Depth models](#depth-models)). `model` sets the default for any camera without its own argument.
+- `zedx_temporal_frames` (5) and `zedx_nano_temporal_frames` (1): the temporal median per camera.
 - `ui_params_file`: the UI parameters, `config/camera_ui.yaml` by default.
 
 `ros2 launch camera_ui cameras.launch.xml` starts the camera stack without the page.
@@ -195,7 +199,14 @@ cores, mostly for the full-resolution tag detection. The Nano node processes eve
 - `top_camera_tf` (true).
 - `zedx_params_file`, `zedx_nano_params_file`: `config/zedx.yaml` and `config/zedx_nano.yaml` hold every other
   parameter, with comments.
-- `with_cameras` (false), `host`, `port`, `depth_backend`, `depth_models_dir`: for starting the camera stack too.
+- `with_cameras` (false), `host`, `port`, `depth_backend`, `depth_models_dir`, `depth_repo`: for starting the
+  camera stack too. The per-camera depth models are the camera stack's defaults; override them there.
+  `perception_bringup` passes the same arguments through.
+
+`camera_perception`, `camera_ui`, `zedx_nano_camera` and `zedx_nano_depth` are shared with
+`apple_server_manip/2_manipulation`, where they are developed on Jazzy. The two copies are kept identical
+except that this one ships the YOLO weights inside `camera_perception` (`models/yolo`, installed by
+`setup.py`) and defaults `yolo_models_dir` to the package share. Port changes both ways.
 
 ## Live ACT inference
 
@@ -374,6 +385,7 @@ The hub bridge, `camera_hub_node`, is not namespaced:
 | depth | `models_dir` | '' | '' = `$ZEDX_NANO_DEPTH_MODELS` or `~/.cache/zedx_nano_depth`. Missing RAFT weights are downloaded |
 | depth | `repo` | '' | fast-foundation only: checkout path ('' = `<models_dir>/Fast-FoundationStereo`). The repo's copy is `third_party/Fast-FoundationStereo` |
 | depth | `match_width` | 640 | px; the width at which disparity is computed |
+| depth | `temporal_frames` | 1 | >1 publishes the per-pixel median of that many frames (the camera stack gives the ZED X 5). For a camera that does not move; the window is dropped after a 1 s gap or a new calibration |
 | depth | `max_depth_mm` | 4000 | farther depth is published as 0 |
 | depth | `input_transport` | compressed | compressed (JPEG) or raw (`image_raw`) |
 | depth | `colorize_near_mm`, `colorize_far_mm` | 100, 1000 | `depth/colorized` range |
@@ -386,6 +398,38 @@ The hub bridge, `camera_hub_node`, is not namespaced:
 | camera_ui | `max_fps`, `jpeg_quality` | 15, 80 | per browser stream |
 | camera_ui | `stale_after` | 1.0 s | older frames are marked stale on the page |
 | camera_ui | `hub_node` | /camera_hub | the hub bridge's status topic and services |
+
+### Depth models
+
+Measured on the Jazzy machine (Thor, CUDA) against the ZED X: 10 stereo pairs of the room and floor at 1.2-3.7 m,
+and 10 of the Opentrons deck at 0.86 m. *Flicker* is the median standard deviation of one pixel's depth over the
+pairs of a still scene; *plane residual* is what a plane fitted in 15x15 windows leaves, i.e. how rough a locally
+flat surface looks.
+
+| ZED X, `match_width` 640 | flicker (room) | flicker (deck) | plane residual | per pair |
+|---|---|---|---|---|
+| sgbm | 33.7 mm | | 31.9 mm | 29 ms |
+| raft-realtime | 34.7 mm | 35.7 mm | 2.1 mm | 51 ms |
+| raft-realtime + median of 5 | | 10.5 mm | 2.6 mm | 51 ms |
+| raft-middlebury | 17.6 mm | | 8.9 mm | 481 ms |
+| fast-foundation | 6.1 mm | 11.4 mm | 1.1 mm | 171 ms |
+| **fast-foundation + median of 5** | | **3.2 mm** | 1.1 mm | 171 ms |
+
+So the camera stack runs the ZED X on fast-foundation with `temporal_frames: 5` (~6-9 fps, which the base camera
+can afford: perception caps at 10 Hz and the point cloud at 5 Hz) and leaves the Nano on raft-realtime with no
+median, because the visual servo needs the rate and the low lag, not the millimetres. The median is per pixel over
+the last N frames (`np.partition`, 9 ms); its window is dropped when the input stops for a second or the
+calibration changes, so a camera switch never mixes two scenes.
+
+fast-foundation is Fast-FoundationStereo. **Its checkout is not in this repo**: point `repo` at one (or put it in
+`<models_dir>/Fast-FoundationStereo`, or set `FAST_FOUNDATION_STEREO_DIR`), with its
+`pretrained_models/model_best_bp2_serialize.pth`. Without it the node logs the error and falls back to
+raft-realtime, so the stack keeps publishing depth — noisier, and the log says why.
+
+Matching at 960 instead of 640 does not help (18.4 mm on the deck, twice the time), and neither does raising the
+hub's JPEG quality: compressing the pairs again at quality 60 wrecks RAFT (plane residual 5.6 -> 42.3 mm) but
+barely touches fast-foundation (2.4 -> 5.1 mm). What remains is the stereo geometry: with fx 365 px at 960 and a
+120.02 mm baseline, one pixel of disparity error is 11 mm at 0.7 m and grows with the square of the range.
 
 ### Stamps, frames and clocks
 

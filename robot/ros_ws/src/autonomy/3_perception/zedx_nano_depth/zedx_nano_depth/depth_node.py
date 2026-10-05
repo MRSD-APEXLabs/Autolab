@@ -13,7 +13,9 @@ Publishes, with the stamp and frame of the left image:
   left/image_rect_color  sensor_msgs/Image bgr8: the rectified left image the depth belongs to
   depth/colorized        bgr8 preview (near red, far blue, invalid black), computed only while subscribed
 
-Left and right are paired by exact stamp. The newest pair is processed on a worker thread and
+`temporal_frames` > 1 publishes the per-pixel median of that many depth frames, which is what the static
+base camera wants: the matcher's frame-to-frame flicker falls roughly as 1/sqrt(frames) at the cost of as many
+frames of lag. Left and right are paired by exact stamp. The newest pair is processed on a worker thread and
 pairs that arrive meanwhile are dropped, not queued, so latency stays at one compute period.
 The node exits if the depth backend fails (e.g. its GPU worker process dies). Without input
 (the camera hub streams another camera) it idles and resumes with the next pair.
@@ -36,6 +38,7 @@ from .sync import PairBuffer
 
 QOS = QoSProfile(depth=2)
 TRANSPORTS = ('compressed', 'raw')
+FALLBACK_MODEL = 'raft-realtime'   # always available: its weights are downloaded when they are missing
 
 
 def camera_info_msg(fields):
@@ -51,6 +54,37 @@ def calibration_key(left, right):
                  for info in (left, right))
 
 
+class TemporalMedian:
+    """Per-pixel median of the last `frames` depth images, for a camera that does not move.
+
+    A zero (no depth) is only a small value to a median, so a pixel keeps its depth as long as most of the window
+    has one, and goes invalid when most of it does not. The window is dropped when the input stops for longer than
+    `gap_s` (the hub switching cameras) or the image changes shape, so frames of another scene never mix in.
+    """
+
+    def __init__(self, frames, gap_s=1.0):
+        self.frames = max(1, int(frames))
+        self.gap_s = gap_s
+        self._window = []
+        self._last_stamp = None
+
+    def reset(self):
+        self._window.clear()
+
+    def __call__(self, depth, stamp_s=None):
+        if self.frames == 1:
+            return depth
+        if stamp_s is not None and self._last_stamp is not None and abs(stamp_s - self._last_stamp) > self.gap_s:
+            self.reset()
+        self._last_stamp = stamp_s
+        if self._window and self._window[0].shape != depth.shape:
+            self.reset()
+        self._window.append(depth)
+        del self._window[:-self.frames]
+        middle = len(self._window) // 2
+        return np.partition(np.stack(self._window), middle, axis=0)[middle]
+
+
 class NanoDepthNode(Node):
     def __init__(self, **kwargs):
         # kwargs go to rclpy Node (namespace, parameter_overrides, context, ...) for embedding and tests
@@ -61,6 +95,7 @@ class NanoDepthNode(Node):
         models_dir = self.declare_parameter('models_dir', '').value
         self.match_width = int(self.declare_parameter('match_width', 640).value)
         self.max_depth_mm = float(self.declare_parameter('max_depth_mm', 4000.0).value)
+        self.smooth = TemporalMedian(self.declare_parameter('temporal_frames', 1).value)
         transport = self.declare_parameter('input_transport', 'compressed').value
         self.colorize_range = (float(self.declare_parameter('colorize_near_mm', 100.0).value),
                                float(self.declare_parameter('colorize_far_mm', 1000.0).value))
@@ -69,7 +104,7 @@ class NanoDepthNode(Node):
 
         self.get_logger().info(f'Loading the {backend} depth backend'
                                + (' (missing weights are downloaded on the first start)' if backend == 'neural' else ''))
-        self.backend = make_backend(backend, model=model, repo=repo or None, models_dir=models_dir or None)
+        self.backend = self._load_backend(backend, model, repo, models_dir)
         self.get_logger().info(f'Depth backend ready: {getattr(self.backend, "describe", lambda: {"backend": backend})()}')
 
         self.bridge = CvBridge()
@@ -100,6 +135,21 @@ class NanoDepthNode(Node):
         self.create_timer(30.0, self._report)
 
     # -- inputs -------------------------------------------------------------------------------
+    def _load_backend(self, backend, model, repo, models_dir):
+        """The requested backend, or raft-realtime when that one cannot be loaded.
+
+        fast-foundation needs a checkout that a deployment may not have. Falling back keeps the camera stack
+        publishing depth, at more noise, instead of leaving the robot with none; the error says what was missing.
+        """
+        try:
+            return make_backend(backend, model=model, repo=repo or None, models_dir=models_dir or None)
+        except Exception as exc:
+            if backend != 'neural' or model == FALLBACK_MODEL:
+                raise
+            self.get_logger().error(f'Depth model {model!r} did not load ({exc}); '
+                                    f'falling back to {FALLBACK_MODEL}, which is noisier')
+            return make_backend(backend, model=FALLBACK_MODEL, models_dir=models_dir or None)
+
     def _on_info(self, eye, msg):
         self._infos[eye] = msg
 
@@ -138,9 +188,11 @@ class NanoDepthNode(Node):
                                       backend=self.backend)
         self._rect_info = camera_info_msg(rectifier.rectified_camera_info_fields())
         self._key = key
+        self.smooth.reset()
         self.get_logger().info(f'Rectifying {rectifier.size[0]}x{rectifier.size[1]} (fx {rectifier.fx:.1f} px, '
                                f'baseline {rectifier.baseline_mm:.2f} mm), matching at '
-                               f'{self._matcher.match_size[0]}x{self._matcher.match_size[1]}')
+                               f'{self._matcher.match_size[0]}x{self._matcher.match_size[1]}'
+                               + (f', median of {self.smooth.frames} frames' if self.smooth.frames > 1 else ''))
 
     def _work(self):
         while not self._stop.is_set():
@@ -166,6 +218,8 @@ class NanoDepthNode(Node):
                     self._set_rectifier(key, rectifier)
                 t0 = time.monotonic()
                 left_rect, depth = self._matcher.compute(left, right)
+                stamp = left_msg.header.stamp
+                depth = self.smooth(depth, stamp.sec + 1e-9 * stamp.nanosec)
                 self._compute_s += time.monotonic() - t0
             except Exception as exc:
                 self.fatal = exc

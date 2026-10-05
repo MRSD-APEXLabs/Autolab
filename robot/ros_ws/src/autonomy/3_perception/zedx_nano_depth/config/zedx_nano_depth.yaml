@@ -8,6 +8,8 @@
     repo: ''                     # fast-foundation only: Fast-FoundationStereo checkout ('' = <models_dir>/Fast-FoundationStereo)
     match_width: 640             # px; disparity is computed at this width and the depth upscaled to the rectified size
     max_depth_mm: 4000.0         # farther depth is published as 0 (invalid)
+    temporal_frames: 1           # >1 publishes the median of that many depth frames: less flicker, as many frames of lag.
+                                 # For a camera that does not move; the camera stack gives the ZED X 5
     input_transport: compressed  # compressed (<eye>/image_raw/compressed, JPEG) or raw (<eye>/image_raw)
     colorize_near_mm: 100.0      # depth/colorized range: red at near, blue at far
     colorize_far_mm: 1000.0

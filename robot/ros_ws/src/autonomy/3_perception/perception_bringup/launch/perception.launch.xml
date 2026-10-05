@@ -17,7 +17,11 @@
   <arg name="host" default="192.168.1.101" description="Xavier running the camera hub"/>
   <arg name="port" default="8090"/>
   <arg name="depth_backend" default="neural" description="neural or sgbm"/>
-  <arg name="depth_models_dir" default="" description="RAFT weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
+  <arg name="depth_models_dir" default="" description="neural weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
+  <!-- The ZED X runs fast-foundation with a temporal median and the Nano raft-realtime; those defaults, and
+       zedx_depth_model, zedx_nano_depth_model, zedx_temporal_frames, zedx_nano_temporal_frames, live in
+       camera_ui/launch/cameras.launch.xml and can be overridden on this command line. -->
+  <arg name="depth_repo" default="" description="Fast-FoundationStereo checkout ('' = &lt;depth_models_dir&gt;/Fast-FoundationStereo)"/>
 
   <include file="$(find-pkg-share camera_perception)/launch/perception.launch.xml">
     <arg name="zedx" value="$(var zedx)"/>
@@ -38,5 +42,6 @@
     <arg name="port" value="$(var port)"/>
     <arg name="depth_backend" value="$(var depth_backend)"/>
     <arg name="depth_models_dir" value="$(var depth_models_dir)"/>
+    <arg name="depth_repo" value="$(var depth_repo)"/>
   </include>
 </launch>

@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>visual_servoing</name>
+  <version>0.1.0</version>
+  <description>Visual servo grasp of a well plate with the xArm6's wrist ZED X Nano: YOLO oriented boxes located with the stereo depth, a position-based servo to a hover pose above the plate, then the Camera-Edge descend / FSR close / lift sequence. Serves the Camera-Edge control WebSocket (port 8765) for Autolab's manipulation_executive.</description>
+  <maintainer email="arnavkha@andrew.cmu.edu">Arker123</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-websockets</exec_depend>
+  <!-- YoloDetector and Intrinsics (camera_perception), image + depth pairing (zedx_nano_depth.sync) -->
+  <exec_depend>camera_perception</exec_depend>
+  <exec_depend>zedx_nano_depth</exec_depend>
+  <!-- pip, not rosdep: xarm-python-sdk, ultralytics (see requirements.txt) -->
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

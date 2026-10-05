@@ -9,9 +9,12 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>nav2_core</depend>
+  <depend>nav2_mppi_controller</depend>
+  <depend>nav2_rotation_shim_controller</depend>
   <depend>pluginlib</depend>
   <depend>nav2_smac_planner</depend>
   <depend>nav_msgs</depend>
+  <depend>tf2_ros</depend>
 
   <exec_depend>swerve_navigation</exec_depend>
   <exec_depend>launch</exec_depend>
@@ -20,7 +23,6 @@
   <exec_depend>xacro</exec_depend>
   <exec_depend>joy</exec_depend>
   <exec_depend>rviz2</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>velodyne_driver</exec_depend>
   <exec_depend>velodyne_pointcloud</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
@@ -34,8 +36,6 @@
   <exec_depend>nav2_waypoint_follower</exec_depend>
   <exec_depend>nav2_velocity_smoother</exec_depend>
   <exec_depend>nav2_collision_monitor</exec_depend>
-  <exec_depend>nav2_mppi_controller</exec_depend>
-  <exec_depend>nav2_rotation_shim_controller</exec_depend>
   <exec_depend>nav2_costmap_2d</exec_depend>
 
   <export>

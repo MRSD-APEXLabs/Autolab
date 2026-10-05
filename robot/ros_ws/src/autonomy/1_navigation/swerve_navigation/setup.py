@@ -15,7 +15,7 @@ setup(
     maintainer='labx',
     maintainer_email='arnavkha@andrew.cmu.edu',
     description='Navigation nodes for the MK5 swerve base: hardware bridge, lidar pipeline, '
-                'teleop, cmd_vel mux, goal helpers and the /nav topic API.',
+                'teleop, cmd_vel mux, controller path adapter, goal helpers and the /nav API.',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
@@ -26,6 +26,7 @@ setup(
             'point_to_goal = swerve_navigation.point_to_goal:main',
             'location_markers = swerve_navigation.location_markers:main',
             'nav_api = swerve_navigation.nav_api:main',
+            'follow_path_adapter = swerve_navigation.follow_path_adapter:main',
         ],
     },
 )

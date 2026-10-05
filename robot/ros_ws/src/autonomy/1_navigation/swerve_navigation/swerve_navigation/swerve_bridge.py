@@ -58,6 +58,7 @@ from rclpy.logging import get_logger
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.signals import SignalHandlerOptions
+from rclpy.subscription import Subscription
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
@@ -605,7 +606,7 @@ class Drivetrain:
 
     def __init__(self, *, target: str, site_packages: str, tuner_constants_dir: str,
                  work_dir: str, odometry_hz: float, drive_request_type: str,
-                 deadband: float, rotational_deadband: float, logger) -> None:
+                 deadband: float, rotational_deadband: float, diagnostics: bool, logger) -> None:
         if target not in (TARGET_HARDWARE, TARGET_SIMULATION):
             raise ValueError(f'invalid target {target!r}')
         request_type_name = drive_request_type_name(drive_request_type)
@@ -635,9 +636,15 @@ class Drivetrain:
             if not os.path.realpath(phoenix6.__file__).startswith(package_root):
                 raise TargetVerificationError(
                     f'phoenix6 was imported from {phoenix6.__file__}, not from {site_packages}')
-            if self._simulation:
-                # Keep the diagnostics server (TCP 1250, Tuner X) closed in simulation.  On
-                # hardware it is left alone because the user works with Tuner X.
+            if self._simulation or not diagnostics:
+                # The diagnostics server (TCP 1250, Tuner X) is OFF by default, on hardware too.
+                # It used to be left running here "because the user works with Tuner X", and on
+                # this robot its start is what immediately precedes the 50 Hz control timer going
+                # silent: /odom and TF stop, nothing is logged, and every Nav2 transform lookup
+                # fails with "extrapolation into the future".  Three hardware runs froze 0.6 s,
+                # 7.2 s and 0.95 s after this server came up; simulation, which has always
+                # disabled it, has never reproduced it.  Set phoenix_diagnostics:=true for a
+                # Tuner X session - but then do not expect navigation to survive.
                 unmanaged.set_phoenix_diagnostics_start_time(-1)
             # The first native call above/below is what loads the libraries: verify them now,
             # before tuner_constants (which opens the CAN bus object) is imported.
@@ -841,6 +848,10 @@ MAX_ODOMETRY_HZ = 1000.0
 STATUS_PERIOD_S = 1.0
 ODOMETRY_STALE_S = 0.25    # drivetrain state not advancing for this long -> driving is inhibited
 TARE_SETTLE_S = 0.1        # resets take effect within one odometry period; do not publish the jump
+CLOCK_STALL_WARN_S = 1.0   # phoenix6 timebase not advancing for this long -> warn, keep publishing
+CONTROL_TICK_STALL_S = 0.5  # control timer not firing for this long -> say so from the spin loop
+HEARTBEAT_PERIOD_S = 5.0   # one "alive" line this often: the loop is cheap, silence is expensive
+PUBLISH_STALL_S = 0.5      # /odom not published for this long -> say so, and say WHY
 QUEUE_DELAY_WARN_S = 0.1   # a /cmd_vel that waited this long for its callback is worth a warning
 
 
@@ -936,6 +947,10 @@ class SwerveBridge(Node):
         self._drive_request_type = self._param(
             'drive_request_type', 'velocity',
             '"velocity" (closed loop, default) or "open_loop" (voltage feed-forward only).')
+        self._phoenix_diagnostics = self._param(
+            'phoenix_diagnostics', False,
+            'Start the phoenix6 diagnostics server (TCP 1250) so Tuner X can attach.  Off by '
+            'default: on this robot its start is what precedes the control timer going silent.')
         self._pose_covariance = diagonal_covariance(self._param(
             'pose_covariance_diagonal', [0.01, 0.01, 1e-6, 1e-6, 1e-6, 0.02],
             'Diagonal of the /odom pose covariance (x, y, z, roll, pitch, yaw).'),
@@ -959,7 +974,17 @@ class SwerveBridge(Node):
         self._timer = None
         self._sample: Optional[OdomSample] = None
         self._odometry_watchdog = OdometryWatchdog(ODOMETRY_STALE_S)
-        self._last_published_timestamp = 0.0
+        # Publication is deduplicated on the acquisition counter, not on the phoenix6 timestamp:
+        # the counter is what says "this is a new pose", and it keeps counting even when the
+        # CANivore-synced phoenix6 timebase stops advancing (which it does, see _publish_odometry).
+        self._last_published_daqs: Optional[int] = None
+        self._clock_timestamp: Optional[float] = None
+        self._clock_progress = -math.inf
+        self._last_tick = -math.inf
+        self._last_heartbeat = -math.inf
+        self._last_publish = -math.inf
+        self._skip_reason: Optional[str] = None
+        self._published = 0
         self._tared = False
         self._holdoff_until = 0.0
         self._last_status_time = -math.inf
@@ -987,7 +1012,12 @@ class SwerveBridge(Node):
         self._odom_pub = self.create_publisher(Odometry, 'odom', 10)
         self._status_pub = self.create_publisher(DiagnosticArray, 'swerve/status', 1)
         self._tf_broadcaster = TransformBroadcaster(self) if self._publish_tf else None
-        self.create_subscription(Twist, 'cmd_vel', self._on_cmd_vel, 1, callback_group=group)
+        # rclpy passes the MessageInfo (reception timestamps) only to a callback that REQUIRES a
+        # second argument, and only from Iron on: Humble's rclpy has no MessageInfo and calls
+        # every callback with the message alone.  Without it the queue delay counts as 0.
+        on_cmd_vel = (self._on_cmd_vel if hasattr(Subscription, 'CallbackType')
+                      else lambda msg: self._on_cmd_vel(msg, None))
+        self.create_subscription(Twist, 'cmd_vel', on_cmd_vel, 1, callback_group=group)
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(Bool, 'e_stop', self._on_e_stop, latched, callback_group=group)
@@ -1007,7 +1037,7 @@ class SwerveBridge(Node):
             tuner_constants_dir=self._tuner_constants_dir, work_dir=self._work_dir,
             odometry_hz=self._odometry_hz, drive_request_type=self._drive_request_type,
             deadband=self._deadband, rotational_deadband=self._rotational_deadband,
-            logger=log)
+            diagnostics=self._phoenix_diagnostics, logger=log)
         self._control = ControlLoop(
             self._governor, self._drivetrain,
             lambda message: log.error(message, throttle_duration_sec=1.0))
@@ -1029,7 +1059,7 @@ class SwerveBridge(Node):
             self._drivetrain.shutdown(self.get_logger())
 
     # ------------------------------------------------------------------------------------------
-    def _on_cmd_vel(self, msg: Twist, message_info: Mapping[str, object]) -> None:
+    def _on_cmd_vel(self, msg: Twist, message_info: Optional[Mapping[str, object]]) -> None:
         # time.monotonic(), not ROS time: a wall-clock step (NTP) must not defeat the watchdog.
         # Back-dated by the time the message sat in the queue, so that a command that went stale
         # while this executor was busy (or the drivetrain was starting) cannot count as fresh.
@@ -1073,6 +1103,7 @@ class SwerveBridge(Node):
     # ------------------------------------------------------------------------------------------
     def _on_timer(self) -> None:
         now = time.monotonic()
+        self._last_tick = now
         self._read_odometry(now)
         # No live odometry means a dead CAN bus / device, a hung odometry thread (which is also
         # what applies our requests) or a pending pose reset: whoever is commanding us (Nav2,
@@ -1081,10 +1112,14 @@ class SwerveBridge(Node):
         self._control.step(now, inhibit=not ready)     # first: nothing may delay the safety path
         if not ready:
             self._guarded('odometry stall report', self._report_stalled_odometry, now)
-        self._guarded('odometry publish', self._publish_odometry, now)
+        self._guarded('odometry publish', lambda at: self._publish_odometry(at, ready), now)
+        self._guarded('publish stall check', self._check_publish_stall, now)
         if now - self._last_status_time >= STATUS_PERIOD_S:
             self._last_status_time = now
             self._guarded('status publish', self._publish_status, now)
+        if now - self._last_heartbeat >= HEARTBEAT_PERIOD_S:
+            self._last_heartbeat = now
+            self._guarded('heartbeat', self._log_heartbeat, now)
 
     def _guarded(self, what: str, step, now: float) -> None:
         # Publishing problems must never take the control loop (and with it the watchdog) down.
@@ -1102,6 +1137,7 @@ class SwerveBridge(Node):
                                     throttle_duration_sec=1.0)
             return
         self._odometry_watchdog.observe(self._sample, now)
+        self._note_clock_progress(self._sample, now)
         if not self._tared and self._odometry_watchdog.alive(now):
             # The one start-up tare: the governor is still inhibited, so nothing is driving.
             try:
@@ -1113,6 +1149,82 @@ class SwerveBridge(Node):
             self._tared = True
             self._holdoff_until = now + TARE_SETTLE_S
             self.get_logger().info('odometry valid: pose tared to (0, 0, 0), publishing /odom')
+
+    def _check_publish_stall(self, now: float) -> None:
+        """Announce, loudly and with a reason, that /odom and TF have stopped.
+
+        If the reason comes back as "publish call is being reached", the node believes it is
+        publishing at 50 Hz and the messages are not arriving - which is a transport problem, not
+        a drivetrain one, and needs looking at from the subscriber side.
+        """
+        if self._last_publish == -math.inf or now - self._last_publish < PUBLISH_STALL_S:
+            return
+        sample = self._sample
+        detail = 'no sample' if sample is None else (
+            f'daqs {sample.successful_daqs}/{sample.failed_daqs}, age {sample.age:.3f} s, '
+            f'valid={sample.valid}')
+        self.get_logger().error(
+            f'/odom AND TF STOPPED {now - self._last_publish:.1f} s ago, after {self._published} '
+            f'messages: {self._skip_reason or "publish call is being reached (no skip)"} '
+            f'[{detail}, odom_subs={self._odom_pub.get_subscription_count()}]; localisation and '
+            'Nav2 are now working from a frozen pose', throttle_duration_sec=2.0)
+
+    def _log_heartbeat(self, now: float) -> None:
+        """One line every few seconds, unconditionally.
+
+        This exists because every failure so far has been a SILENCE: /odom and TF stop and not one
+        node says anything.  The counters below separate the only remaining explanations - a loop
+        that stopped running, a loop that runs but declines to publish, and a loop that publishes
+        to nobody - which no amount of reading the other nodes' logs can do.
+        """
+        sample = self._sample
+        state = 'no sample' if sample is None else (
+            f'daqs {sample.successful_daqs}/{sample.failed_daqs} age {sample.age:.3f}s '
+            f'valid={sample.valid} pose ({sample.x:.2f}, {sample.y:.2f}, {sample.yaw:.2f})')
+        tf_pub = getattr(self._tf_broadcaster, 'pub_tf', None)
+        tf_subs = tf_pub.get_subscription_count() if tf_pub is not None else '-'
+        since = ('never' if self._last_publish == -math.inf
+                 else f'{now - self._last_publish:.2f}s ago')
+        self.get_logger().info(
+            f'alive: ready={self._odometry_ready(now)} published={self._published} (last {since}) '
+            f'odom_subs={self._odom_pub.get_subscription_count()} tf_subs={tf_subs} {state}'
+            + (f' skip={self._skip_reason}' if self._skip_reason else ''))
+
+    def check_control_loop_alive(self) -> None:
+        """Report a control timer that has stopped firing.  Called from the spin loop, because a
+        timer that is no longer firing cannot report its own absence - and that silence is exactly
+        what made this failure so hard to see: /odom and TF just stopped, with nothing in the log.
+
+        Nothing is driven from here: the drivetrain fails safe on its own, because feeding enable
+        is what the timer does, and phoenix6 disables the motors once the feed stops arriving.
+        """
+        if self._timer is None or self._last_tick == -math.inf:
+            return
+        late = time.monotonic() - self._last_tick
+        if late >= CONTROL_TICK_STALL_S:
+            self.get_logger().error(
+                f'CONTROL LOOP NOT TICKING: no timer callback for {late:.1f} s. /odom and TF have '
+                'stopped, so localisation and Nav2 are working from a frozen pose; the drivetrain '
+                'disables itself as the enable feed stops.', throttle_duration_sec=2.0)
+
+    def _note_clock_progress(self, sample: Optional[OdomSample], now: float) -> None:
+        """Say so when the phoenix6 timebase freezes, instead of going quietly blind.
+
+        A frozen timebase is survivable - the acquisitions keep delivering fresh poses and the
+        stamps come from the ROS clock - but it is not normal, and silence here once cost a whole
+        run: /odom stopped and every Nav2 lookup failed with "extrapolation into the future".
+        """
+        if sample is None or not sample.valid:
+            return
+        if sample.timestamp != self._clock_timestamp:
+            self._clock_timestamp = sample.timestamp
+            self._clock_progress = now
+            return
+        if now - self._clock_progress >= CLOCK_STALL_WARN_S:
+            self.get_logger().warning(
+                f'phoenix6 timebase frozen at {sample.timestamp:.3f} for '
+                f'{now - self._clock_progress:.1f} s while acquisitions keep succeeding: /odom '
+                'and TF are being stamped from the ROS clock', throttle_duration_sec=10.0)
 
     def _odometry_ready(self, now: float) -> bool:
         return (self._tared and now >= self._holdoff_until
@@ -1128,14 +1240,39 @@ class SwerveBridge(Node):
         self.get_logger().error(f'ODOMETRY STALLED ({detail}): driving is inhibited',
                                 throttle_duration_sec=1.0)
 
-    def _publish_odometry(self, now: float) -> None:
+    def _publish_odometry(self, now: float, ready: bool) -> None:
         sample = self._sample
-        if (sample is None or not sample.valid or not self._tared or now < self._holdoff_until
-                or sample.timestamp == self._last_published_timestamp):
-            return    # nothing new (a repeated stamp would make tf2 complain) or not settled yet
-        self._last_published_timestamp = sample.timestamp
-        # phoenix6 timestamps are CLOCK_MONOTONIC: convert through the age of the state.
-        stamp = (self.get_clock().now() - Duration(nanoseconds=int(sample.age * 1e9))).to_msg()
+        # Every skip below used to be a bare return, and that silence is what hid this failure for
+        # four runs: /odom and TF stopped and no node, anywhere, said why.  Record the reason so
+        # _check_publish_stall can name it.
+        if sample is None:
+            self._skip_reason = 'no drivetrain sample (state read failed)'
+        elif not ready:
+            # "not ready" is a pose that is not advancing (stalled acquisitions, dead CAN device)
+            # or one that was just reset.  Publishing it anyway would stamp a frozen pose with the
+            # current time, i.e. tell AMCL and Nav2 "the robot is standing still, as of now" - and
+            # a controller that never sees the robot turn keeps asking it to turn, for ever.
+            self._skip_reason = (
+                f'odometry not ready (tared={self._tared}, '
+                f'holdoff {max(0.0, self._holdoff_until - now):.2f} s, '
+                f'watchdog_alive={self._odometry_watchdog.alive(now)})')
+        elif sample.successful_daqs == self._last_published_daqs:
+            # no new acquisition; a repeated stamp would make tf2 complain
+            self._skip_reason = f'no new acquisition (daqs stuck at {sample.successful_daqs})'
+        else:
+            self._skip_reason = None
+        if self._skip_reason is not None:
+            return
+        self._last_published_daqs = sample.successful_daqs
+        self._published += 1
+        self._last_publish = now
+        # phoenix6 timestamps live in utils.get_current_time_seconds()'s timebase, not the ROS
+        # clock, so the state is dated by its age.  The age is clamped because that timebase is
+        # CANivore-synced and has been seen to stop advancing while acquisitions kept succeeding:
+        # unclamped, every stamp would then freeze (or slide into the past) and tf2 would let the
+        # whole odom subtree go stale, taking localisation and Nav2 down with it.
+        age = min(max(0.0, sample.age), ODOMETRY_STALE_S)
+        stamp = (self.get_clock().now() - Duration(nanoseconds=int(age * 1e9))).to_msg()
         qx, qy, qz, qw = yaw_to_quaternion(sample.yaw)
 
         odom = Odometry()
@@ -1214,6 +1351,7 @@ def main(args=None) -> None:
         executor.add_node(node)
         while not stop.is_set() and rclpy.ok():
             executor.spin_once(timeout_sec=0.1)
+            node.check_control_loop_alive()
         node.get_logger().info('stop requested: shutting the drivetrain down')
     except HardwareRefusedError as exc:
         get_logger('swerve_bridge').fatal(str(exc))

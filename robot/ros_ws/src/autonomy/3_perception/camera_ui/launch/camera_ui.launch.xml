@@ -7,7 +7,12 @@
   <arg name="host" default="192.168.1.101" description="Xavier running the camera hub (with_cameras only)"/>
   <arg name="port" default="8090"/>
   <arg name="backend" default="neural" description="depth backend: neural or sgbm (with_cameras only)"/>
-  <arg name="model" default="raft-realtime"/>
+  <arg name="model" default="raft-realtime" description="depth model for cameras without their own below"/>
+  <arg name="zedx_depth_model" default="fast-foundation" description="ZED X depth model (cameras.launch.xml)"/>
+  <arg name="zedx_nano_depth_model" default="$(var model)" description="Nano depth model"/>
+  <arg name="zedx_temporal_frames" default="5" description="ZED X: median of this many depth frames (cameras.launch.xml)"/>
+  <arg name="zedx_nano_temporal_frames" default="1" description="Nano: no temporal median"/>
+  <arg name="repo" default="" description="fast-foundation checkout ('' = &lt;models_dir&gt;/Fast-FoundationStereo)"/>
   <arg name="models_dir" default="" description="neural weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
   <!-- not "params_file": an include sees this file's launch arguments, and camera_hub.launch.xml has its own params_file -->
   <arg name="ui_params_file" default="$(find-pkg-share camera_ui)/config/camera_ui.yaml"/>
@@ -17,6 +22,11 @@
     <arg name="port" value="$(var port)"/>
     <arg name="backend" value="$(var backend)"/>
     <arg name="model" value="$(var model)"/>
+    <arg name="zedx_depth_model" value="$(var zedx_depth_model)"/>
+    <arg name="zedx_nano_depth_model" value="$(var zedx_nano_depth_model)"/>
+    <arg name="zedx_temporal_frames" value="$(var zedx_temporal_frames)"/>
+    <arg name="zedx_nano_temporal_frames" value="$(var zedx_nano_temporal_frames)"/>
+    <arg name="repo" value="$(var repo)"/>
     <arg name="models_dir" value="$(var models_dir)"/>
   </include>
 

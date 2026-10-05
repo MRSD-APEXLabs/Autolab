@@ -99,7 +99,7 @@ def test_default_launch_maps_both_cameras_to_the_pc3_topics(launch):
     assert (zedx['executable'], zedx['namespace']) == ('perception_node', '/zedx')
     assert zedx['yamls'] == [config('zedx.yaml')]
     params = zedx['params']
-    assert params['yolo.model'] == '/home/labx/apple_server_manip/data/models/yolo/best_wrist.pt'
+    assert params['yolo.model'].endswith('/camera_perception/models/yolo/best_wrist.pt')   # shipped in the package
     assert (params['yolo.clahe_clip'], params['yolo.clahe_tiles']) == (3.0, 4)
     assert (params['output_frame'], params['yolo.marker_ns'], params['yolo.conf']) == ('top_camera', 'wellplates', 0.8)
     assert params['apriltags.ids'] == [0, 1, 2, 21, 22] and params['yolo.classes'] == 'wellplate'
@@ -114,7 +114,7 @@ def test_default_launch_maps_both_cameras_to_the_pc3_topics(launch):
     assert (nano['executable'], nano['namespace']) == ('perception_node', '/zedx_nano')
     assert nano['yamls'] == [config('zedx_nano.yaml')]
     params = nano['params']
-    assert params['yolo.model'] == '/home/labx/apple_server_manip/data/models/yolo/best_wrist.pt'
+    assert params['yolo.model'].endswith('/camera_perception/models/yolo/best_wrist.pt')   # shipped in the package
     assert (params['pointcloud.enable'], params['yolo.max_detections'], params['yolo.marker_ns']) == \
         (False, 1, 'servo_detections')
     assert set(nano['remaps'].values()) == {'/servo/apriltags', '/servo/detections', '/servo/image',
@@ -138,3 +138,14 @@ def test_launch_arguments(launch):
                              'zedx_nano_perception']
     assert nodes['camera_hub']['params']['host'] == '10.1.2.3'
     assert nodes['zedx_nano_depth']['params']['backend'] == 'sgbm'
+
+
+def test_each_camera_gets_its_own_depth_model(launch):
+    """The ZED X trades rate for accuracy, the wrist camera keeps the rate, and the YOLO weights stay out of it."""
+    nodes = launch('with_cameras:=true', 'zedx_model:=best_seg.pt')
+    assert nodes['zedx_depth']['params']['model'] == 'fast-foundation'
+    assert nodes['zedx_nano_depth']['params']['model'] == 'raft-realtime'
+
+    nodes = launch('with_cameras:=true', 'depth_models_dir:=/w', 'depth_repo:=/w/ff')
+    for depth in ('zedx_depth', 'zedx_nano_depth'):
+        assert (nodes[depth]['params']['models_dir'], nodes[depth]['params']['repo']) == ('/w', '/w/ff')
