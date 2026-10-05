@@ -1,0 +1,5 @@
+<library path="fresh_odom_controllers">
+  <class type="navigation_bringup::FreshOdomMPPIController" base_class_type="nav2_core::Controller">
+    <description>MPPI protected against a stale Humble TF buffer.</description>
+  </class>
+</library>

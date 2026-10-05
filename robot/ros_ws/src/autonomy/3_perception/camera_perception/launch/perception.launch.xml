@@ -23,13 +23,15 @@
   <arg name="host" default="192.168.1.101" description="Xavier running the camera hub (with_cameras only)"/>
   <arg name="port" default="8090"/>
   <arg name="depth_backend" default="neural" description="neural or sgbm (with_cameras only)"/>
-  <arg name="depth_models_dir" default="" description="RAFT weights directory (with_cameras only)"/>
+  <arg name="depth_models_dir" default="" description="neural weights directory (with_cameras only)"/>
+  <arg name="depth_repo" default="" description="fast-foundation checkout (with_cameras only)"/>
 
   <include file="$(find-pkg-share camera_ui)/launch/cameras.launch.xml" if="$(var with_cameras)">
     <arg name="host" value="$(var host)"/>
     <arg name="port" value="$(var port)"/>
     <arg name="backend" value="$(var depth_backend)"/>
     <arg name="models_dir" value="$(var depth_models_dir)"/>
+    <arg name="repo" value="$(var depth_repo)"/>
   </include>
 
   <group if="$(var zedx)">

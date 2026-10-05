@@ -4,9 +4,9 @@
   Keep a valid path for up to 10 seconds instead of replacing it every second.
   Check at 2 Hz for a changed goal or an obstructed path, following Nav2 Jazzy's
   nav_to_pose_with_consistent_replanning_and_if_path_becomes_invalid.xml pattern.
-  Contextual and system recoveries remain available. BackUp is limited to 0.15 m
-  at 0.05 m/s because the lidar cannot see behind the robot; this does not make
-  contact safe. Spin can still recover visibility after an actual failure.
+  Contextual and system recoveries remain available, but recovery never commands
+  motion. Spinning looked like navigation while the actual goal had already failed,
+  and backing up is unsafe in the lidar's rear/right blind area.
 -->
 <root BTCPP_format="4" main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -54,9 +54,7 @@
               <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
               <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
             </Sequence>
-            <Spin spin_dist="1.57" error_code_id="{spin_error_code}"/>
             <Wait wait_duration="5.0"/>
-            <BackUp backup_dist="0.15" backup_speed="0.05" error_code_id="{backup_code_id}"/>
           </RoundRobin>
         </ReactiveFallback>
       </Sequence>

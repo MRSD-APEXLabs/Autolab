@@ -96,7 +96,11 @@ def test_camera_ui_launch_starts_the_hub_both_cameras_and_the_ui(launch):
         assert (depth['executable'], depth['namespace']) == ('zedx_nano_depth_node', f'/{camera}')
         assert depth['yamls'] == [config('zedx_nano_depth', 'zedx_nano_depth.yaml')]
         params = depth['params']
-        assert (params['backend'], params['model'], params['models_dir']) == ('neural', 'raft-realtime', '')
+        # the base camera trades rate for accuracy, the wrist camera keeps the rate for the visual servo
+        model = 'fast-foundation' if camera == 'zedx' else 'raft-realtime'
+        assert (params['backend'], params['model'], params['models_dir']) == ('neural', model, '')
+        assert params['repo'] == ''
+        assert params['temporal_frames'] == (5 if camera == 'zedx' else 1)
 
     ui = nodes['camera_ui']
     assert (ui['executable'], ui['namespace']) == ('camera_ui_node', '')
@@ -107,13 +111,22 @@ def test_camera_ui_launch_starts_the_hub_both_cameras_and_the_ui(launch):
 
 def test_launch_arguments_reach_the_nodes(launch):
     nodes = launch('cameras.launch.xml', 'host:=10.1.2.3', 'port:=9001', 'backend:=sgbm', 'model:=raft-fast',
-                   'models_dir:=/models')
+                   'models_dir:=/models', 'zedx_depth_model:=raft-middlebury', 'repo:=/models/ff')
     assert sorted(nodes) == ['camera_hub', 'zedx_camera', 'zedx_depth', 'zedx_nano_camera', 'zedx_nano_depth']
     for name in ('camera_hub', 'zedx_camera', 'zedx_nano_camera'):
         assert (nodes[name]['params']['host'], nodes[name]['params']['port']) == ('10.1.2.3', 9001)
-    for name in ('zedx_depth', 'zedx_nano_depth'):
+    for name, model in (('zedx_depth', 'raft-middlebury'), ('zedx_nano_depth', 'raft-fast')):
         params = nodes[name]['params']
-        assert (params['backend'], params['model'], params['models_dir']) == ('sgbm', 'raft-fast', '/models')
+        assert (params['backend'], params['model'], params['models_dir']) == ('sgbm', model, '/models')
+        assert params['repo'] == '/models/ff'
+
+    # camera_ui.launch.xml passes the models through too
+    nodes = launch('camera_ui.launch.xml', 'zedx_depth_model:=sgbm-ish', 'zedx_nano_depth_model:=raft-fast',
+                   'zedx_temporal_frames:=5', 'zedx_nano_temporal_frames:=2')
+    assert (nodes['zedx_depth']['params']['model'], nodes['zedx_nano_depth']['params']['model']) \
+        == ('sgbm-ish', 'raft-fast')
+    assert (nodes['zedx_depth']['params']['temporal_frames'],
+            nodes['zedx_nano_depth']['params']['temporal_frames']) == (5, 2)
 
     nodes = launch('camera_ui.launch.xml', 'with_cameras:=false', 'ui_host:=127.0.0.1', 'ui_port:=8123')
     assert list(nodes) == ['camera_ui']

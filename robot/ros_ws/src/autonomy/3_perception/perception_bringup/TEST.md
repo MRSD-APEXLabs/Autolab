@@ -43,6 +43,18 @@ still starts, logs a load error, and keeps publishing AprilTags/point cloud (see
 computed" — YOLO failure is non-fatal). Copy real weights into `yolo_models_dir` if you want detections;
 otherwise skip and only validate tags/cloud/hub wiring.
 
+Stereo depth weights: the RAFT ones (`raft-realtime`, the Nano's model) are **downloaded** into
+`depth_models_dir` on the first start. The ZED X runs **fast-foundation** (Fast-FoundationStereo), whose
+checkout is **not in this repo** and is not downloadable: pass `depth_repo:=<checkout>` (or put it in
+`<depth_models_dir>/Fast-FoundationStereo`), with its `pretrained_models/model_best_bp2_serialize.pth`.
+Without it the ZED X depth node logs the error and falls back to raft-realtime, which still works but
+flickers about three times as much (README, "Depth models"). To check what a running node uses:
+
+```bash
+ros2 param get /zedx/zedx_depth model             # fast-foundation, or raft-realtime after a fallback
+ros2 param get /zedx/zedx_depth temporal_frames   # 5 on the ZED X, 1 on the Nano
+```
+
 ## 4. Unit tests first — this is what actually proves the Humble port works
 
 These use a synthetic Xavier server and a stub robot, so they need **no real camera hardware** and are

@@ -123,7 +123,7 @@ controller_server:
       # rotation at startup and circling a goal to satisfy its final yaw.
       # The shim delegates path tracking to MPPI under this SAME parameter name.
       plugin: "nav2_rotation_shim_controller::RotationShimController"
-      primary_controller: "nav2_mppi_controller::MPPIController"
+      primary_controller: "navigation_bringup::FreshOdomMPPIController"
       angular_dist_threshold: 0.60
       angular_disengage_threshold: 0.20
       forward_sampling_distance: 0.50

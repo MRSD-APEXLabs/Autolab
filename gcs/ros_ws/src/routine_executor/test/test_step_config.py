@@ -15,7 +15,7 @@ def test_step_has_required_keys():
 
 
 def test_msg_type_values():
-    valid_types = {'manipulation', 'lab_machine'}
+    valid_types = {'manipulation', 'lab_machine', 'string', 'pose'}
     for name, config in STEPS.items():
         assert config['msg_type'] in valid_types, f"Step '{name}' has invalid msg_type: {config['msg_type']}"
 
@@ -140,3 +140,68 @@ def test_shaker_required_params():
 
 def test_ot2_required_params():
     assert 'parameters_json' in STEPS['ot2']['required_params']
+
+
+def test_make_msg_go_to_uses_target_machine():
+    from std_msgs.msg import String
+    msg = STEPS['go_to']['make_msg']({'name': 'go_to', 'target_machine': 'ot2'})
+    assert isinstance(msg, String)
+    assert msg.data == 'ot2'
+
+
+def test_go_to_required_params():
+    assert STEPS['go_to']['required_params'] == ['target_machine']
+
+
+def test_go_to_watch_topic():
+    assert STEPS['go_to']['watch_topic'] == 'behavior/go_to_location_status'
+
+
+def test_go_to_publish_topic():
+    assert STEPS['go_to']['publish_topic'] == 'behavior/go_to_location_command'
+
+
+def test_make_msg_home_is_fixed_string():
+    from std_msgs.msg import String
+    msg = STEPS['home']['make_msg']({'name': 'home'})
+    assert isinstance(msg, String)
+    assert msg.data == 'home'
+
+
+def test_home_has_no_required_params():
+    assert STEPS['home']['required_params'] == []
+
+
+def test_home_shares_go_to_location_topics():
+    assert STEPS['home']['publish_topic'] == STEPS['go_to']['publish_topic']
+    assert STEPS['home']['watch_topic'] == STEPS['go_to']['watch_topic']
+
+
+def test_make_msg_go_to_pose_builds_pose_stamped():
+    from geometry_msgs.msg import PoseStamped
+    msg = STEPS['go_to_pose']['make_msg']({'name': 'go_to_pose', 'x': 1.5, 'y': -2.0, 'yaw': 3.14159})
+    assert isinstance(msg, PoseStamped)
+    assert msg.header.frame_id == 'map'
+    assert msg.pose.position.x == 1.5
+    assert msg.pose.position.y == -2.0
+
+
+def test_go_to_pose_orientation_from_yaw():
+    import math
+    msg = STEPS['go_to_pose']['make_msg']({'name': 'go_to_pose', 'x': 0.0, 'y': 0.0, 'yaw': math.pi / 2})
+    assert msg.pose.orientation.z == pytest.approx(math.sin(math.pi / 4))
+    assert msg.pose.orientation.w == pytest.approx(math.cos(math.pi / 4))
+    assert msg.pose.orientation.x == 0.0
+    assert msg.pose.orientation.y == 0.0
+
+
+def test_go_to_pose_required_params():
+    assert set(STEPS['go_to_pose']['required_params']) == {'x', 'y', 'yaw'}
+
+
+def test_go_to_pose_watch_topic():
+    assert STEPS['go_to_pose']['watch_topic'] == 'behavior/navigate_to_pose_status'
+
+
+def test_go_to_pose_publish_topic():
+    assert STEPS['go_to_pose']['publish_topic'] == 'behavior/navigate_to_pose_command'

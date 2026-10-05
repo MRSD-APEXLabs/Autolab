@@ -11,4 +11,7 @@ cmd_vel_mux:
     # at very low speed (drive k_s = 0), so Nav2's small final corrections stalled just short of the goal tolerance
     # while the azimuths chased noise. Module speed = |v| + 0.359 * |wz|.
     nav_min_speed: 0.12     # [m/s] smaller Nav2 commands are scaled up to this (0.33 rad/s when turning in place)
-    nav_zero_below: 0.03    # [m/s] smaller Nav2 commands are noise: true zero, the modules hold their angle
+    # CollisionMonitor can reduce RotationShim's initial 0.10 rad/s command to 0.04 rad/s,
+    # whose module speed is only 0.014 m/s.  Keep the noise floor below that or the mux turns
+    # the command into zero, odometry never changes, and RotationShim never accelerates.
+    nav_zero_below: 0.005   # [m/s] smaller Nav2 commands are noise: true zero, the modules hold their angle

@@ -719,8 +719,14 @@ int main(int argc, char *argv[])
         pointcloud_qos,    // <-- Inject your custom QoS here
         [&latest_obstacle_cloud](const sensor_msgs::msg::PointCloud2::SharedPtr msg)
         {
-            latest_obstacle_cloud = msg;
+            std::atomic_store(&latest_obstacle_cloud, msg);
         });
+
+    // move_group's octomap reads this topic (sensors_3d.yaml). It only ever gets
+    // the cloud cached at the first plan command, so the octomap stays frozen.
+    auto frozen_cloud_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>(
+        "/zed_pointcloud_frozen", rclcpp::SensorDataQoS());
+    bool cloud_frozen = false;
 
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
         "/planning_command", 10, command_callback);
@@ -778,7 +784,19 @@ int main(int argc, char *argv[])
             auto node = rclcpp::Node::make_shared("controller_switch_node");
             set_controller_active(node, "xarm6_traj_controller");
         }
-        
+
+        if (!cloud_frozen && cmd.rfind("plan_", 0) == 0)
+        {
+            if (auto cloud = std::atomic_load(&latest_obstacle_cloud))
+            {
+                frozen_cloud_pub->publish(*cloud);
+                cloud_frozen = true;
+                RCLCPP_INFO(node->get_logger(), "Froze obstacle cloud for the octomap.");
+                // Give move_group time to fold it into the octomap before planning.
+                rclcpp::sleep_for(std::chrono::seconds(1));
+            }
+        }
+
 
         if (cmd.rfind("plan_april_", 0) == 0)
         {
