@@ -122,6 +122,11 @@
     <collision>
       <geometry><mesh filename="package://base_urdf/meshes/gripper_v43_1.stl"/></geometry>
     </collision>
+    <!-- Extra sideways clearance: 4 cm slab on the link's -x side (= world +y, "left" when EE points down) -->
+    <collision>
+      <origin xyz="-0.101 0 -0.03725" rpy="0 0 0"/>
+      <geometry><box size="0.04 0.075 0.0745"/></geometry>
+    </collision>
     <inertial>
       <mass value="0.5"/>
       <origin xyz="-0.133 -0.007 0.33" rpy="0 0 0"/>

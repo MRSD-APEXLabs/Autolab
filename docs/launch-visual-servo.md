@@ -30,7 +30,7 @@ ssh autolab@192.168.1.101 'cd ~/Autolab-Camera-Edge/example_client && python3 -m
 
 ## 4b. Trigger through the pipeline (Jetson)
 
-Planning stack up ([launch-planning.md](launch-planning.md) step 5), then the executives:
+Planning stack up ([launch-planning.md](launch-planning.md) step 4), then the executives:
 
 ```bash
 docker exec -it autolab-robot-l4t-1 bash -lc 'export ROS_LOCALHOST_ONLY=1 FASTRTPS_DEFAULT_PROFILES_FILE=/home/robot/AutoLab/common/ros_packages/fastdds_loopback.xml; ros2 launch behavior_bringup behavior.launch.xml'
@@ -47,4 +47,4 @@ docker exec autolab-robot-l4t-1 bash -lc "export ROS_LOCALHOST_ONLY=1 FASTRTPS_D
 
 ## 5. Afterwards
 
-Send `plan_home_offset` ([launch-planning.md](launch-planning.md) step 6). If the next plan won't execute, restart the planning launch.
+Send `plan_home_offset` ([launch-planning.md](launch-planning.md) step 5). If the next plan won't execute, restart the planning launch.
