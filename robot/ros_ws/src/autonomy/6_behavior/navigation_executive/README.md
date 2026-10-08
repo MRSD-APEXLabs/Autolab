@@ -211,6 +211,47 @@ end-to-end path. Not yet separately confirmed:
 - Step 6 (driving `home` against the real `1_navigation` stack) — optional, needs the host Jazzy
   environment, do whenever convenient.
 
+## TODO: pause / cancel integration with `routine_executor`
+
+The executor side is done; the gap is wiring it into `routine_executor` properly.
+
+**How pause works today (BT side only).** In `drone.tree`, `(Pause Commanded) → [Pause]`
+outranks `Go To Location` / `Navigate To Pose` in the same fallback. Commanding Pause mid-goal
+deactivates the nav action → `tick_channel` publishes `/nav/cancel` (robot stops). The
+`... Commanded` condition is left set (only `finish()` clears it), so when Pause clears the BT
+reactivates the action and `dispatch()` re-sends the same target. Pause = cancel + resend; there
+is no other way at this layer (`nav_api` only has `/nav/cancel`, Nav2 has no native pause).
+
+While deactivated, the status topic keeps reading `RUNNING`. That is deliberate: from the
+outside the goal is still underway. Do **not** change a mid-flight deactivation to report
+`FAILURE` — `routine_executor._on_action_status` still processes status while the routine is
+`paused`, so a paused nav would count as a failed attempt and burn a retry.
+
+**What still needs doing:**
+
+- `routine_executor` pause does not stop the robot. `RoutineStateMachine.pause()` only stops
+  advancing to the next step; nothing sets `Pause Commanded`. It needs to publish that BT
+  condition on pause and clear it on resume.
+- `routine_executor` cancel does not abort navigation. Deactivation alone can't distinguish
+  pause from cancel, so a real abort needs something to clear `Go To Location Commanded` /
+  `Navigate To Pose Commanded` — e.g. a cancel command topic on `navigation_executive` that calls
+  `finish(&bt::Action::set_failure)` for the in-flight channel.
+- Decide whether a new nav command during a pause should be accepted. Today it is
+  (`any_goal_in_flight()` is false while deactivated), so it replaces the target and the resume
+  goes to the new one.
+- Resume re-plans from wherever the robot stopped; it does not retrace the original path.
+- Test: pause mid-goal → one `/nav/cancel`; resume → same goal re-sent on `/nav/goal_location`,
+  status stays `RUNNING` throughout, then `SUCCESS` on arrival.
+
+## Known-fixed gotcha: hold the terminal status until deactivation
+
+After `finish()`, the action is still active for at least one BT tick (the engine has to see the
+cleared condition before sending `Active(false)`). The `!goal_in_flight` branch in
+`tick_channel` used to call `set_running()` there, flipping a finished `SUCCESS` / `FAILURE`
+back to `RUNNING` ~50 ms later — visible to `routine_executor`, which watches the status topic
+directly. It now just returns, holding the terminal status (same as `lab_machine_executive`'s
+`ot2_terminal_` latch).
+
 ## Known-fixed gotcha: clear `commanded_condition` on every terminal transition
 
 Every place `tick_channel` reaches a terminal outcome (`REJECTED` result, `SUCCEEDED`,
