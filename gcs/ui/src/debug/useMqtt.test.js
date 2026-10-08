@@ -101,3 +101,24 @@ test('message events are dispatched only to callbacks subscribed on that topic',
   expect(onA).toHaveBeenCalledWith('hello');
   expect(onB).not.toHaveBeenCalled();
 });
+
+test('subscriptions made while children mount reach the broker once connected', () => {
+  // Child effects run before the provider's effect creates the client, exactly like
+  // StatusEcho subscribing on mount.
+  const client = makeFakeClient();
+  mqtt.connect.mockReturnValue(client);
+
+  const onMsg = jest.fn();
+  function SubscribeOnMount() {
+    const { subscribe } = useMqttContext();
+    React.useEffect(() => subscribe('ros2/status', onMsg), [subscribe]);
+    return null;
+  }
+  render(<MqttProvider><SubscribeOnMount /></MqttProvider>);
+
+  act(() => { client._handlers.connect(); });
+  expect(client.subscribe).toHaveBeenCalledWith('ros2/status');
+
+  act(() => { client._handlers.message('ros2/status', Buffer.from('ok')); });
+  expect(onMsg).toHaveBeenCalledWith('ok');
+});

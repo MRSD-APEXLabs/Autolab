@@ -14,7 +14,12 @@ export function MqttProvider({ children, brokerUrl = DEFAULT_BROKER_URL }) {
     const client = mqtt.connect(brokerUrl);
     clientRef.current = client;
 
-    client.on('connect', () => setConnected(true));
+    client.on('connect', () => {
+      setConnected(true);
+      // Children (e.g. StatusEcho) subscribe in their mount effects, which run before this
+      // effect creates the client — those topics are only in subsRef until we send them here.
+      subsRef.current.forEach((_callbacks, topic) => client.subscribe(topic));
+    });
     client.on('close', () => setConnected(false));
     client.on('error', () => setConnected(false));
     client.on('message', (topic, message) => {
