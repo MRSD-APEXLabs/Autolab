@@ -23,6 +23,8 @@ services:
       file: ./gcs-base-docker-compose.yaml
       service: gcs-base
     network_mode: host
+    environment:
+      - GCS_GUI=false # no rviz2 / rqt_gui on the real GCS
     volumes:
       - $HOME/bags/:/bags
       - ../../robot/ros_ws/src/robot_bringup/rviz/:/bags/rviz
