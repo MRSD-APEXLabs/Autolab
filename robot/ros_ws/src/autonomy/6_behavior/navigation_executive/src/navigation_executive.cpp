@@ -159,11 +159,11 @@ void NavigationExecutive::tick_channel(Channel& channel) {
     }
 
     if (!channel.goal_in_flight) {
-        // Defensive fallback only: on the normal path, goal_in_flight is always true here (the
-        // active_has_changed() branch above already returned for a fresh activation). This can
-        // only be reached if a terminal outcome below did not also clear commanded_condition,
-        // leaving the BT thinking we're still active after we already finished.
-        action->set_running();
+        // Already finished this activation: hold the terminal SUCCESS/FAILURE until the BT
+        // deactivates us. finish() clears commanded_condition, but the BT engine needs at least
+        // one tick to see that and send Active(false); until then we're still active here.
+        // Overwriting the status with RUNNING in that window would flip a finished goal back
+        // to RUNNING for anyone watching the status topic (routine_executor included).
         return;
     }
 
