@@ -1,7 +1,9 @@
 import json
+import math
 
 from gcs_monitoring.mqtt_ros2_bridge import (
     STRING_CMD_TOPIC_MAP,
+    TYPED_CMD_TOPIC_MAP,
     _build_goal_pose,
     _build_manipulation_command,
     _build_ot2_command,
@@ -9,18 +11,39 @@ from gcs_monitoring.mqtt_ros2_bridge import (
 )
 
 
-def test_build_goal_pose_converts_all_fields():
+def test_build_goal_pose_builds_map_frame_pose_stamped():
     msg = _build_goal_pose({'x': 1.5, 'y': -2.0, 'theta': 90})
-    assert msg.x == 1.5
-    assert msg.y == -2.0
-    assert msg.theta == 90.0
+    assert msg.header.frame_id == 'map'
+    assert msg.pose.position.x == 1.5
+    assert msg.pose.position.y == -2.0
+    assert msg.pose.position.z == 0.0
 
 
-def test_build_goal_pose_coerces_ints_to_float():
-    msg = _build_goal_pose({'x': 1, 'y': 2, 'theta': 3})
-    assert isinstance(msg.x, float)
-    assert isinstance(msg.y, float)
-    assert isinstance(msg.theta, float)
+def test_build_goal_pose_converts_theta_degrees_to_yaw_quaternion():
+    msg = _build_goal_pose({'x': 0, 'y': 0, 'theta': 90})
+    q = msg.pose.orientation
+    assert q.x == 0.0
+    assert q.y == 0.0
+    assert math.isclose(q.z, math.sin(math.radians(90) / 2.0))
+    assert math.isclose(q.w, math.cos(math.radians(90) / 2.0))
+
+
+def test_build_goal_pose_zero_theta_is_identity_orientation():
+    msg = _build_goal_pose({'x': 1, 'y': 2, 'theta': 0})
+    assert msg.pose.orientation.z == 0.0
+    assert msg.pose.orientation.w == 1.0
+
+
+def test_goal_pose_routes_through_behavior_tree():
+    ros2_topic, _msg_type, _builder = TYPED_CMD_TOPIC_MAP['cmd/navigation/goal_pose']
+    assert ros2_topic == '/robot_1/behavior/navigate_to_pose_command'
+
+
+def test_go_to_location_topic_routes_through_behavior_tree():
+    assert (
+        STRING_CMD_TOPIC_MAP['cmd/navigation/go_to_location']
+        == '/robot_1/behavior/go_to_location_command'
+    )
 
 
 def test_planning_command_topic_is_registered():

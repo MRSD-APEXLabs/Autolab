@@ -20,13 +20,14 @@ Environment variables:
 """
 
 import json
+import math
 import os
 import time
 
 import paho.mqtt.client as mqtt
 import rclpy
 from behavior_tree_msgs.msg import LabMachineCommand, ManipulationCommand
-from geometry_msgs.msg import Pose2D
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -39,15 +40,20 @@ STRING_CMD_TOPIC_MAP = {
     'cmd/routine_executor/cancel': '/routine_executor/cancel',
     'cmd/planning/command': '/planning_command',
     'cmd/perception/camera_mode_cmd': '/robot_1/behavior/perception/camera_mode_cmd',
+    'cmd/navigation/go_to_location': '/robot_1/behavior/go_to_location_command',
 }
 
 
 # ── Typed commands — one named builder function per command ────────────────
-def _build_goal_pose(payload: dict) -> Pose2D:
-    msg = Pose2D()
-    msg.x = float(payload['x'])
-    msg.y = float(payload['y'])
-    msg.theta = float(payload['theta'])
+def _build_goal_pose(payload: dict) -> PoseStamped:
+    # theta arrives in degrees from the UI; yaw-only quaternion (REP-103: CCW from +x).
+    yaw = math.radians(float(payload['theta']))
+    msg = PoseStamped()
+    msg.header.frame_id = 'map'
+    msg.pose.position.x = float(payload['x'])
+    msg.pose.position.y = float(payload['y'])
+    msg.pose.orientation.z = math.sin(yaw / 2.0)
+    msg.pose.orientation.w = math.cos(yaw / 2.0)
     return msg
 
 
@@ -83,7 +89,8 @@ def _build_shaker_command(payload: dict) -> LabMachineCommand:
 
 TYPED_CMD_TOPIC_MAP = {
     'cmd/navigation/goal_pose': (
-        '/robot_1/swerve/goal_pose', Pose2D, _build_goal_pose,
+        '/robot_1/behavior/navigate_to_pose_command', PoseStamped,
+        _build_goal_pose,
     ),
     'cmd/manipulation/command': (
         '/robot_1/behavior/manipulation_command', ManipulationCommand,
