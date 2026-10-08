@@ -1,0 +1,4 @@
+# pip packages for visual_servoing, into the venv that runs the node (with --system-site-packages, so ROS,
+# numpy and the system cv2 stay visible). ultralytics comes with camera_perception (see its requirements.txt).
+xarm-python-sdk>=1.14
+websockets>=10

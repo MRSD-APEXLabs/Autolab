@@ -168,8 +168,13 @@ static int extend_greedy_with_projection(std::vector<RRTNode>& tree,
     int last_added_idx = -1;
     int ni = nearest(tree, q_target);
     JointVec q_curr = tree[ni].q;
+    double d_curr = joint_dist(q_curr, q_target);
 
-    while (joint_dist(q_curr, q_target) > 1e-6)
+    // A straight march needs d/STEP_SIZE steps; allow slack for projection
+    // jitter but never walk unbounded.
+    const int max_steps = static_cast<int>(d_curr / crrt_cfg::STEP_SIZE) + 20;
+
+    for (int step = 0; step < max_steps && d_curr > 1e-6; ++step)
     {
         JointVec q_steered = steer(q_curr, q_target, crrt_cfg::STEP_SIZE);
         rs.setJointGroupPositions(jmg, q_steered);
@@ -178,6 +183,13 @@ static int extend_greedy_with_projection(std::vector<RRTNode>& tree,
 
         JointVec q_projected;
         rs.copyJointGroupPositions(jmg, q_projected);
+
+        // The ee_down projection only preserves end-effector position; in
+        // joint space it can pull the sample back as far as steer() advanced
+        // it. If the step made no net progress the manifold blocks this
+        // direction, so stop instead of marching in place forever.
+        double d_next = joint_dist(q_projected, q_target);
+        if (d_next >= d_curr) break;
 
         collision_detection::CollisionRequest req;
         collision_detection::CollisionResult  res;
@@ -188,8 +200,9 @@ static int extend_greedy_with_projection(std::vector<RRTNode>& tree,
         tree.push_back({q_projected, (last_added_idx == -1) ? ni : last_added_idx});
         last_added_idx = (int)tree.size() - 1;
         q_curr = q_projected;
+        d_curr = d_next;
 
-        if (joint_dist(q_curr, q_target) < 0.001) break;
+        if (d_curr < 0.001) break;
     }
 
     return last_added_idx;

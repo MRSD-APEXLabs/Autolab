@@ -1,0 +1,33 @@
+# VLP-16 driver + cloud conversion (velodyne 2.5.1).
+# Derived from /home/labx/nav_nav/vlp16/vlp16_rviz/config/vlp16.yaml (the user's working setup); differences:
+#   * fixed_frame / target_frame are EMPTY: the cloud stays in the sensor frame ("velodyne") and the node creates no
+#     TF listener at all. cloud_to_scan works in the sensor frame, and the real base_link -> velodyne transform comes
+#     from the URDF (robot_state_publisher), not from an all-zero static TF.
+#   * "calibration" is not set here: it must be an ABSOLUTE path, so robot.launch.py supplies
+#     <velodyne_pointcloud share>/params/VLP16db.yaml.
+
+velodyne_driver_node:
+  ros__parameters:
+    device_ip: "192.168.1.202"
+    frame_id: "velodyne"
+    model: "VLP16"
+    port: 2368
+    rpm: 600.0                      # only sets packets-per-scan (76); it does not configure the sensor
+    gps_time: false                 # packets are stamped with host ROS time
+    time_offset: 0.0
+    enabled: true
+    read_once: false
+    read_fast: false
+    repeat_delay: 0.0
+    timestamp_first_packet: false   # cloud stamp = END of the sweep (cloud_to_scan keeps it)
+
+velodyne_transform_node:
+  ros__parameters:
+    model: "VLP16"
+    fixed_frame: ""
+    target_frame: ""
+    min_range: 0.1                  # the sensor returns nothing below ~0.5 m anyway; cloud_to_scan applies range_min
+    max_range: 130.0
+    view_direction: 0.0
+    view_width: 6.283185307179586   # full circle; the robot-body sector is removed in cloud_to_scan
+    organize_cloud: false           # height 1, only valid points (what cloud_to_scan expects)

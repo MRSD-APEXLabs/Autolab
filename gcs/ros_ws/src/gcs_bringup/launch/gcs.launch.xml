@@ -11,4 +11,11 @@
   <node pkg="domain_bridge" exec="domain_bridge" args="$(find-pkg-share gcs_bringup)/config/domain_bridge.yaml">
   </node>
 
+  <!-- Monitoring bridges -->
+  <node pkg="gcs_monitoring" exec="ros2_mqtt_bridge" output="screen" respawn="true" respawn_delay="1" />
+  <node pkg="gcs_monitoring" exec="mqtt_ros2_bridge" output="screen" respawn="true" respawn_delay="1" />
+
+  <!-- Routine executor -->
+  <node pkg="routine_executor" exec="routine_executor_node" output="screen" respawn="true" respawn_delay="1" />
+
 </launch>

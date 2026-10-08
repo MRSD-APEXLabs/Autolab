@@ -173,3 +173,116 @@ def test_current_step_safe_after_completion():
     sm.start()
     sm.on_success()
     assert sm.current_step() == {}  # no IndexError
+
+
+# --- pause / resume ---
+
+def test_pause_sets_state_to_paused():
+    sm = make_sm()
+    sm.start()
+    sm.pause()
+    assert sm.state == 'paused'
+
+
+def test_pause_ignored_when_not_running():
+    sm = make_sm()
+    sm.pause()  # state is idle
+    assert sm.state == 'idle'
+
+
+def test_resume_sets_state_to_running():
+    sm = make_sm()
+    sm.start()
+    sm.pause()
+    sm.resume()
+    assert sm.state == 'running'
+
+
+def test_resume_ignored_when_not_paused():
+    sm = make_sm()
+    sm.start()
+    sm.resume()  # state is running, not paused
+    assert sm.state == 'running'
+
+
+def test_cancel_while_paused_sets_failed():
+    sm = make_sm()
+    sm.start()
+    sm.pause()
+    sm.cancel()
+    assert sm.state == 'failed'
+    assert sm.error == 'cancelled'
+
+
+def test_on_success_while_paused_stays_paused():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}])
+    sm.start()
+    sm.pause()
+    sm.on_success()
+    assert sm.state == 'paused'
+    assert sm.current_step_idx == 1
+
+
+def test_on_success_last_step_while_paused_sets_success():
+    sm = make_sm([{'name': 'pick_base'}])
+    sm.start()
+    sm.pause()
+    sm.on_success()
+    assert sm.state == 'success'
+
+
+def test_needs_dispatch_true_after_success_while_paused():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}])
+    sm.start()
+    sm.acknowledge_dispatch()
+    sm.pause()
+    sm.on_success()
+    assert sm.needs_dispatch is True
+
+
+def test_on_failure_while_paused_within_retries_stays_paused():
+    sm = make_sm(max_retries=3)
+    sm.start()
+    sm.pause()
+    sm.on_failure()
+    assert sm.state == 'paused'
+    assert sm.retry_count == 1
+
+
+def test_on_failure_while_paused_exceeds_retries_sets_failed():
+    sm = make_sm(max_retries=2)
+    sm.start()
+    sm.pause()
+    sm.on_failure()  # retry 1
+    sm.on_failure()  # retry 2 — exhausted
+    assert sm.state == 'failed'
+    assert sm.error is not None
+
+
+def test_resume_then_dispatch_on_pending_step():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}])
+    sm.start()
+    sm.acknowledge_dispatch()
+    sm.pause()
+    sm.on_success()       # step 0 done while paused, needs_dispatch = True, state stays paused
+    sm.resume()           # back to running
+    assert sm.state == 'running'
+    assert sm.needs_dispatch is True
+    assert sm.current_step_idx == 1
+
+
+def test_to_dict_state_reflects_paused():
+    sm = make_sm()
+    sm.start()
+    sm.pause()
+    d = sm.to_dict()
+    assert d['state'] == 'paused'
+    assert d['current_step_name'] == 'pick_base'
+
+
+def test_start_while_paused_is_rejected():
+    sm = make_sm()
+    sm.start()
+    sm.pause()
+    with pytest.raises(RuntimeError):
+        sm.start()

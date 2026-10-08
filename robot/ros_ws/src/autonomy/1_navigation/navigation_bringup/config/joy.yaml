@@ -1,0 +1,51 @@
+# Gamepad: joy_node (ros-jazzy-joy 3.3.0, raw SDL joystick API) + nav5 joy_teleop.
+
+joy_node:
+  ros__parameters:
+    # EXACT SDL name (SDL_JoystickNameForIndex). Not "X360 Controller" (what joy_enumerate_devices prints) and not
+    # "Microsoft X-Box 360 pad" (the kernel name). Never select by device_id: index 0 on this machine is the
+    # 3Dconnexion SpaceMouse.
+    device_name: "Xbox 360 Controller"
+    deadzone: 0.15              # this pad rests at 0.07 on right-stick X; the 0.05 default leaks a constant creep
+    autorepeat_rate: 20.0       # [Hz] keeps /joy flowing while the sticks are held still
+    coalesce_interval_ms: 1
+    sticky_buttons: false
+
+# Layout from joy_node for this pad (8 axes, 11 buttons; left / up = +1, triggers rest at +1):
+#   axes    0 LX  1 LY  2 LT  3 RX  4 RY  5 RT  6 dpad-X  7 dpad-Y
+#   buttons 0 A  1 B  2 X  3 Y  4 LB  5 RB  6 back  7 start  8 guide  9 L3  10 R3
+# Same feel as the user's final.py: RIGHT stick translates, LEFT stick X rotates, no sign flips.
+joy_teleop:
+  ros__parameters:
+    axis_vx: 4                  # right stick Y, up   = +x (forward)
+    axis_vy: 3                  # right stick X, left = +y (left)
+    axis_wz: 0                  # left stick X,  left = +yaw (CCW)
+
+    # Deadman = LT. Commands are published ONLY while it is held past the threshold. The triggers
+    # report +1.0 RELEASED and -1.0 fully pressed, which joy_teleop maps to 0.0 .. 1.0; the
+    # threshold must stay above 0.5 so a half-pressed or not-yet-read trigger cannot engage it.
+    deadman_axis: 2             # LT
+    deadman_axis_threshold: 0.6
+    deadman_button: -1          # set to 4 to let LB work as a deadman as well
+    require_deadman: true
+    turbo_button: 5             # RB
+
+    scale_linear: 0.30          # [m/s]
+    scale_angular: 0.50         # [rad/s]
+    scale_linear_turbo: 0.80
+    scale_angular_turbo: 1.20
+    stick_deadband: 0.10        # on top of the joy_node deadzone, rescaled like final.py
+
+    # Field-centric driving relative to a stored heading (A re-stores the current one). The odometry itself is never
+    # reseeded: SLAM / AMCL need a continuous odom frame.
+    field_centric: true
+    reseed_button: 0            # A
+
+    estop_button: 1             # B latches /e_stop = true
+    estop_release_button: 7     # start releases it (only with the deadman released and the sticks centred)
+    cancel_nav_button: 2        # X cancels the active Nav2 goal (/nav_cancel)
+    estop_cancels_nav: true     # latching the e-stop also cancels the goal, so releasing it cannot resume driving
+
+    joy_timeout: 0.5            # [s] /joy goes silent when the pad is unplugged -> treated as deadman released
+    odom_timeout: 0.5           # [s] field-centric without fresh /odom -> zero command
+    publish_rate: 20.0          # [Hz]

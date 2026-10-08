@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, Command, PathJoinSubstitution, EnvironmentVariable
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -66,7 +67,7 @@ def launch_setup(context, *args, **kwargs):
         executable='robot_state_publisher',
         name='robot_state_publisher',
         parameters=[{
-            'robot_description': robot_description_content,
+            'robot_description': ParameterValue(robot_description_content, value_type=str),
             'publish_frequency': publish_frequency,
             'ignore_timestamp': ignore_timestamp,
             'frame_prefix': frame_prefix,

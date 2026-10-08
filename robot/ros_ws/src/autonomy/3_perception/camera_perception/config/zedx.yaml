@@ -1,0 +1,59 @@
+# camera_perception on the ZED X (base camera): the old Camera-Edge "inspect" worker. launch/perception.launch.xml sets
+# yolo.model, yolo.device, pointcloud.mode and pointcloud.fresh from its launch arguments; the rest are read from here.
+# Floats may be written as ints (1 for 1.0); an array must keep its element type.
+/**:
+  ros__parameters:
+    camera: zedx
+    output_frame: top_camera     # header frame of every output ('' = the image's, zedx_left_camera_optical_frame);
+                                 # the Autolab planner and MoveIt know the ZED X left camera as top_camera
+    publish_image: true          # perception/image: the input image, only while subscribed
+    annotate: true               # perception/annotated_image, only computed while subscribed
+    max_rate: 10.0               # Hz cap on processed frames (0 = every depth frame, ~16/s: ~1.3 CPU cores, most of
+                                 # it full-resolution tag detection; 10 Hz is plenty for tag and plate positions)
+
+    apriltags:
+      enable: true
+      family: tag36h11
+      ids: [0, 1, 2, 21, 22]     # others are ignored; [-1] keeps every id
+      size: 0.0625               # m, black-square edge; PnP distance scales with it
+      sizes: ''                  # per-id overrides 'id=m, id=m' (the node warns when the depth measures a tag
+                                 # more than 15% off its size), e.g. '21=0.075, 22=0.075'
+      nthreads: 2
+      quad_decimate: 1.0         # 2.0 is ~3x faster but loses the small (~30 px) tags' bits more often
+      max_hamming: 1             # corrected bit errors accepted
+      position: pnp              # pnp (from the corners and size) or depth (PnP rotation, position from the stereo depth)
+
+    yolo:
+      enable: true
+      model: ''                  # set by the launch file: best_wrist.pt (oriented boxes, class wellplate). On the
+                                 # ZED X it finds the clear plate at 0.9+ with CLAHE; best_top.pt did not find it at all
+      device: cuda:0             # falls back to cpu without CUDA
+      conf: 0.8                  # Camera-Edge inspect dropped wellplates below 0.8
+      iou: 0.7
+      imgsz: 0                   # 0 = the model's training size (640). 960: plate 0.90 -> 0.91, YOLO 33 -> 57 ms
+      classes: wellplate         # keep only these ('name, name' or ids; '' = all). /inspect/wellplates must hold
+                                 # plates only: the planner takes its last marker (best_seg.pt has other classes)
+      max_detections: 0          # 0 = all
+      half: false
+      clahe_clip: 3.0            # CLAHE on the model's input (LAB lightness); 0 = off. Without it the dim deck
+      clahe_tiles: 4             # hides the plate: 0.00 -> 0.90 on the 2026-09-22 frames, no false positives
+      marker_ns: wellplates      # the planner takes the last ADD marker of ns "wellplates" on /inspect/wellplates
+      json_key: wellplates
+
+    pointcloud:
+      enable: true
+      mode: live                 # live: a cloud per frame (<= max_rate); snapshot: 10 frames stacked once and
+                                 # republished (pc3.py), cached in cache_path, recaptured by perception/capture_snapshot
+      stride: 4                  # every 4th pixel in x and y: 240 x 150 samples
+      bounds_x: [-0.6, 0.6]      # m, camera frame (x right, y down, z forward), as Camera-Edge cropped the ZED cloud
+      bounds_y: [-0.6, 0.6]
+      bounds_z: [0.2, 1.7]
+      edge_threshold: 0.02       # drop points on depth jumps above 2% of the depth per pixel (0 = keep)
+      color: true                # rgb field (RViz); MoveIt uses x, y, z only
+      max_rate: 5.0              # Hz, clouds (live) or snapshot republishing
+      voxel_size: 0.01           # m, one point per voxel (0 = off); shrinks a snapshot ~5x for the 4 cm octomap
+      snapshot_frames: 10
+      cache_path: ~/.ros/camera_perception/zedx_snapshot.npy   # snapshot mode; also loads pc3's N x 3 .npy
+      fresh: false               # snapshot: ignore the cache; both modes: clear the octomap before the first cloud
+      clear_octomap_service: /clear_octomap   # '' = never clear
+      clear_octomap_attempts: 40

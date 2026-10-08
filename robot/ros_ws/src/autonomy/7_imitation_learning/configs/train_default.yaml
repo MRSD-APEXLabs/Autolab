@@ -1,0 +1,37 @@
+# ACT training defaults (actlib/train.py). Override on the command line:
+#   python -m actlib.train --dataset data/wellplate_place --inputs cam_left cam_right depth joints --action tcp_abs \
+#          --name first_try --set model.chunk_size=100 train.lr=3e-5
+# Every run copies the fully resolved values to runs/<run>/config.yaml.
+seed: 0
+device: auto            # auto = cuda if available else cpu
+inputs: [cam_left, cam_right, joints]   # any subset of: cam_left cam_right depth joints tcp
+action: tcp_abs         # tcp_abs = [x y z yaw] | joint_abs = 6 joint angles | cmd_vel = [vx vy vz wz]
+
+model:
+  chunk_size: 60        # future steps predicted per query (60 steps ~ 2 s at ~29 Hz)
+  hidden_dim: 512
+  dim_feedforward: 3200
+  enc_layers: 4
+  dec_layers: 7
+  nheads: 8
+  dropout: 0.1
+  latent_dim: 32
+  kl_weight: 10.0
+  pretrained: true      # ImageNet weights for the RGB backbones (downloaded on first use); depth is always trained from scratch
+
+image:
+  width: 480            # images/depth are resized to this before the backbone
+  height: 300
+  depth_max_m: 1.5      # depth is clipped to this and scaled to 0..1; invalid pixels become 0 and are also passed as a mask channel
+
+train:
+  epochs: 50
+  batch_size: 8
+  lr: 1.0e-5
+  lr_backbone: 1.0e-5
+  weight_decay: 1.0e-4
+  grad_clip: 10.0       # 0 disables
+  num_workers: 4
+  amp: true             # mixed precision on CUDA
+  val_fraction: 0.1     # fraction of EPISODES held out (at least 1 when there are >= 3 episodes)
+  val_every: 1          # epochs

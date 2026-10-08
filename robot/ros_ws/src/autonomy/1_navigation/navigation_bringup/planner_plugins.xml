@@ -1,0 +1,5 @@
+<library path="latest_frame_smac_planner">
+  <class type="navigation_bringup::LatestFrameSmacPlanner2D" base_class_type="nav2_core::GlobalPlanner">
+    <description>Smac 2D with map-route poses evaluated using current localization.</description>
+  </class>
+</library>

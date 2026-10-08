@@ -1,0 +1,7 @@
+xarm-python-sdk==1.18.4
+numpy
+opencv-python-headless
+h5py
+websockets
+pynput
+pyyaml

@@ -26,8 +26,6 @@
 #include <std_msgs/msg/empty.hpp>
 #include <vector>
 
-#include "rclcpp_action/rclcpp_action.hpp"
-
 class BehaviorExecutive : public rclcpp::Node {
    private:
     bt::Condition* armed_condition;

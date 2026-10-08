@@ -1,0 +1,28 @@
+# cloud_to_scan: /velodyne_points -> /scan (2-D slice for SLAM / AMCL / costmaps) + /obstacle_points (3-D obstacle
+# band for the costmap voxel layer and the collision monitor). All values were measured on the user's bag
+# (velodyne_20260829_141942); heights are ABOVE THE FLOOR, azimuths are in the velodyne frame.
+cloud_to_scan:
+  ros__parameters:
+    lidar_height: 0.330            # optical centre above the floor (floor-plane fit: 0.3296 m, std 1.4 mm)
+
+    # Usable azimuth window. Everything else ([154, 180] U [-180, -62] deg, ~136 deg behind / right of the robot)
+    # is the robot's own superstructure: hard blind sectors plus partially occluded slivers. Beams there are never
+    # produced, so downstream never mistakes "own body / no data" for free space.
+    angle_min_deg: -62.0
+    angle_max_deg: 154.0
+    angle_increment_deg: 0.5       # -> 433 beams, CONSTANT (slam_toolbox caches the laser geometry of the first scan)
+
+    range_min: 0.55                # the VLP-16 returns nothing below 0.50 m; 0.50-0.55 m returns are robot parts
+    range_max: 25.0                # must stay >= slam_toolbox max_laser_range (20.0)
+
+    scan_min_height: 0.20          # SLAM slice: the band around the lidar plane is the most viewpoint-independent
+    scan_max_height: 0.60
+
+    obstacle_min_height: 0.10      # floor noise reaches +0.04 m while driving
+    obstacle_max_height: 1.20      # keep above the robot height: 38 % of occupied cells in the lab are overhang-only
+    obstacle_max_range: 6.0
+    obstacle_voxel: 0.05           # matches the costmap resolution
+
+    scan_frame: ""                 # "" = copy the cloud frame (velodyne): rays start at the true sensor origin
+    scan_time: 0.1009              # measured sweep period
+    publish_obstacles: true

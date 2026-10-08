@@ -1,0 +1,6 @@
+# pip packages for camera_perception, into the venv that runs the nodes (with --system-site-packages, so
+# ROS, numpy and the system cv2 stay visible). Don't let pip pull opencv-python: it would shadow the system cv2.
+pupil-apriltags>=1.0.4
+# ultralytics' own dependencies include opencv-python; on the Thor it was installed with --no-deps plus
+# filelock>=3.16.1, cloudpickle, ultralytics-thop and nvidia-ml-py (torch and torchvision were already there)
+ultralytics>=8.4.19

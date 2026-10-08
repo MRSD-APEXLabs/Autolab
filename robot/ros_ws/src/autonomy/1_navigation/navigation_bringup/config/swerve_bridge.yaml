@@ -1,0 +1,49 @@
+# swerve_bridge: /cmd_vel -> CTRE phoenix6 swerve drivetrain, drivetrain odometry -> /odom + TF odom->base_footprint.
+# THE ONLY hardware-facing node of the stack.
+swerve_bridge:
+  ros__parameters:
+    # SAFETY: false = phoenix6 SIMULATION (no CAN traffic, the robot cannot move). robot.launch.py ALWAYS overrides this
+    # value with its "hardware" launch argument (default false), so editing it here does not arm the launch files.
+    # Leave it false: it only matters for a bare "ros2 run ... --params-file".
+    hardware: false
+
+    phoenix6_site_packages: "/home/labx/nav_nav/Navigation/generated/venv/lib/python3.12/site-packages"
+    tuner_constants_dir: "/home/labx/nav_nav/Navigation/generated"
+    work_dir: "~/.ros/swerve_bridge"   # tuner_constants opens ./logs/*.hoot and the sim writes ./ctre_sim relative to cwd
+
+    odom_frame: "odom"
+    base_frame: "base_footprint"       # the URDF root; slam_toolbox / AMCL / Nav2 all use base_footprint
+    publish_tf: true
+    rate_hz: 50.0                      # control + odometry publish rate
+    odometry_hz: 100.0                 # phoenix6 odometry thread
+
+    cmd_timeout: 0.3                   # [s] no fresh /cmd_vel -> zero request and the enable signal is no longer fed
+
+    # Last line of defence; the teleop scales (0.8 m/s turbo) and Nav2 limits (0.4 m/s) sit below these.
+    max_linear_speed: 1.0              # [m/s] clamp on the NORM of (vx, vy)
+    max_angular_speed: 1.5             # [rad/s]
+    max_linear_accel: 1.2              # [m/s^2] limits speeding UP only; stops are always immediate. Was 2.0: the
+                                       # collision monitor toggling 40 % <-> 100 % made the drive jerk (logs 2026-09-21)
+    max_angular_accel: 3.0             # [rad/s^2]
+
+    drive_request_type: "velocity"     # "velocity" (closed loop) | "open_loop"
+
+    # /odom covariance diagonals. Pose: x, y, z, roll, pitch, yaw. Twist: vx, vy, vz, wx, wy, wz.
+    pose_covariance_diagonal: [0.01, 0.01, 0.000001, 0.000001, 0.000001, 0.02]
+    twist_covariance_diagonal: [0.005, 0.005, 0.000001, 0.000001, 0.000001, 0.01]
+
+    # A swerve module's ANGLE is atan2() of its velocity vector, so near zero speed the angle is
+    # meaningless and a command jittering around zero swings the azimuths randomly while the robot
+    # does not move.  Below these thresholds phoenix6 zeroes the request and the modules hold their
+    # angle.  Keep them just under the slowest speed the drivetrain can actually execute.
+    deadband: 0.02              # [m/s]
+    rotational_deadband: 0.05   # [rad/s]
+
+    # Steer stabiliser: the module angles depend only on the DIRECTION of the twist (vx, vy, steer_radius * wz),
+    # so controller noise (MPPI wz jitter at low vx is the worst case) makes all four azimuths wobble. Direction
+    # changes below steer_hold_angle are ignored; larger ones are followed at steer_max_rate while moving.
+    # Stops, slowdowns and starts from rest are never delayed. steer_filter: false restores the old behaviour.
+    steer_filter: true
+    steer_hold_angle: 0.035     # [rad] 2 deg. Raise (0.05-0.09) if the azimuths still twitch; costs path accuracy.
+    steer_max_rate: 2.5         # [rad/s] 90 deg direction change in 0.63 s. Lower = calmer but lazier steering.
+    steer_radius: 0.359         # [m] module distance from the base centre

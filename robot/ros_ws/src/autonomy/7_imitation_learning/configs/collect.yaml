@@ -1,0 +1,49 @@
+# ACT data collection settings (read by actlib/collect.py)
+arm_ip: 192.168.1.236
+
+xavier:
+  host: 192.168.1.101
+  control_port: 8765
+  record_port: 8768
+  # Streamed wrist-camera size (fraction of the native 960x600) and JPEG quality. The Xavier's Ethernet link currently
+  # negotiates only 100 Mb/s (~11.8 MB/s): 0.6667 / 90 measured 261 KB/frame = 7.5 MB/s at 28.8 Hz, no drops.
+  # With a gigabit link use scale 1.0 and jpeg_quality 95.
+  scale: 0.6667
+  jpeg_quality: 90
+
+recording:
+  min_cam_hz: 25            # preflight aborts below this; an episode warns below this
+  max_frame_gap_ms: 100     # an episode warns above this
+  min_duration_s: 2.0
+  max_lag_ms: 400           # preflight aborts if frames arrive later than this (link saturated / backlog)
+  tail_s: 0.35              # keep recording after the arm stops so late-arriving camera frames are captured
+  # Redundant-frame removal at save time: a camera frame is dropped when its joint angles are EXACTLY the same as the previous
+  # frame's (joint angles only; no tolerance, nothing else is compared). The first frame of each still stretch is kept. The
+  # 100 Hz robot log is never thinned. enabled: false keeps every frame.
+  dedupe:
+    enabled: true
+
+teleop:
+  loop_hz: 100
+  presets:                  # keys 1 / 2 / 3   (was 5/15/40 mm/s and 3/8/15 deg/s)
+    - {lin_mm_s: 15,  ang_deg_s: 8}
+    - {lin_mm_s: 40,  ang_deg_s: 20}
+    - {lin_mm_s: 100, ang_deg_s: 45}
+  start_preset: 2           # 1-based; the session starts on the middle one
+  accel_lin_mm_s2: 250      # was 100: ramps up/down faster (100 mm/s is reached in 0.4 s and stops within 20 mm)
+  accel_ang_deg_s2: 150     # was 60
+  release_debounce_ms: 30   # ignores X11 auto-repeat release/press flicker
+
+# Soft workspace box for the TCP, xArm base frame, mm. Motion toward a wall is stopped before it is reached.
+# CHECK THESE FOR YOUR DECK BEFORE THE FIRST RUN, especially z min: the fingertips must stay above the table.
+workspace_mm:
+  x: [-200, 600]
+  y: [-500, 500]
+  z: [70, 500]     # min was 120 (TCP stopped at ~121.9); lowered by 50 mm. The wall keeps a 2 mm margin.
+
+# Optional TCP pose [x, y, z, roll, pitch, yaw] (mm, deg) that "g" at the prompt moves to (straight line, slow).
+# null = feature off.
+start_pose: null
+start_speed_mm_s: 60
+
+gripper_log: true           # read gripper setpoint + both finger pressure sensors at ~5 Hz (state only)

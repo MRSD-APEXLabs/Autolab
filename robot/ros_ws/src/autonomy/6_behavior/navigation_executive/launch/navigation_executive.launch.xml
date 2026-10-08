@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="navigation_executive" exec="navigation_executive" output="screen" />
+</launch>

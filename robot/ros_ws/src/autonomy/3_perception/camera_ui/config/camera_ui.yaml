@@ -1,0 +1,12 @@
+# camera_ui parameters. launch/camera_ui.launch.xml sets host and port from its ui_host and ui_port launch arguments,
+# so change those on the ros2 launch command line; the rest are read from here.
+/**:
+  ros__parameters:
+    host: 0.0.0.0                # address the page is served on (0.0.0.0: reachable from other machines)
+    port: 8001
+    cameras: [zedx, zedx_nano]   # camera hub names; topics are read from /<cam>/...
+    labels: ['ZED X (base)', 'ZED X Nano (wrist)']   # shown on the camera switch, same order as cameras
+    max_fps: 15.0                # per browser stream; frames are encoded on demand, once per frame
+    jpeg_quality: 80
+    stale_after: 1.0             # s; older frames count as stale: overlay on the page, raw image instead of the rectified one
+    hub_node: /camera_hub        # zedx_nano_camera camera_hub node: <hub_node>/status, <hub_node>/select_<cam>, <hub_node>/release

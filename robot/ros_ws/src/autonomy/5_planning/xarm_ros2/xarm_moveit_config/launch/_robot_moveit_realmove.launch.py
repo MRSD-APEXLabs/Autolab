@@ -55,6 +55,7 @@ def launch_setup(context, *args, **kwargs):
     geometry_mesh_tcp_rpy = LaunchConfiguration('geometry_mesh_tcp_rpy', default='"0 0 0"')
 
     no_gui_ctrl = LaunchConfiguration('no_gui_ctrl', default=False)
+    show_rviz = LaunchConfiguration('show_rviz', default=True)
     ros_namespace = LaunchConfiguration('ros_namespace', default='').perform(context)
 
     ros2_control_plugin = 'uf_robot_hardware/UFRobotSystemHardware'
@@ -166,6 +167,7 @@ def launch_setup(context, *args, **kwargs):
             'attach_xyz': attach_xyz,
             'attach_rpy': attach_rpy,
             'no_gui_ctrl': no_gui_ctrl,
+            'show_rviz': show_rviz,
             'use_sim_time': 'false',
             'moveit_config_dump': yaml.dump(moveit_config.to_dict()),
         }.items(),
@@ -225,8 +227,8 @@ def launch_setup(context, *args, **kwargs):
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments=['0.012652', '0.265518', '-0.584171',
-                    '-1.5708', '0', '1.0472',   # yaw pitch roll
+        arguments=['0.008595', '0.282195', '-0.600188',
+                   '-1.650408', '-0.049855', '1.019755',   # yaw pitch roll
                    'Chassis_1', 'top_camera']
     )
 

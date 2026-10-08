@@ -1,0 +1,100 @@
+# visual_servo_node. launch/visual_servo.launch.xml sets execute, preview, robot_ip, yolo.model, yolo.device and
+# control_port from its arguments; everything else is read from here. Lengths in metres unless the name says mm.
+/**:
+  ros__parameters:
+    camera_namespace: /zedx_nano      # zedx_nano_depth outputs: left/image_rect_color, depth/image_rect, depth/camera_info
+    depth_scale: 1.0                  # multiplies the depth before use (see README: the RAFT depth may read short up close)
+    select_service: /camera_hub/select_zedx_nano   # switch the hub to the Nano at the start of a run; '' = don't
+    select_timeout: 20.0
+    restore_camera: true              # afterwards, switch back to the camera the hub streamed before (the ZED X)
+    hub_node: /camera_hub
+    control_host: 0.0.0.0             # Camera-Edge control WebSocket; control_port (launch) -1 disables it
+
+    yolo:
+      model: ''                       # set by the launch file (best_wrist.pt: oriented boxes, class wellplate)
+      device: cuda:0
+      conf: 0.001                     # report weak candidates too; servo.min_conf decides (the plate scored 0.0025
+                                      # on the arm from 147 mm up, 2026-09-22: weak ones need the depth size check)
+      iou: 0.7
+      imgsz: 0
+      classes: ''
+      clahe_clip: 0.0
+
+    # Where the camera and the fingertips are: the CAD numbers (mount.py explains the frames). The flange is the
+    # xArm tool frame without TCP offset, z towards the fingers; the camera is on its +x side.
+    mount:
+      camera_offset_mm: [90.711, -0.078, 5.732]   # camera reference point from the EE point
+      tilt_deg: 20.0                                # optical axis tipped towards the fingers (bracket at 110 deg)
+      lens_offset_mm: [-9.0, 0.0, 0.0]              # left lens from that point, camera frame (18 mm baseline)
+      correction_rpy_deg: [0.0, 0.0, 0.0]           # extra camera rotation about its x, y, z
+      tip_mm: [-1.022, -7.838, 109.104]             # fingertip centre from the EE point
+      ee_below_flange_mm: 0.0                       # cancels out; only absolute heights in the status change
+      # [x, y, z] measured in the camera frame, overrides tip_mm; [0.0] = use tip_mm. From the live depth with the
+      # gripper open (2026-09-22, README "Before the first grasp"): finger ends 112.9 mm down the flange axis (CAD 109.1),
+      # midway between the fingers (flange y -0.2); x, along the plate's long side, kept from the episode estimate
+      tip_camera_mm: [8.9, 47.2, 131.2]
+
+    servo:
+      control_rate: 50.0              # Hz
+      command_duration: 0.25          # s, the arm zeroes a velocity command it doesn't get renewed within this
+      level_at_start: true            # roll 180, pitch 0 first (Camera-Edge move_to_start_pose)
+      level_speed: 100.0              # mm/s
+      hover_height: 0.08              # fingertips above the plate's top face when the servo ends
+      grasp_offset: [0.0, 0.0]        # fingertip target shift: across the fingers, along the fingers
+      finger_axis: 'y'                # flange axis the fingers close along (Camera-Edge FINGER_TOOL_AXIS)
+      settle_count: 5                 # consecutive detections within tolerance that end the servo
+      max_image_age: 0.5
+      hold_timeout: 0.5               # s without a detection: the last plate estimate counts towards settling this often
+      lost_timeout: 5.0               # s without a detection: the attempt fails
+      align_timeout: 60.0             # s per attempt; 0 = none (a dry run then previews until stopped)
+      max_travel: 0.25                # the fingertip target must stay within this of where the run started
+      min_tip_z: -0.08                # no fingertip target below this base z
+      plate_size: [0.12776, 0.08548]  # SBS footprint (long, short); also the no-depth fallback's scale
+      size_tolerance: 0.35            # drop estimates whose long side is off by more than this fraction; 0 = off
+      min_conf: 0.25                  # below this (yolo.conf lets them through), a detection counts only with depth
+      weak_size_tolerance: 0.12       # and both sides within this fraction of plate_size (clutter drops YOLO's score)
+      filter_alpha: 0.3
+      filter_gate: 0.03
+
+    gains:
+      k_xy: 1.0                       # 1/s
+      k_z: 1.0
+      k_yaw: 1.0
+      max_xy: 0.02                    # m/s (Camera-Edge clamped to 0.02)
+      max_z: 0.02
+      max_yaw: 0.3                    # rad/s
+      tol_xy: 0.002
+      tol_z: 0.004
+      tol_yaw_deg: 1.5
+
+    grasp:
+      enable: true                    # false: stop at the hover pose
+      depth: -0.002                   # fingertips this far below the plate's top face when closing; at 0.005 they
+                                      # hit the tray on the arm, 7 mm higher grasped the plate (2026-09-22)
+      approach_speed: 30.0            # mm/s down to final_segment above the grasp height
+      final_segment: 0.02
+      final_speed: 8.0                # mm/s
+      lift: 0.10
+      lift_speed: 50.0
+      max_retries: 3
+      retry_lift: 0.05
+      return_to_start: true           # back to the pose the run started from, after a completed run
+      return_speed: 100.0
+
+    gripper:                          # the Camera-Edge FSR close (config.py values)
+      close_start: 50
+      step: 20
+      max_close: 350
+      samples: 100
+      rate: 2.0
+      # Rises above the baseline (tare_samples), not raw readings. Measured on the arm 2026-09-22, FSR1 raw:
+      # open 354 (343-368), plate held at max_close 395 (381-404); FSR2 read 0 held or not, so it is left out (-1)
+      target_pressure: [15, -1]
+      stop_pressure: [25, -1]
+      final_squeeze: 30
+      nudge_mm: 1.0
+      nudge_speed: 30.0
+      use_fsr: false                  # false: close to the gripper position (register) + close_offset, no FSRs
+      close_offset: 350               # 350 held the plate on the arm (2026-09-22)
+      close_settle: 4.0               # s for the fingers to close before lifting (1.5 lifted mid-close on the arm)
+      tare_samples: 5                 # FSR reads at the hover with the gripper open; FSR1 idles at ~360 (0: raw pressures)

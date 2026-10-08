@@ -3,10 +3,18 @@ import json
 import rclpy
 from rclpy.node import Node
 from behavior_tree_msgs.msg import LabMachineCommand, ManipulationCommand, Status
+from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 
 from routine_executor.state_machine import RoutineStateMachine
 from routine_executor.step_config import STEPS, KNOWN_STEPS
+
+STEP_MSG_CLASSES = {
+    'manipulation': ManipulationCommand,
+    'lab_machine': LabMachineCommand,
+    'string': String,
+    'pose': PoseStamped,
+}
 
 STATUS_QOS = rclpy.qos.QoSProfile(
     reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
@@ -207,7 +215,7 @@ class RoutineExecutorNode(Node):
 
         msg = config['make_msg'](step)
         topic_suffix = config['publish_topic']
-        msg_type = ManipulationCommand if config['msg_type'] == 'manipulation' else LabMachineCommand
+        msg_type = STEP_MSG_CLASSES[config['msg_type']]
 
         pub = self._get_cmd_pub(self._robot, topic_suffix, msg_type)
         pub.publish(msg)

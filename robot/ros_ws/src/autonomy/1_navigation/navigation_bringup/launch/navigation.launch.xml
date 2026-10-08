@@ -1,10 +1,46 @@
 <!-- NAVIGATION -->
+<!--
+  Autolab entry point (NAVIGATION_LAUNCH_PACKAGE / NAVIGATION_LAUNCH_FILE in .env).
+  It wraps navigation.launch.py, which starts the whole navigation stack: VLP-16 -> /scan,
+  swerve_bridge -> /odom + the drivetrain, AMCL in the saved map, Nav2, and nav_api (the /nav
+  topic API the rest of the system talks to).
+
+  THE AUTONOMY BRINGUP STARTS NOTHING HERE unless NAVIGATION_ENABLED=true is exported (or
+  enabled:=true is passed).  Navigation owns /cmd_vel, /odom and the odom->base_footprint
+  transform, so it must not come up beside another stack that drives the same base by accident.
+  autonomy/1_navigation/run.sh starts it directly and ignores this switch.
+
+  hardware:=false (the default, and what NAVIGATION_HARDWARE=false means) runs the phoenix6
+  SIMULATOR: every topic behaves normally and the robot cannot move.  true ENABLES THE
+  DRIVETRAIN.
+
+  Runs in the robot container (Humble) and on the host (Jazzy).  It needs the velodyne driver and
+  the phoenix6 Python package, which scripts/install_deps.sh installs; where they are missing,
+  navigation.launch.py logs that and starts nothing, leaving the rest of the autonomy bringup
+  alone.  See ../README.md.
+-->
 <launch>
-    <group>
+    <arg name="sim" default="true" />
 
-        <node pkg="navigation_controller" exec="navigation_controller" namespace="navigation_controller"
-        output="screen">
-        </node>
+    <arg name="enabled" default="$(env NAVIGATION_ENABLED false)"
+         description="true: the autonomy bringup starts navigation. Default false: it does not." />
+    <arg name="hardware" default="$(env NAVIGATION_HARDWARE false)"
+         description="true ENABLES THE REAL DRIVETRAIN. false = phoenix6 simulator." />
+    <arg name="map" default=""
+         description="map yaml; empty = navigation_bringup/maps/map.yaml" />
+    <arg name="rviz" default="false" description="RViz (off inside the autonomy bringup)" />
+    <arg name="api_namespace" default="/"
+         description="where the /nav API appears: / -> /nav/state, /robot_1 -> /robot_1/nav/state" />
 
-    </group>  
+    <group if="$(var enabled)">
+        <include file="$(find-pkg-share navigation_bringup)/launch/navigation.launch.py">
+            <arg name="hardware" value="$(var hardware)" />
+            <arg name="map" value="$(var map)" />
+            <arg name="rviz" value="$(var rviz)" />
+            <arg name="api_namespace" value="$(var api_namespace)" />
+        </include>
+    </group>
+    <group unless="$(var enabled)">
+        <log message="[navigation] not started by the autonomy bringup (NAVIGATION_ENABLED is not true). Start it with autonomy/1_navigation/run.sh" />
+    </group>
 </launch>

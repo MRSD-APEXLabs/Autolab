@@ -1,12 +1,19 @@
 <!-- AUTONOMY -->
 <launch>
 
+  <arg name="sim" default="true" />
+
   <!-- Interface -->
   <include
     file="$(find-pkg-share $(env INTERFACE_LAUNCH_PACKAGE))/launch/$(env INTERFACE_LAUNCH_FILE)" />
 
+  <!-- Mapping and Localization -->
+  <include file="$(find-pkg-share mapping_and_localization_bringup)/launch/mapping_and_localization.launch.xml" />
+
   <!-- Navigation -->
-  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)" />
+  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)">
+    <arg name="sim" value="$(var sim)" />
+  </include>
 
   <!-- Perception -->
   <include
@@ -19,7 +26,9 @@
   <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
 
   <!-- Planning -->
-  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)" />
+  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)">
+    <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
+  </include>
 
   <!-- Behavior -->
   <include
