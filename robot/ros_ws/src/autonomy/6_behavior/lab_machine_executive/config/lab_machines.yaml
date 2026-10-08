@@ -3,6 +3,6 @@ robot_1:
     lab_machine_executive:
       ros__parameters:
         ot2_base_url: "http://192.168.10.4:8000"
-        ot2_host: "192.168.10.9"
+        ot2_host: "192.168.10.17"
         shaker_base_url: "http://192.168.10.14"
         shaker_endpoint: "/pwm_control/"

@@ -2,3 +2,9 @@ log/
 .idea
 frames_2026*
 .superpowers/
+__pycache__/
+*.pyc
+venv/
+.venv_jog/
+build.log
+output.txt

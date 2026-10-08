@@ -1,0 +1,10 @@
+# Live ACT inference (python run_act_inference.py). PyTorch with CUDA for the target machine is
+# best installed from its own index (see pytorch.org); the versions below are the tested ones.
+numpy>=1.26,<2
+opencv-python>=4.8
+scipy>=1.11
+torch>=2.1
+torchvision>=0.16
+xarm-python-sdk>=1.13
+# --camera-source ros additionally needs a sourced ROS 2 environment (rclpy, sensor_msgs);
+# --camera-source nano-stream needs nothing beyond the above.

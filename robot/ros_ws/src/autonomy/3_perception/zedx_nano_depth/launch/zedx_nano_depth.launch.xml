@@ -1,0 +1,29 @@
+<!-- Depth from a Xavier stereo camera: <namespace>/{depth/image_rect,depth/camera_info,depth/colorized,left/image_rect_color}.
+     with_camera:=true (default) also starts zedx_nano_camera in the same namespace; for the ZED X pass
+     camera:=zedx namespace:=zedx. -->
+<launch>
+  <arg name="namespace" default="zedx_nano"/>
+  <arg name="with_camera" default="true" description="also launch zedx_nano_camera"/>
+  <arg name="camera" default="" description="hub camera for with_camera: zedx or zedx_nano ('' = the root API, i.e. the Nano)"/>
+  <arg name="host" default="192.168.1.101" description="Xavier running the camera hub (with_camera only)"/>
+  <arg name="port" default="8090"/>
+  <arg name="backend" default="neural" description="neural or sgbm"/>
+  <arg name="model" default="raft-realtime"/>
+  <arg name="models_dir" default="" description="neural weights directory ('' = ZEDX_NANO_DEPTH_MODELS or ~/.cache/zedx_nano_depth)"/>
+  <arg name="params_file" default="$(find-pkg-share zedx_nano_depth)/config/zedx_nano_depth.yaml"/>
+
+  <include file="$(find-pkg-share zedx_nano_camera)/launch/zedx_nano_camera.launch.xml" if="$(var with_camera)">
+    <arg name="namespace" value="$(var namespace)"/>
+    <arg name="camera" value="$(var camera)"/>
+    <arg name="host" value="$(var host)"/>
+    <arg name="port" value="$(var port)"/>
+    <arg name="sensor" value="stereo"/>
+  </include>
+
+  <node pkg="zedx_nano_depth" exec="zedx_nano_depth_node" name="zedx_nano_depth" namespace="$(var namespace)" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="backend" value="$(var backend)"/>
+    <param name="model" value="$(var model)"/>
+    <param name="models_dir" value="$(var models_dir)"/>
+  </node>
+</launch>

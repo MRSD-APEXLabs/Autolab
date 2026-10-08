@@ -326,8 +326,9 @@ class PointToGoal(Node):
         status = STATUS_NAMES.get(wrapped.status, f'status {wrapped.status}')
         detail = ''
         if wrapped.status == GoalStatus.STATUS_ABORTED:
-            # error_msg only exists in newer nav2_msgs: a missing field must not kill the node
-            detail = (f' (error {wrapped.result.error_code} '
+            # error_code / error_msg only exist in newer nav2_msgs (not Humble): a missing field
+            # must not kill the node
+            detail = (f" (error {getattr(wrapped.result, 'error_code', '?')} "
                       f"{getattr(wrapped.result, 'error_msg', '')})")
         self.get_logger().info(f'goal #{seq} finished: {status}{detail}')
         if seq != self._seq:

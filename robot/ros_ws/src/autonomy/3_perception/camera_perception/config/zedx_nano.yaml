@@ -1,0 +1,38 @@
+# camera_perception on the ZED X Nano (wrist camera): the old Camera-Edge "servo" worker, without a point cloud.
+# launch/perception.launch.xml sets yolo.model and yolo.device from its launch arguments; the rest are read from here.
+/**:
+  ros__parameters:
+    camera: zedx_nano
+    output_frame: ''             # zedx_nano_left_camera_optical_frame, from the image
+    publish_image: true
+    annotate: true
+    max_rate: 0.0
+
+    apriltags:
+      enable: true
+      family: tag36h11
+      ids: [0, 1, 2, 21, 22]
+      size: 0.0625
+      sizes: ''
+      nthreads: 2
+      quad_decimate: 1.0
+      max_hamming: 1
+      position: pnp
+
+    yolo:
+      enable: true
+      model: ''                  # set by the launch file (best_wrist.pt: oriented boxes, class wellplate)
+      device: cuda:0
+      conf: 0.25                 # the servo worker used the model default and kept the best detection
+      iou: 0.7
+      imgsz: 0
+      classes: ''
+      max_detections: 1
+      half: false
+      clahe_clip: 0.0            # CLAHE on the model's input; 0 = off
+      clahe_tiles: 4
+      marker_ns: servo_detections
+      json_key: detections
+
+    pointcloud:
+      enable: false              # ZED X only

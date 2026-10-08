@@ -1,0 +1,35 @@
+<!-- Wrist-camera visual servo grasp (the Xavier Camera-Edge "servo" mode, on the ZED X Nano stack).
+
+     Needs the camera stack (camera_ui's cameras.launch.xml: hub bridge, /zedx_nano camera and depth nodes).
+     execute:=false (default): the arm is only read; a run shows the plate, target and command it would send.
+     execute:=true: the arm moves; grasp:=false stops it at the hover pose. Serves ws://0.0.0.0:8765/ for Autolab's manipulation_executive. -->
+<launch>
+  <arg name="execute" default="false" description="true: command the arm; false: read-only dry run"/>
+  <arg name="grasp" default="true" description="false: stop at the hover pose (first runs: check the fingertip height)"/>
+  <arg name="preview" default="false" description="run the detector between runs too (annotated image)"/>
+  <arg name="robot_ip" default="192.168.1.236"/>
+  <arg name="yolo_models_dir" default="$(find-pkg-share camera_perception)/models/yolo"/>
+  <arg name="model" default="best_wrist.pt"/>
+  <arg name="device" default="cuda:0"/>
+  <arg name="control_port" default="8765" description="Camera-Edge control WebSocket; -1 disables it"/>
+  <arg name="params_file" default="$(find-pkg-share visual_servoing)/config/visual_servo.yaml"/>
+  <arg name="with_cameras" default="false" description="also launch camera_ui's cameras.launch.xml"/>
+  <arg name="depth_models_dir" default="" description="neural weights directory (with_cameras only)"/>
+  <arg name="depth_repo" default="" description="fast-foundation checkout (with_cameras only)"/>
+
+  <include file="$(find-pkg-share camera_ui)/launch/cameras.launch.xml" if="$(var with_cameras)">
+    <arg name="models_dir" value="$(var depth_models_dir)"/>
+    <arg name="repo" value="$(var depth_repo)"/>
+  </include>
+
+  <node pkg="visual_servoing" exec="visual_servo_node" name="visual_servo" output="screen">
+    <param from="$(var params_file)"/>
+    <param name="execute" value="$(var execute)"/>
+    <param name="grasp.enable" value="$(var grasp)"/>
+    <param name="preview" value="$(var preview)"/>
+    <param name="robot_ip" value="$(var robot_ip)"/>
+    <param name="yolo.model" value="$(var yolo_models_dir)/$(var model)"/>
+    <param name="yolo.device" value="$(var device)"/>
+    <param name="control_port" value="$(var control_port)"/>
+  </node>
+</launch>
