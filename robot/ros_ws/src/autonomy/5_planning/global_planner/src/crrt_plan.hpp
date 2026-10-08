@@ -681,6 +681,44 @@ crrt_plan_from_to(
 
 
 // ─────────────────────────────────────────────────────────────
+//  MIDPOINT FOR THE FALLBACK
+//  IK with the EE pointing down at the Cartesian midpoint of the start and
+//  goal EE positions, seeded from the joint-space midpoint so the solution
+//  stays on the same arm configuration as both ends.
+// ─────────────────────────────────────────────────────────────
+static std::optional<JointVec> ik_midpoint(const JointVec& q_start, const JointVec& q_goal,
+                                           const moveit::core::RobotModelConstPtr& robot_model,
+                                           const moveit::core::JointModelGroup* jmg)
+{
+    moveit::core::RobotState rs(robot_model);
+    rs.setToDefaultValues();
+    rs.setJointGroupPositions(jmg, q_start);
+    rs.updateLinkTransforms();
+    const Eigen::Vector3d p_start = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation();
+    rs.setJointGroupPositions(jmg, q_goal);
+    rs.updateLinkTransforms();
+    const Eigen::Vector3d p_mid =
+        0.5 * (p_start + rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation());
+
+    JointVec seed(q_start.size());
+    for (size_t i = 0; i < seed.size(); ++i) seed[i] = 0.5 * (q_start[i] + q_goal[i]);
+    rs.setJointGroupPositions(jmg, seed);
+
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = p_mid.x();
+    pose.position.y = p_mid.y();
+    pose.position.z = p_mid.z();
+    tf2::Quaternion q;
+    q.setRPY(0.0, 0.0, M_PI);
+    pose.orientation = tf2::toMsg(q);
+    if (!rs.setFromIK(jmg, pose, 0.1)) return std::nullopt;
+
+    JointVec q_mid;
+    rs.copyJointGroupPositions(jmg, q_mid);
+    return q_mid;
+}
+
+// ─────────────────────────────────────────────────────────────
 //  POST-SEARCH PIPELINE  (shared by crrt_plan and irrtstar_plan)
 //  wrap-normalise → raw-path viz → per-waypoint validation (midpoint
 //  fallback on collision) → shortcut → shortcut viz → ratio check → TOTG
@@ -748,19 +786,23 @@ crrt_finish_path(
             RCLCPP_ERROR(node->get_logger(),
                 "[CRRT] Waypoint %d angles: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
                 wp_idx, q[0], q[1], q[2], q[3], q[4], q[5]);
+            return std::nullopt;
+            /* Midpoint fallback disabled.
             RCLCPP_WARN(node->get_logger(),
                 "[CRRT] Path validation failed — trying midpoint fallback...");
 
-            auto plan1 = crrt_plan_from_to(arm_group, node, q_start, best_mid);
+            const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
+            if (!q_mid) { RCLCPP_ERROR(node->get_logger(), "[CRRT] No IK for the midpoint."); return std::nullopt; }
+            auto plan1 = crrt_plan_from_to(arm_group, node, q_start, *q_mid);
             if (!plan1) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 1 failed."); return std::nullopt; }
-            auto plan2 = crrt_plan_from_to(arm_group, node, best_mid, q_goal);
+            auto plan2 = crrt_plan_from_to(arm_group, node, *q_mid, q_goal);
             if (!plan2) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 2 failed."); return std::nullopt; }
 
             std::vector<JointVec> stitched;
             for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
                 stitched.push_back(pt.positions);
             for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
-                // seg1 ends on best_mid and seg2 starts on it - drop the repeat,
+                // seg1 ends on the midpoint and seg2 starts on it - drop the repeat,
                 // a zero-length segment upsets time parameterisation.
                 if (!stitched.empty() &&
                     joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
@@ -779,6 +821,7 @@ crrt_finish_path(
                 stitched,
                 std::vector<std::string>(joint_names.begin(), joint_names.end()),
                 arm_group);
+            */
         }
         ++wp_idx;
     }
@@ -809,19 +852,22 @@ crrt_finish_path(
             "[CRRT] Path length: %.3f  Direct: %.3f  Ratio: %.2f",
             path_length, direct_dist, ratio);
 
+        /* Midpoint fallback disabled: a long path is kept as is.
         if (ratio > 3.0) {
             RCLCPP_WARN(node->get_logger(),
                 "[CRRT] Path looks suspicious (ratio %.2f) — trying midpoint fallback...", ratio);
 
-            auto plan1 = crrt_plan_from_to(arm_group, node, q_start, best_mid);
-            auto plan2 = plan1 ? crrt_plan_from_to(arm_group, node, best_mid, q_goal)
+            const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
+            auto plan1 = q_mid ? crrt_plan_from_to(arm_group, node, q_start, *q_mid)
+                               : std::nullopt;
+            auto plan2 = plan1 ? crrt_plan_from_to(arm_group, node, *q_mid, q_goal)
                                : std::nullopt;
 
             if (plan1 && plan2) {
                 // Stitch FIRST, then shortcut the whole thing. Shortcutting the
-                // two segments separately can never remove best_mid, because no
+                // two segments separately can never remove the midpoint, because no
                 // candidate segment spans the junction - so the detour through
-                // that one hardcoded pose survives however redundant it is. A
+                // that one pose survives however redundant it is. A
                 // global pass can delete it outright, and shortcut() collision-
                 // and constraint-checks every segment it replaces, so dropping
                 // the midpoint only happens when the direct route is genuinely
@@ -871,6 +917,7 @@ crrt_finish_path(
             // own segments, so republish the path we are actually executing.
             viz.path(full_path, true);
         }
+        */
     }
     // full_path = densify_path(full_path, 0.01);
     auto plan = build_plan(

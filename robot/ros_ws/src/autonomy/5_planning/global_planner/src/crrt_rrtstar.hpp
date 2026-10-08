@@ -87,6 +87,10 @@ struct InformedSampler {
 //  HELPERS
 // ─────────────────────────────────────────────────────────────
 
+// Why extensions get rejected; printed when the search finds no solution.
+struct IrrtStats { int ik = 0, not_closer = 0, collision = 0, edge_ee_down = 0, edge_collision = 0; };
+static IrrtStats irrt_stats;
+
 // Walk from q_from toward q_to, at most eta in joint space, projecting each
 // STEP_SIZE step onto ee_down and collision-checking it — the same march as
 // extend_greedy_with_projection, but returns one configuration instead of
@@ -107,18 +111,18 @@ static std::optional<JointVec> constrained_steer(
 
         JointVec q_steered = steer(q_curr, q_to, crrt_cfg::STEP_SIZE);
         rs.setJointGroupPositions(jmg, q_steered);
-        if (!project_to_ee_down(rs, jmg)) break;
+        if (!project_to_ee_down(rs, jmg)) { ++irrt_stats.ik; break; }
 
         JointVec q_proj;
         rs.copyJointGroupPositions(jmg, q_proj);
         double d_next = joint_dist(q_proj, q_to);
-        if (d_next >= d_curr) break;                       // manifold blocks this direction
+        if (d_next >= d_curr) { ++irrt_stats.not_closer; break; }   // manifold blocks this direction
 
         collision_detection::CollisionRequest req;
         collision_detection::CollisionResult  res;
         req.group_name = crrt_cfg::GROUP_NAME;
         scene->checkCollision(req, res, rs);
-        if (res.collision) break;
+        if (res.collision) { ++irrt_stats.collision; break; }
 
         q_curr = q_proj;
         d_curr = d_next;
@@ -138,7 +142,11 @@ static bool edge_valid(const JointVec& a, const JointVec& b,
     JointVec cur = a;
     while (joint_dist(cur, b) > crrt_cfg::STEP_SIZE) {
         cur = steer(cur, b, crrt_cfg::STEP_SIZE);
-        if (!is_valid(cur, rs, jmg, scene)) return false;
+        if (!is_valid(cur, rs, jmg, scene)) {
+            if (satisfies_ee_down(rs)) ++irrt_stats.edge_collision;
+            else                       ++irrt_stats.edge_ee_down;
+            return false;
+        }
     }
     return true;
 }
@@ -220,8 +228,20 @@ irrtstar_plan(
     }
     // Goal: full validation including ee_down
     if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
+        rs.setJointGroupPositions(jmg, q_goal);
+        rs.updateLinkTransforms();
+        collision_detection::CollisionRequest req;
+        collision_detection::CollisionResult  res;
+        req.group_name = crrt_cfg::GROUP_NAME;
+        req.contacts = true;
+        req.max_contacts = 10;
+        req.max_contacts_per_pair = 1;
+        scene_snapshot->checkCollision(req, res, rs);
+        std::string pairs;
+        for (const auto& [key, _] : res.contacts) pairs += key.first + " <-> " + key.second + "  ";
         RCLCPP_ERROR(node->get_logger(),
-            "[IRRT*] Goal violates constraint or is in collision — aborting.");
+            "[IRRT*] Goal invalid — ee_down=%s, collision=%s %s",
+            satisfies_ee_down(rs) ? "ok" : "FAIL", res.collision ? "YES:" : "NO", pairs.c_str());
         return std::nullopt;
     }
 
@@ -231,6 +251,42 @@ irrtstar_plan(
         limits.push_back({bnd.min_position_, bnd.max_position_});
     }
     const int dof = (int)limits.size();
+
+    // Diagnostics: start orientation, and whether the straight start->goal segment passes edge_valid's checks.
+    {
+        rs.setJointGroupPositions(jmg, q_start);
+        rs.updateLinkTransforms();
+        const Eigen::Matrix3d R = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).rotation();
+        const double roll  = std::atan2(R(2,1), R(2,2));
+        const double pitch = std::atan2(-R(2,0), std::hypot(R(2,1), R(2,2)));
+        const double yaw   = std::atan2(R(1,0), R(0,0));
+        const double d     = joint_dist(q_start, q_goal);
+        std::string straight = "VALID";
+        JointVec cur = q_start;
+        while (joint_dist(cur, q_goal) > crrt_cfg::STEP_SIZE) {
+            cur = steer(cur, q_goal, crrt_cfg::STEP_SIZE);
+            if (is_valid(cur, rs, jmg, scene_snapshot)) continue;
+            const int pct = (int)std::lround(100.0 * (1.0 - joint_dist(cur, q_goal) / d));
+            if (!satisfies_ee_down(rs)) {
+                straight = "invalid at " + std::to_string(pct) + "%: ee_down";
+            } else {
+                collision_detection::CollisionRequest req;
+                collision_detection::CollisionResult  res;
+                req.group_name = crrt_cfg::GROUP_NAME;
+                req.contacts = true;
+                req.max_contacts = 10;
+                req.max_contacts_per_pair = 1;
+                scene_snapshot->checkCollision(req, res, rs);
+                straight = "invalid at " + std::to_string(pct) + "%: collision";
+                for (const auto& [key, _] : res.contacts) straight += " [" + key.first + " <-> " + key.second + "]";
+            }
+            break;
+        }
+        RCLCPP_INFO(node->get_logger(),
+            "[IRRT*] Start EE roll %.1f pitch %.1f yaw %.1f deg (tol %.1f); start->goal %.2f rad; straight path %s",
+            roll * 180 / M_PI, pitch * 180 / M_PI, yaw * 180 / M_PI, crrt_cfg::EE_ROLL_TOL * 180 / M_PI, d, straight.c_str());
+    }
+    irrt_stats = {};
 
     auto& viz = crrt_viz::get(node, robot_model, jmg);
     viz.begin();
@@ -322,35 +378,59 @@ irrtstar_plan(
     }
 
     if (goal_idx < 0) {
-        RCLCPP_WARN(node->get_logger(),
-            "[IRRT*] No solution after %d iters — trying midpoint fallback...", iter);
-        static const JointVec q_mid = {0.0611, -0.0977, -0.2164, -0.0436, 0.3159, 0.1012};
+        RCLCPP_ERROR(node->get_logger(),
+            "[IRRT*] No solution after %d iters, tree %zu nodes. Steer stopped by: IK %d, not closer %d, "
+            "collision %d. Edges rejected: ee_down %d, collision %d.",
+            iter, tree.size(), irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
+            irrt_stats.edge_ee_down, irrt_stats.edge_collision);
+        return std::nullopt;
+        /* Midpoint fallback disabled.
+        const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
+        if (!q_mid) {
+            RCLCPP_ERROR(node->get_logger(), "[IRRT*] No IK for the midpoint.");
+            return std::nullopt;
+        }
+        RCLCPP_INFO(node->get_logger(),
+            "[IRRT*] Midpoint: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+            (*q_mid)[0], (*q_mid)[1], (*q_mid)[2], (*q_mid)[3], (*q_mid)[4], (*q_mid)[5]);
 
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 1: start -> midpoint...");
-        auto plan1 = crrt_plan_from_to(arm_group, node, q_start, q_mid);
+        auto plan1 = crrt_plan_from_to(arm_group, node, q_start, *q_mid);
         if (!plan1) {
             RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 1 failed.");
             return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 2: midpoint -> goal...");
-        auto plan2 = crrt_plan_from_to(arm_group, node, q_mid, q_goal);
+        auto plan2 = crrt_plan_from_to(arm_group, node, *q_mid, q_goal);
         if (!plan2) {
             RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 2 failed.");
             return std::nullopt;
         }
-        auto& traj1 = plan1->trajectory_.joint_trajectory;
-        auto& traj2 = plan2->trajectory_.joint_trajectory;
-        double t_offset =
-            traj1.points.back().time_from_start.sec +
-            traj1.points.back().time_from_start.nanosec * 1e-9;
-        for (auto& pt : traj2.points) {
-            double t_pt = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9;
-            pt.time_from_start = rclcpp::Duration::from_seconds(t_offset + t_pt);
-            traj1.points.push_back(pt);
+        // Join the legs (dropping the repeated midpoint), shortcut the whole path so
+        // the midpoint can drop out, and time it once so the arm doesn't stop there.
+        std::vector<JointVec> stitched;
+        for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
+            stitched.push_back(pt.positions);
+        for (const auto& pt : plan2->trajectory_.joint_trajectory.points) {
+            if (!stitched.empty() && joint_dist(stitched.back(), pt.positions) < 1e-9) continue;
+            stitched.push_back(pt.positions);
         }
-        plan1->planning_time_ = std::chrono::duration<double>(
+        const size_t n_raw = stitched.size();
+        moveit::core::RobotState rs_sc(robot_model);
+        rs_sc.setToDefaultValues();
+        shortcut(stitched, rs_sc, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
+        RCLCPP_INFO(node->get_logger(),
+            "[IRRT*] Midpoint path shortcut: %zu -> %zu waypoints.", n_raw, stitched.size());
+        viz.path(stitched, true);
+
+        auto plan = build_plan(
+            stitched,
+            std::vector<std::string>(joint_names.begin(), joint_names.end()),
+            arm_group);
+        plan.planning_time_ = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - t0).count();
-        return plan1;
+        return plan;
+        */
     }
 
     RCLCPP_INFO(node->get_logger(),
