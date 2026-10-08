@@ -1,3 +1,8 @@
 <launch>
     <node pkg="navigation_executive" exec="navigation_executive" output="screen" />
+
+    <!-- nav_api topics only, domain 0 <-> isolated navigation domain 42 (see config file) -->
+    <node pkg="domain_bridge" exec="domain_bridge" name="nav_domain_bridge"
+        args="$(find-pkg-share navigation_executive)/config/nav_domain_bridge.yaml"
+        output="screen" respawn="true" respawn_delay="1" />
 </launch>

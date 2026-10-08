@@ -21,11 +21,6 @@
 
   Opt out with SWERVE_NAV_SHM=1 to get stock Fast DDS behaviour back.
 
-  Loopback only.  The interfaceWhiteList keeps this stack off the network: only processes on this
-  machine (navigation_executive, rviz_docker.sh) can discover it, even on domain 0. The robot
-  container's own shells use a LAN profile (common/dds_lan_profile.sh); run.sh deliberately does
-  not inherit it.
-
   Buffer sizes are kept under this machine's limits (net.core.rmem_max 1048576,
   net.core.wmem_max 212992); the kernel silently clamps anything larger.
 -->
@@ -38,9 +33,6 @@
         <sendBufferSize>212992</sendBufferSize>
         <receiveBufferSize>1048576</receiveBufferSize>
         <maxMessageSize>65500</maxMessageSize>
-        <interfaceWhiteList>
-          <address>127.0.0.1</address>
-        </interfaceWhiteList>
       </transport_descriptor>
     </transport_descriptors>
 

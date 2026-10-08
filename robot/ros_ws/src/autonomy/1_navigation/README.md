@@ -31,12 +31,10 @@ cd ~/coding/Autolab/robot/ros_ws
 ```
 
 The window uses the host X display, but its ROS participant is Humble. Closing or restarting it
-does not stop navigation. Docker navigation runs on ROS domain 0 so `navigation_executive` (the
-robot_1 behavior stack) can reach `nav_api` directly. It is kept off the network by its Fast DDS
-profile (`scripts/fastdds_no_shm.xml`: UDP over loopback only, shared memory off), not by the domain
-ID, so only processes on this machine can discover it; both the stack and Docker RViz use that
-profile. Set the same `NAVIGATION_DOMAIN_ID` for both commands only when a different domain is
-required. `rviz_docker.sh` refuses to start while host Jazzy processes are on the same domain.
+does not stop navigation. Docker navigation defaults to isolated ROS domain 42 because domain 0 on
+this Jetson already contains unrelated Jazzy processes. It uses Fast DDS with shared memory off;
+both the stack and Docker RViz communicate over UDP. Set the same `NAVIGATION_DOMAIN_ID` for both
+commands only when a different isolated domain is required.
 
 The Humble apt repository currently supplies tf2 0.25.23, whose transform-message callback can
 deadlock RViz after it has been open for a short time. `rviz_docker.sh` detects affected versions,

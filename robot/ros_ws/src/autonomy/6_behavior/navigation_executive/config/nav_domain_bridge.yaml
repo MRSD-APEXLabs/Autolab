@@ -1,0 +1,28 @@
+# Bridges ONLY the nav_api contract between the robot_1 domain (0) and the isolated navigation
+# domain (42, the default NAVIGATION_DOMAIN_ID in autonomy/1_navigation/run.sh). Nav2 internals,
+# TF, cmd_vel etc. stay on 42 and are not visible on domain 0 (GCS, LAN). If run.sh is started
+# with a different NAVIGATION_DOMAIN_ID, change 42 below to match.
+#
+# QoS is left unset on purpose: domain_bridge copies the publisher's QoS, so the latched
+# (transient_local) /nav/state stays latched on domain 0.
+name: nav_domain_bridge
+from_domain: 0
+to_domain: 42
+topics:
+  # navigation_executive -> nav_api
+  /nav/goal_location:
+    type: std_msgs/msg/String
+  /nav/goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+  /nav/cancel:
+    type: std_msgs/msg/Empty
+
+  # nav_api -> navigation_executive
+  /nav/state:
+    type: std_msgs/msg/String
+    from_domain: 42
+    to_domain: 0
+  /nav/result:
+    type: std_msgs/msg/String
+    from_domain: 42
+    to_domain: 0
