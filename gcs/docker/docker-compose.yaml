@@ -26,6 +26,7 @@ services:
     environment:
       - GCS_GUI=false # no rviz2 / rqt_gui on the real GCS
       - ROS_LOCALHOST_ONLY=0 # robot is on another machine; must discover over the network
+      - DDS_LAN_SUBNET=${DDS_LAN_SUBNET:-} # see common/dds_lan_profile.sh
     volumes:
       - $HOME/bags/:/bags
       - ../../robot/ros_ws/src/robot_bringup/rviz/:/bags/rviz

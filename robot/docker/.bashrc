@@ -9,6 +9,8 @@
 ROS2_WS_DIR="$HOME/AutoLab/robot/ros_ws"
 # needed for communication with Isaac Sim ROS2  # https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_ros.html#enabling-the-ros-bridge-extension
 export FASTRTPS_DEFAULT_PROFILES_FILE="$ROS2_WS_DIR/fastdds.xml"
+# real hardware: restrict Fast DDS to the LAN interface (no-op unless DDS_LAN_SUBNET is set)
+source "$HOME/AutoLab/common/dds_lan_profile.sh"
 # Compose controls discovery for simulation. Keep an explicitly supplied value
 # instead of forcing localhost-only discovery inside every interactive shell.
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
