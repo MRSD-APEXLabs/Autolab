@@ -25,6 +25,7 @@ services:
     network_mode: host
     environment:
       - GCS_GUI=false # no rviz2 / rqt_gui on the real GCS
+      - ROS_LOCALHOST_ONLY=0 # robot is on another machine; must discover over the network
     volumes:
       - $HOME/bags/:/bags
       - ../../robot/ros_ws/src/robot_bringup/rviz/:/bags/rviz
