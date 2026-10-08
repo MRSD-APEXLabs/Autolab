@@ -68,7 +68,7 @@ Glue the tag to a **rigid flat card**, then attach the card to the gripper:
 
 ## 3. Bring the stack up
 
-Planning stack running ([launch-planning.md](launch-planning.md) step 5; TF must
+Planning stack running ([launch-planning.md](launch-planning.md) step 4; TF must
 be live) and the camera in inspect mode (step 3). Verify from the Jetson:
 
 ```bash

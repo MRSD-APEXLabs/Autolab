@@ -1,8 +1,12 @@
 # Launch planning — from scratch
 
-The arm moves from step 5. E-stop in reach, workspace clear, nothing else commanding the arm (no joystick script, no UFactory Studio).
+The arm moves from step 4. Keep the E-stop in reach and the workspace clear. Nothing else may command the arm (no
+joystick script, no UFactory Studio).
 
-## 1. Network (Jetson)
+The point cloud, AprilTags and well plate detections come from the perception stack (`robot/ros_ws/src/autonomy/3_perception`). The planner
+reads the topics it publishes: `/zed_pointcloud`, `/inspect/apriltags` and `/inspect/wellplates`.
+
+## 1. Network (Thor)
 
 ```bash
 ip -4 -br addr | grep enP2p1s0            # must be UP, 192.168.1.100
@@ -10,40 +14,48 @@ ping -c1 192.168.1.236 && echo ARM OK
 ping -c1 192.168.1.101 && echo XAVIER OK
 ```
 
-## 2. Camera server (Xavier)
+## 2. Camera hub (Xavier)
 
-Check first — if it's already running, **skip this step** (a second `main.py` fails: ports and cameras already taken):
-
-```bash
-timeout 2 bash -c '</dev/tcp/192.168.1.101/8765' && echo "ALREADY RUNNING — skip" || echo "not running — start it"
-```
+The hub runs at boot (`camera-hub.service`). Check that it answers:
 
 ```bash
-ssh autolab@192.168.1.101
-tmux new -s edged
-cd ~/Autolab-Camera-Edge && python3 main.py     # wait for the three "ws://0.0.0.0:876x" lines
-# Ctrl-b d  then  exit
+curl -s http://192.168.1.101:8090/status   # "server": "camera_hub", "state": "streaming"
 ```
-To see the camera feed go to http://192.168.1.101:8080/test.html in the browser and type 192.168.1.101 as the host
 
-
-## 3. Put the camera in Inspect (Jetson)
+If it doesn't answer, restart it on the Xavier:
 
 ```bash
-/usr/bin/python3 ~/coding/percep/test_server.py ws://192.168.1.101:8765
-> inspect
-> status                                        # mode=inspect, worker_alive=true
-# Ctrl-C
+ssh autolab@192.168.1.101 'sudo systemctl restart camera-hub.service'
 ```
 
-## 4. Point cloud + detections into ROS (Jetson, repo root, no venv active)
+## 3. Perception (Thor host, not the container)
+
+Use a new terminal. `~/.bashrc` already sets up ROS Jazzy, `ROS_DOMAIN_ID=1` and the loopback FastDDS profile.
+The packages are built in `~/ros2_ws` from `~/apple_server_manip/2_manipulation`.
 
 ```bash
-cd ~/coding/Autolab && /usr/bin/python3 pc3.py   # "Connected to ws://192.168.1.101:8766"
-# other terminal:  ros2 topic hz /zed_pointcloud   (~5 Hz)
+source ~/ros2_ws/install/setup.bash
+source /home/labx/apple_server_manip/.venv/bin/activate        # torch for the depth nodes
+ros2 launch camera_perception perception.launch.xml with_cameras:=true \
+  depth_models_dir:=/home/labx/apple_server_manip/data/models
 ```
 
-## 5. Robot stack (Jetson → container) — the arm enables here
+The hub streams one camera at a time, and the point cloud only comes from the ZED X. Select it (takes ~6 s):
+
+```bash
+ros2 service call /camera_hub/select_zedx std_srvs/srv/Trigger
+```
+
+Check:
+
+```bash
+ros2 topic hz /zed_pointcloud                  # up to 5 Hz
+ros2 topic echo --once /inspect/wellplates     # a "wellplates" marker when a plate is in view
+```
+
+## 4. Planning stack (Thor → container): the arm enables here
+
+After a `git pull`, rebuild in the container first: `autolab connect robot`, then `bws`.
 
 ```bash
 xhost +local:
@@ -53,9 +65,9 @@ docker exec -it autolab-robot-l4t-1 bash -lc 'export DISPLAY=:1 ROS_LOCALHOST_ON
 # ready when "Received command: idle" repeats (~30 s); RViz opens with the planner path display
 ```
 
-Always `bash -lc` — without it the stack comes up on the wrong ROS domain and ignores every command.
+Always use `bash -lc`. Without it, the stack comes up on the wrong ROS domain and ignores every command.
 
-## 6. Plan (Jetson)
+## 5. Plan (Thor)
 
 ```bash
 # terminal A
@@ -63,8 +75,8 @@ ros2 topic echo /planning_state
 ```
 
 ```bash
-# terminal B — one at a time, wait for PLANNING → EXECUTING → SUCCESS
-ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_home_offset'}"   # fixed safe pose, no camera needed — do this first
+# terminal B: one at a time, wait for PLANNING → EXECUTING → SUCCESS
+ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_home_offset'}"   # fixed safe pose, no camera needed. Do this first
 ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_home'}"          # home point (via top_camera TF)
 ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_april_1'}"       # 25 cm above AprilTag 1 (OT-2)
 ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_april_2'}"       # 25 cm above AprilTag 2 (shaker)
@@ -72,14 +84,20 @@ ros2 topic pub --once /planning_command std_msgs/String "{data: 'plan_wellplate'
 ros2 topic pub --once /planning_command std_msgs/String "{data: 'idle'}"
 ```
 
-- Wrist must be within ~11° of straight down before the first plan, else `Waypoint 0 FAILED ee_down constraint`.
-- RViz shows two lines per plan: orange = raw planner path, cyan = after shortcutting.
-- Planner choice: `PLANNER` in `robot/ros_ws/src/autonomy/5_planning/global_planner/src/move_to_pose_node.cpp` (`RRT_CONNECT` | `INFORMED_RRTSTAR` | `PRM`), then rebuild and relaunch step 5:
+- **The obstacle cloud is frozen at the first `plan_*` command.** The planner forwards the latest `/zed_pointcloud`
+  once to `/zed_pointcloud_frozen`, which is the only cloud MoveIt reads. Every later plan uses that cloud. To take a
+  new one, restart the planning launch (step 4).
+- `plan_april_<id>` and `plan_wellplate` wait up to 10 s for a detection less than 1 s old, or end in `ERROR`.
+- The wrist must be within ~11° of straight down before the first plan, or you get
+  `Waypoint 0 FAILED ee_down constraint`.
+- RViz shows two lines per plan: orange is the raw planner path, cyan is the path after shortcutting.
+- The planner is chosen by `PLANNER` in `robot/ros_ws/src/autonomy/5_planning/global_planner/src/move_to_pose_node.cpp` (`RRT_CONNECT` |
+  `INFORMED_RRTSTAR` | `PRM`). After changing it, rebuild and relaunch step 4:
 
 ```bash
 docker exec autolab-robot-l4t-1 bash -lc 'cd ~/AutoLab/robot/ros_ws && colcon build --symlink-install --packages-select global_planner'
 ```
 
-## 7. Stop
+## 6. Stop
 
-Ctrl-C the launch (step 5) · Ctrl-C `pc3.py` · `test_server.py` → `idle`
+Ctrl-C the planning launch (step 4), then Ctrl-C the perception launch (step 3).
