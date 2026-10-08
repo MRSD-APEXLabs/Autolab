@@ -64,12 +64,12 @@ fi
 # shellcheck source=scripts/ros_env.sh
 source "$SRC_DIR/scripts/ros_env.sh"
 
-# Domain 0 already contains unrelated host Jazzy processes on this Jetson. Keep this self-contained
-# Docker stack on an isolated domain; rviz_docker.sh uses the same default. Deliberately override
-# with NAVIGATION_DOMAIN_ID when integration requires it.
+# Domain 0 so navigation_executive (robot_1 behavior stack) reaches nav_api directly. The stack is
+# kept off the network by its Fast DDS profile (loopback only, scripts/fastdds_no_shm.xml), not by
+# the domain ID. rviz_docker.sh uses the same default; override both with NAVIGATION_DOMAIN_ID.
 if [[ "$NAV_DISTRO" == humble ]]; then
   export RMW_IMPLEMENTATION="${NAVIGATION_RMW:-rmw_fastrtps_cpp}"
-  export ROS_DOMAIN_ID="${NAVIGATION_DOMAIN_ID:-42}"
+  export ROS_DOMAIN_ID="${NAVIGATION_DOMAIN_ID:-0}"
   [[ "$ROS_DOMAIN_ID" =~ ^[0-9]+$ ]] || {
     echo "NAVIGATION_DOMAIN_ID must be a non-negative integer: $ROS_DOMAIN_ID" >&2
     exit 2

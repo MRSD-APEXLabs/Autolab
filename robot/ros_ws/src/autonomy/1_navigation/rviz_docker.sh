@@ -4,7 +4,7 @@
 set -euo pipefail
 
 CONTAINER="${AUTOLAB_ROBOT_CONTAINER:-autolab-robot-l4t-1}"
-DOMAIN="${NAVIGATION_DOMAIN_ID:-42}"
+DOMAIN="${NAVIGATION_DOMAIN_ID:-0}"
 CONFIG=/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/navigation_bringup/rviz/navigation.rviz
 DDS_PROFILE=/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/scripts/fastdds_no_shm.xml
 TF2_FIXED_VERSION=0.25.24
@@ -17,7 +17,7 @@ usage() {
   cat <<'EOF'
 Usage: rviz_docker.sh [--domain ID] [--container NAME]
 
-Run this on the host after the container's run.sh has started. The default navigation domain is 42.
+Run this on the host after the container's run.sh has started. The default navigation domain is 0.
 EOF
 }
 
