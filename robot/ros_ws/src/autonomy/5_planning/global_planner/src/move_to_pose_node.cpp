@@ -19,6 +19,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_srvs/srv/empty.hpp>   // TEMP: cloud refresh
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
@@ -72,6 +73,7 @@ static constexpr int APRIL_TAG_WAIT_STEP_MS = 100;
 static constexpr double WELLPLATE_STALE_SEC = 1.0;
 static constexpr int WELLPLATE_WAIT_TIMEOUT_SEC = 10;
 static constexpr int WELLPLATE_WAIT_STEP_MS = 100;
+static constexpr int CLOUD_REFRESH_TIMEOUT_SEC = 3;   // TEMP: cloud refresh
 
 
 
@@ -722,11 +724,12 @@ int main(int argc, char *argv[])
             std::atomic_store(&latest_obstacle_cloud, msg);
         });
 
-    // move_group's octomap reads this topic (sensors_3d.yaml). It only ever gets
-    // the cloud cached at the first plan command, so the octomap stays frozen.
+    // move_group's octomap reads this topic (sensors_3d.yaml). TEMP: plan_wellplate and
+    // plan_april_<id> clear the octomap and re-freeze a fresh cloud; other plans reuse it.
     auto frozen_cloud_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/zed_pointcloud_frozen", rclcpp::SensorDataQoS());
     bool cloud_frozen = false;
+    auto clear_octomap_client = node->create_client<std_srvs::srv::Empty>("/clear_octomap");
 
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
         "/planning_command", 10, command_callback);
@@ -785,7 +788,53 @@ int main(int argc, char *argv[])
             set_controller_active(node, "xarm6_traj_controller");
         }
 
-        if (!cloud_frozen && cmd.rfind("plan_", 0) == 0)
+        // TEMP: fresh cloud for plan_wellplate / plan_april_<id>. Assumes the arm is out of the camera's view.
+        if (cmd == "plan_wellplate" || cmd.rfind("plan_april_", 0) == 0)
+        {
+            // Drop the cached cloud and wait for one that arrives after this command.
+            std::atomic_store(&latest_obstacle_cloud, sensor_msgs::msg::PointCloud2::SharedPtr{});
+            sensor_msgs::msg::PointCloud2::SharedPtr cloud;
+            for (int elapsed_ms = 0; elapsed_ms < CLOUD_REFRESH_TIMEOUT_SEC * 1000 && !cloud; elapsed_ms += 100)
+            {
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                cloud = std::atomic_load(&latest_obstacle_cloud);
+            }
+            if (!cloud)
+            {
+                RCLCPP_ERROR(node->get_logger(), "No fresh /zed_pointcloud within %d s.", CLOUD_REFRESH_TIMEOUT_SEC);
+                finish_plan(std::nullopt);
+                continue;
+            }
+            // Empty the octomap so voxels from the old cloud don't stay.
+            auto fut = clear_octomap_client->async_send_request(std::make_shared<std_srvs::srv::Empty::Request>());
+            if (fut.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+                RCLCPP_WARN(node->get_logger(), "/clear_octomap did not answer; old voxels may remain.");
+
+            // The planner has its own scene copy (crrt_psm_node). Each octomap it receives replaces
+            // the <octomap> object, so wait for that pointer to change after publishing.
+            auto planner_psm = crrt_internal::get_psm(node).psm;
+            auto planner_octomap = [&] {
+                planning_scene_monitor::LockedPlanningSceneRO ls(planner_psm);
+                return ls->getWorld()->getObject("<octomap>");
+            };
+            const auto old_map = planner_octomap();
+            frozen_cloud_pub->publish(*cloud);
+            bool planner_has_new_map = false;
+            for (int elapsed_ms = 0; elapsed_ms < CLOUD_REFRESH_TIMEOUT_SEC * 1000 && !planner_has_new_map; elapsed_ms += 100)
+            {
+                rclcpp::sleep_for(std::chrono::milliseconds(100));
+                planner_has_new_map = planner_octomap() != old_map;
+            }
+            if (!planner_has_new_map)
+            {
+                RCLCPP_ERROR(node->get_logger(), "Planner did not receive the fresh octomap within %d s.", CLOUD_REFRESH_TIMEOUT_SEC);
+                finish_plan(std::nullopt);
+                continue;
+            }
+            cloud_frozen = true;
+            RCLCPP_INFO(node->get_logger(), "Refreshed obstacle cloud; planner has the new octomap.");
+        }
+        else if (!cloud_frozen && cmd.rfind("plan_", 0) == 0)
         {
             if (auto cloud = std::atomic_load(&latest_obstacle_cloud))
             {
