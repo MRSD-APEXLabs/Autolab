@@ -1,0 +1,14 @@
+# image_stream_server parameters. launch/image_stream_server.launch.xml sets host and port from its stream_host and
+# stream_port launch arguments; the rest are read from here.
+/**:
+  ros__parameters:
+    host: 0.0.0.0          # bind address (0.0.0.0: reachable from the GCS)
+    port: 8002
+    # <kind>/<camera>=<topic>; served at /stream/<kind>/<camera>.mjpg. A topic is subscribed only while watched.
+    streams:
+      - annotated/zedx=/inspect/annotated_image
+      - annotated/zedx_nano=/servo/annotated_image
+      - raw/zedx=/zedx/left/image_rect_color
+      - raw/zedx_nano=/zedx_nano/left/image_rect_color
+    max_fps: 15.0          # per client
+    jpeg_quality: 80

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function ConfirmButton({ onConfirm, disabled, children }) {
+export default function ConfirmButton({ onConfirm, disabled, active = false, children }) {
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   if (awaitingConfirm) {
@@ -29,8 +29,9 @@ export default function ConfirmButton({ onConfirm, disabled, children }) {
     <button
       type="button"
       disabled={disabled}
+      aria-pressed={active}
       onClick={() => setAwaitingConfirm(true)}
-      className="bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white px-3 py-1.5 rounded text-sm"
+      className={`bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white px-3 py-1.5 rounded text-sm${active ? ' ring-2 ring-offset-1 ring-orange-800' : ''}`}
     >
       {children}
     </button>

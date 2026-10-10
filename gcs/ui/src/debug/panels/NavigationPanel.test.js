@@ -1,8 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import NavigationPanel from './NavigationPanel';
-import { useMqttContext } from '../useMqtt';
+import { useMqttContext } from '../../shared/useMqtt';
 
-jest.mock('../useMqtt');
+jest.mock('../../shared/useMqtt');
 
 test('publishes the entered x/y/theta after confirming', () => {
   const publish = jest.fn();

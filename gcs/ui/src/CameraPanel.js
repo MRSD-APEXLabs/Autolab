@@ -1,124 +1,61 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-
-// ── Config ────────────────────────────────────────────────────────────────────
-const HOST = 'localhost';
+import React, { useState, useRef, useCallback } from 'react';
+import { MqttProvider, useMqttContext } from './shared/useMqtt';
+import useCameraHub from './shared/useCameraHub';
+import usePerception from './shared/usePerception';
+import CameraPair from './shared/CameraPair';
+import { cameraLabel } from './shared/cameras';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const DEFAULT_W = 520;
+const DEFAULT_W = 720;
 const DEFAULT_H = 400;
-const MIN_W     = 320;
+const MIN_W     = 480;
 const MIN_H     = 200;
 const HEADER_H  = 36;
 
-// ── CamTile ───────────────────────────────────────────────────────────────────
-function Dot({ live }) {
+// ── Status dot ────────────────────────────────────────────────────────────────
+const DOT_COLORS = { ok: '#44cc66', warn: '#e0a030', bad: '#e05050', idle: '#333' };
+
+function dotTone(hub, connected) {
+  if (!connected || !hub.active) return 'idle';
+  if (hub.reachable === false || hub.state === 'error') return 'bad';
+  return hub.state === 'streaming' ? 'ok' : 'warn';
+}
+
+function Dot({ tone }) {
+  const color = DOT_COLORS[tone];
   return (
     <div style={{
       width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-      background: live ? '#44cc66' : '#333',
-      boxShadow: live ? '0 0 5px #44cc66' : 'none',
+      background: color,
+      boxShadow: tone === 'idle' ? 'none' : `0 0 5px ${color}`,
     }} />
   );
 }
 
-function CamTile({ title, img, dotLive, gridStyle }) {
+// ── Detection strip ───────────────────────────────────────────────────────────
+function DetectionStrip({ camera }) {
+  const { tags, plates } = usePerception(camera);
+  const target = plates.find((p) => p.plannerTarget);
   return (
-    <div style={{
-      background: '#111116',
-      border: '1px solid #2d2d3a',
-      borderRadius: 5,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      minHeight: 0,
-      ...gridStyle,
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '4px 8px',
-        background: '#1a1a22',
-        borderBottom: '1px solid #2d2d3a',
-        flexShrink: 0,
-      }}>
-        <Dot live={dotLive} />
-        <span style={{ fontWeight: 600, fontSize: 11, color: '#888' }}>{title}</span>
-      </div>
-      <div style={{
-        flex: 1, display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-        background: '#0a0a0d',
-        overflow: 'hidden',
-        minHeight: 0,
-      }}>
-        {img
-          ? <img src={img} alt={title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }} />
-          : <div style={{ color: '#333', fontSize: 11 }}>No signal</div>
-        }
-      </div>
+    <div data-testid="detection-strip" style={{ padding: '2px 8px 4px', color: '#aaa', fontSize: 11, flexShrink: 0 }}>
+      <span>Tags {tags.length ? tags.map((t) => t.id).join(' · ') : '—'}</span>
+      <span style={{ marginLeft: 16 }}>
+        Wellplate {target ? `${target.conf.toFixed(2)} @ ${target.distance.toFixed(2)} m` : '—'}
+      </span>
     </div>
   );
 }
 
 // ── CameraPanel ───────────────────────────────────────────────────────────────
-export default function CameraPanel() {
+// View-only: shows the camera the hub streams; switching happens in the debug console (/debug).
+function CameraPanelBody() {
+  const { connected } = useMqttContext();
+  const hub = useCameraHub();
   const [minimized, setMinimized] = useState(true);
   const [size, setSize] = useState({ w: DEFAULT_W, h: DEFAULT_H });
 
-  const [activeImg, setActiveImg] = useState(null);
-  const [activeDot, setActiveDot] = useState(false);
-  const [wristImg,  setWristImg]  = useState(null);
-  const [wristDot,  setWristDot]  = useState(false);
-  const [baseImg,   setBaseImg]   = useState(null);
-  const [baseDot,   setBaseDot]   = useState(false);
-
   const dragging   = useRef(false);
   const dragOrigin = useRef({ x: 0, y: 0, w: 0, h: 0 });
-
-  // ── WebSocket connections (open on mount, close on unmount) ───────────────
-  useEffect(() => {
-    // Active stream — port 8766, JSON frames
-    const stream = new WebSocket(`ws://${HOST}:8766`);
-    stream.onmessage = (evt) => {
-      try {
-        const d = JSON.parse(evt.data);
-        if (!d.image_jpeg_b64) { setActiveImg(null); setActiveDot(false); return; }
-        setActiveImg(`data:image/jpeg;base64,${d.image_jpeg_b64}`);
-        setActiveDot(true);
-      } catch { /* ignore */ }
-    };
-    stream.onclose = () => { setActiveImg(null); setActiveDot(false); };
-    stream.onerror = () => { setActiveImg(null); setActiveDot(false); };
-
-    // Wrist cam — port 8767, subscribe { camera: 'wrist' }
-    const wrist = new WebSocket(`ws://${HOST}:8767`);
-    wrist.onopen = () => wrist.send(JSON.stringify({ camera: 'wrist' }));
-    wrist.onmessage = (evt) => {
-      try {
-        const d = JSON.parse(evt.data);
-        if (!d.image_jpeg_b64) return;
-        setWristImg(`data:image/jpeg;base64,${d.image_jpeg_b64}`);
-        setWristDot(true);
-      } catch { /* ignore */ }
-    };
-    wrist.onclose = () => { setWristImg(null); setWristDot(false); };
-    wrist.onerror = () => { setWristImg(null); setWristDot(false); };
-
-    // Base cam — port 8767, subscribe { camera: 'base' }
-    const base = new WebSocket(`ws://${HOST}:8767`);
-    base.onopen = () => base.send(JSON.stringify({ camera: 'base' }));
-    base.onmessage = (evt) => {
-      try {
-        const d = JSON.parse(evt.data);
-        if (!d.image_jpeg_b64) return;
-        setBaseImg(`data:image/jpeg;base64,${d.image_jpeg_b64}`);
-        setBaseDot(true);
-      } catch { /* ignore */ }
-    };
-    base.onclose = () => { setBaseImg(null); setBaseDot(false); };
-    base.onerror = () => { setBaseImg(null); setBaseDot(false); };
-
-    return () => { stream.close(); wrist.close(); base.close(); };
-  }, []);
 
   // ── Resize drag (NW handle — panel anchored bottom-right) ────────────────
   const onResizeDown = useCallback((e) => {
@@ -192,6 +129,10 @@ export default function CameraPanel() {
         <span style={{ fontWeight: 600, fontSize: 13, color: '#aaa', paddingLeft: 16 }}>
           Camera Feeds
         </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 12, color: '#888', fontSize: 12 }}>
+          <Dot tone={dotTone(hub, connected)} />
+          <span>{cameraLabel(hub.active)}</span>
+        </span>
         <button
           aria-label={minimized ? 'expand' : 'minimize'}
           onClick={() => setMinimized(v => !v)}
@@ -204,25 +145,23 @@ export default function CameraPanel() {
         </button>
       </div>
 
-      {/* Camera grid */}
+      {/* Active camera: annotated + raw */}
       {!minimized && (
-        <div
-          data-testid="camera-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 185px',
-            gridTemplateRows: '1fr 1fr',
-            gap: 6,
-            padding: 6,
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          <CamTile title="Active"       img={activeImg} dotLive={activeDot} gridStyle={{ gridRow: '1 / 3' }} />
-          <CamTile title="Wrist (cam1)" img={wristImg}  dotLive={wristDot} />
-          <CamTile title="Base (cam2)"  img={baseImg}   dotLive={baseDot}  />
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: 6, gap: 4 }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <CameraPair camera={hub.active} hubReachable={hub.reachable !== false} compact />
+          </div>
+          <DetectionStrip camera={hub.active} />
         </div>
       )}
     </div>
+  );
+}
+
+export default function CameraPanel() {
+  return (
+    <MqttProvider>
+      <CameraPanelBody />
+    </MqttProvider>
   );
 }

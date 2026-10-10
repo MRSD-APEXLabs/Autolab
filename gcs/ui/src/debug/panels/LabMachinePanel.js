@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMqttContext } from '../useMqtt';
+import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
 
 const DEFAULT_OT2_PARAMS = JSON.stringify({

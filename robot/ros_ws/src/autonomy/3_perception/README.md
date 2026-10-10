@@ -9,6 +9,7 @@ to move into a larger codebase:
 | `zedx_nano_depth/` | ROS 2 package. Subscribes to the stereo pair, rectifies it, computes depth with RAFT-Stereo (GPU) or SGBM (CPU) and publishes depth plus the rectified left image | `zedx_nano_camera`; torch for the neural backend |
 | `camera_ui/` | ROS 2 package. Web page on port 8001 that switches the hub between the two cameras and shows the active camera's RGB and depth. Its launch file starts the whole camera stack | `zedx_nano_camera`, `sensor_msgs`, `std_srvs`, `cv_bridge`, numpy, OpenCV |
 | `camera_perception/` | ROS 2 package. AprilTags, YOLO detections and (ZED X only) a point cloud from the depth node's outputs, published under the topic names of the old Autolab `pc3.py` bridge (`/inspect/*`, `/servo/*`, `/zed_pointcloud`) | `zedx_nano_depth`, `camera_ui` (launch only), `cv_bridge`; pip: `pupil-apriltags`, `ultralytics` (torch) |
+| `image_stream_server/` | ROS 2 package. Lazy MJPEG server on port 8002 for the GCS UIs: annotated and rectified streams per camera, each topic subscribed only while a browser watches it. Started by `perception_bringup` | `rclpy`, `sensor_msgs`, `cv_bridge`, OpenCV |
 | `xavier_camera_hub/` | Not a ROS package (`COLCON_IGNORE`). HTTP server that runs **on the Xavier** (`/home/autolab/camera_hub/`) and streams one camera at a time. See [its README](xavier_camera_hub/README.md) | Python 3.8, numpy, OpenCV, pyzed (ZED X), `v4l2-ctl` (Nano) |
 | `act_inference/` | Plain Python, not a ROS package (`COLCON_IGNORE`). Live ACT rollout on the xArm6. Contains a trimmed copy of the ACT/DETR model code | the ROS packages above as libraries; torch, xArm SDK |
 
@@ -93,6 +94,22 @@ UI HTTP API, for scripts:
 | `GET /stream/<cam>/rgb.mjpg` | rectified left image; the raw JPEG while no depth node runs |
 | `GET /stream/<cam>/depth.mjpg?near=&far=&auto=1` | colorized depth |
 | `GET /snapshot/<cam>/rgb.png`, `/snapshot/<cam>/depth.png` | the latest frame; depth as 16-bit PNG in mm |
+
+## Image streams for the GCS (`image_stream_server`)
+
+`perception_bringup` starts `image_stream_server` (`with_stream_server:=false` turns it off, `stream_port`
+changes the port from 8002). The GCS web UIs load these with plain `<img>` tags:
+
+| request | answer |
+|---|---|
+| `GET /stream/annotated/zedx.mjpg`, `/stream/annotated/zedx_nano.mjpg` | `/inspect/annotated_image`, `/servo/annotated_image` |
+| `GET /stream/raw/zedx.mjpg`, `/stream/raw/zedx_nano.mjpg` | `/zedx/left/image_rect_color`, `/zedx_nano/left/image_rect_color` |
+| `GET /health` | per stream: topic, subscribed, viewers, last frame age |
+
+A topic is subscribed only while at least one client watches its stream. `camera_perception` draws the annotated
+image only while it has a subscriber, so with no viewer neither node spends anything on it; detection itself
+always runs. The streams are set by the `streams` parameter (`config/image_stream_server.yaml`,
+`<kind>/<camera>=<topic>`).
 
 ## Perception: AprilTags, YOLO and the ZED X point cloud
 
