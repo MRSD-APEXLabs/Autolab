@@ -50,13 +50,6 @@ def test_planning_command_topic_is_registered():
     assert STRING_CMD_TOPIC_MAP['cmd/planning/command'] == '/planning_command'
 
 
-def test_perception_camera_mode_cmd_topic_is_registered():
-    assert (
-        STRING_CMD_TOPIC_MAP['cmd/perception/camera_mode_cmd']
-        == '/robot_1/behavior/perception/camera_mode_cmd'
-    )
-
-
 def test_build_manipulation_command_maps_all_fields():
     msg = _build_manipulation_command({
         'type': 'place', 'object_type': 'well_plate', 'target_machine': 'ot2',

@@ -53,7 +53,6 @@ STRING_CMD_TOPIC_MAP = {
     'cmd/routine_executor/start_routine_cmd': '/routine_executor/start_routine_cmd',
     'cmd/routine_executor/cancel': '/routine_executor/cancel',
     'cmd/planning/command': '/planning_command',
-    'cmd/perception/camera_mode_cmd': '/robot_1/behavior/perception/camera_mode_cmd',
     'cmd/navigation/go_to_location': '/robot_1/behavior/go_to_location_command',
 }
 

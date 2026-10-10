@@ -2,7 +2,7 @@
 
 | folder | what it is | needs |
 |---|---|---|
-| `visual_servoing/` | ROS 2 package (`ament_python`). Wrist-camera (ZED X Nano) visual servo grasp of a well plate on the xArm6: YOLO oriented boxes located with the stereo depth, a position-based servo to a hover pose above the plate, then the descend / FSR close / lift sequence of the Xavier's Camera-Edge. Serves the Camera-Edge control WebSocket that `6_behavior/manipulation_executive` drives | `3_perception`'s `camera_perception` and `zedx_nano_depth` (as libraries), a running camera stack; pip: `xarm-python-sdk`, `websockets`, `ultralytics` (torch) |
+| `visual_servoing/` | ROS 2 package (`ament_python`). Wrist-camera (ZED X Nano) visual servo grasp of a well plate on the xArm6: YOLO oriented boxes located with the stereo depth, a position-based servo to a hover pose above the plate, then the descend / FSR close / lift sequence of the Xavier's Camera-Edge. Driven by `6_behavior/manipulation_executive` through `/visual_servo/{start,stop,status}` | `3_perception`'s `camera_perception` and `zedx_nano_depth` (as libraries), a running camera stack; pip: `xarm-python-sdk`, `websockets`, `ultralytics` (torch) |
 | `act_inference/` | **Not** a ROS package (`COLCON_IGNORE`): plain Python. Live ACT rollout on the xArm6 from the wrist camera, with a trimmed copy of the ACT/DETR model code | `3_perception`'s `zedx_nano_camera` and `zedx_nano_depth` (as libraries); torch, xArm SDK |
 
 Both folders are shared with the `apple_server_manip` repo (`2_manipulation/`), where they are developed and
@@ -17,21 +17,24 @@ takes the YOLO weights from `camera_perception`'s package share, as the rest of 
 3_perception (camera hub, /zedx_nano image + depth)
         │
         ▼
-visual_servoing  ──ws://<host>:8765──►  6_behavior/manipulation_executive
-   /visual_servo/{start,stop,status,annotated_image}        (behavior tree)
+visual_servoing  ◄──/visual_servo/{start,stop,status}──  6_behavior/manipulation_executive
+   /visual_servo/annotated_image                                   (behavior tree)
         │
         ▼  xArm SDK (mode 5 velocity), next to xarm_ros2
       xArm6
 ```
 
-`manipulation_executive` sends `{"cmd": "mode", "mode": "inspect"|"servo"}` and polls `{"cmd": "status"}` for
-`{"mode": ..., "worker_alive": ...}`; `visual_servoing/edge_control.py` answers exactly that, so the executive
-needs no change — **except its host**: `manipulation_executive.launch.xml` still has
-`camera_edge_host = 192.168.1.101`, the Xavier's old Camera-Edge. Point it at whichever machine runs
-`visual_servo_node` (the one with the GPU and the camera stack). The port stays 8765.
+`manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
+counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,
+`stopped` by default; see `manipulation_executive/config/manipulation_executive.yaml`). A BT deactivation or its
+`servo_timeout_s` calls `/visual_servo/stop`. The executive selects the base camera (`/camera_hub/select_zedx`)
+itself before planning; the servo switches to the Nano and back on its own.
 
-Nothing here is in `autonomy_bringup`, on purpose: this node can move the arm, so it is started by hand (or by
-the behavior stack through the WebSocket) rather than with the rest of autonomy.
+The Camera-Edge control WebSocket (`edge_control.py`) is kept for the `apple_server_manip` copy but is off by
+default here (`control_port:=-1`); `control_port:=8765` turns it back on.
+
+Nothing here is in `autonomy_bringup`, on purpose: this node can move the arm, so it is started by hand rather
+than with the rest of autonomy. Without it, the executive's servo step fails with "is visual_servo_node running?".
 
 ## Build
 
@@ -63,10 +66,10 @@ ros2 service call /visual_servo/stop std_srvs/srv/Trigger
 | `/visual_servo/start`, `/visual_servo/stop` | `std_srvs/Trigger` | start a run (returns at once) / abort it |
 | `/visual_servo/status` | `std_msgs/String` | JSON at 2 Hz and at the end of a run (transient local): `phase`, `result`, `message`, `attempt`, `error_mm`, `error_yaw_deg`, `plate_mm`, `target_mm`, `start_tip_mm`, `command_mm_s`, `fsr`, `mode` |
 | `/visual_servo/annotated_image` | `Image` bgr8 | wrist image with the plate box, the fingertip model and the state; published only while subscribed |
-| `ws://0.0.0.0:8765/` | WebSocket | the Camera-Edge control protocol (`control_port:=-1` turns it off) |
+| `ws://0.0.0.0:8765/` | WebSocket | the legacy Camera-Edge control protocol, only with `control_port:=8765` |
 
 Launch arguments: `execute` (false), `grasp` (true), `preview` (false), `robot_ip` (192.168.1.236),
-`yolo_models_dir` + `model` (best_wrist.pt), `device` (cuda:0), `control_port` (8765), `params_file`
+`yolo_models_dir` + `model` (best_wrist.pt), `device` (cuda:0), `control_port` (-1, off), `params_file`
 (`config/visual_servo.yaml`, every other parameter with comments), and `with_cameras` (false) with
 `depth_models_dir` / `depth_repo` to start the camera stack too.
 
@@ -118,4 +121,3 @@ either next to this folder or in the sibling group folder — no build required.
   `websockets` ≥ 14 wants `serve()` called inside the event loop), and nothing beyond node startup has
   been exercised here yet.
 - The first on-arm grasp (fingertip check above).
-- `manipulation_executive`'s `camera_edge_host` still points at the Xavier.
