@@ -11,7 +11,11 @@ pairs:
 
 Activation publishes the goal to `nav_api` (`/nav/goal_location` or `/nav/goal_pose`, both
 absolute — `nav_api` is not namespaced under `behavior/`) and watches `/nav/state` +
-`/nav/result` to derive RUNNING / SUCCESS / FAILURE. See
+`/nav/result` to derive RUNNING / SUCCESS / FAILURE. The nav stack runs on its own ROS domain
+(42, `NAVIGATION_DOMAIN_ID` in `1_navigation/run.sh`); this package's launch file also starts a
+`domain_bridge` (`config/nav_domain_bridge.yaml`) that carries only those five `/nav/*` topics
+between domain 0 and 42, so Nav2 internals stay off domain 0 (the GCS never sees them). This hides
+the stack rather than securing it: a LAN machine that deliberately joins domain 42 can still reach it. See
 `docs/superpowers/specs/2026-09-22-nav-bt-integration-design.md` for the full design.
 
 No automated test harness exists for this package (matches the rest of `6_behavior` — no gtest

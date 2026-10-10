@@ -44,6 +44,21 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_camera_mode_cmd_guard test/test_camera_mode_cmd_guard.cpp)
+  target_include_directories(test_camera_mode_cmd_guard PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+  target_compile_features(test_camera_mode_cmd_guard PUBLIC cxx_std_17)
+  ament_target_dependencies(test_camera_mode_cmd_guard
+    rclcpp
+    std_msgs
+    behavior_tree
+    behavior_tree_msgs
+  )
+  target_link_libraries(test_camera_mode_cmd_guard
+    nlohmann_json::nlohmann_json
+  )
 endif()
 
 ament_package()

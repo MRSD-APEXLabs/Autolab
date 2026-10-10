@@ -2,12 +2,15 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import DebugConsole from './debug/DebugConsole';
 import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+const isDebugRoute = window.location.pathname === '/debug';
+
 root.render(
   <React.StrictMode>
-    <App />
+    {isDebugRoute ? <DebugConsole /> : <App />}
   </React.StrictMode>
 );
 

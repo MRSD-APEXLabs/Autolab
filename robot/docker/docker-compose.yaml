@@ -85,6 +85,8 @@ services:
     runtime: nvidia
     # assumes network isolation via a physical router, so uses network_mode=host
     network_mode: host
+    environment:
+      - DDS_LAN_SUBNET=${DDS_LAN_SUBNET:-} # see common/dds_lan_profile.sh
     volumes:
       - /home/${USERNAME}/autolab_data/bags:/bags:rw
 
