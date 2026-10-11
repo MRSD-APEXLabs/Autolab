@@ -84,6 +84,8 @@ RUN apt update && apt install -y \
 RUN apt update -y && apt install -y \
   ros-dev-tools \
   ros-humble-tf2* \
+  # build dep of the source tf2 0.25.24 in ros_ws/tf2_fix (overrides the apt tf2; see bws in .bashrc)
+  ros-humble-ament-cmake-google-benchmark \
   ros-humble-moveit \
   ros-humble-ros2-control \
   ros-humble-ros2-controllers \
@@ -205,6 +207,23 @@ RUN pip3 install \
   onnx \
   opencv-python \
   websockets
+
+# 3_perception (camera_perception) + 7_manipulation (visual_servoing, act_inference) + 7_imitation_learning.
+# ultralytics goes in with --no-deps (plus the deps it actually needs) so pip doesn't pull a second opencv;
+# see 3_perception/camera_perception/requirements.txt.
+# pupil-apriltags ships no wheel for this platform, so it builds from sdist. Ubuntu 22.04's pip 22.0.2
+# leaks system site-packages into the isolated build env (setuptools_scm -> vcs-versioning wants
+# packaging>=26.2, system has 21.3), so upgrade pip first.
+RUN python3 -m pip install -U pip && \
+  python3 -m pip install \
+  pupil-apriltags \
+  xarm-python-sdk \
+  pynput \
+  'filelock>=3.16.1' \
+  cloudpickle \
+  ultralytics-thop \
+  nvidia-ml-py && \
+  python3 -m pip install --no-deps 'ultralytics>=8.4.19'
 
 # Override install newer openvdb 9.1.0 for compatibility with Ubuntu 22.04  https://bugs.launchpad.net/bugs/1970108
 RUN apt remove -y libopenvdb*; \
