@@ -4,7 +4,8 @@
   <arg name="sim" default="true" />
   <arg name="record_bag" default="false" />
 
-  <push_ros_namespace namespace="$(env ROBOT_NAME)" />
+  <!-- No robot namespace here: nodes keep their own (mostly root) names. Only the behavior layer, which the GCS
+       commands, lives under /$(env ROBOT_NAME)/behavior (set in behavior.launch.xml). -->
 
   <set_parameter name="use_sim_time" value="true" if="$(var sim)" />
 
