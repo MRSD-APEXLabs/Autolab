@@ -1,0 +1,13 @@
+<!-- Lazy MJPEG server on http://<stream_host>:<stream_port>/stream/<kind>/<camera>.mjpg (see config for the streams).
+     Arguments are prefixed stream_ because an include sees its parent's arguments (perception_bringup has host/port). -->
+<launch>
+  <arg name="stream_host" default="0.0.0.0" description="address the streams are served on"/>
+  <arg name="stream_port" default="8002"/>
+  <arg name="stream_params_file" default="$(find-pkg-share image_stream_server)/config/image_stream_server.yaml"/>
+
+  <node pkg="image_stream_server" exec="image_stream_server_node" name="image_stream_server" output="screen">
+    <param from="$(var stream_params_file)"/>
+    <param name="host" value="$(var stream_host)"/>
+    <param name="port" value="$(var stream_port)"/>
+  </node>
+</launch>

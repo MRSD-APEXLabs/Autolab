@@ -13,6 +13,9 @@ Two kinds of command are supported:
     by a named builder function. Every command has its own builder — this
     stays an explicit, hardcoded mapping rather than a generic
     JSON-schema-driven converter.
+  - camera_select:         cmd/perception/select_camera ("zedx" | "zedx_nano" |
+    null) → camera_hub std_srvs/Trigger service; the result goes back on
+    MQTT perception/select_camera_result.
 
 Environment variables:
     MQTT_HOST   broker hostname  (default: localhost)
@@ -22,6 +25,7 @@ Environment variables:
 import json
 import math
 import os
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -30,6 +34,16 @@ from behavior_tree_msgs.msg import LabMachineCommand, ManipulationCommand
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
+
+from gcs_monitoring.camera_select import (
+    CAMERA_SERVICES,
+    SELECT_CAMERA_TOPIC,
+    SELECT_RESULT_TOPIC,
+    call_select,
+    parse_select_payload,
+    result_payload,
+)
 
 MQTT_HOST = os.environ.get('MQTT_HOST', 'localhost')
 MQTT_PORT = int(os.environ.get('MQTT_PORT', '1883'))
@@ -39,7 +53,6 @@ STRING_CMD_TOPIC_MAP = {
     'cmd/routine_executor/start_routine_cmd': '/routine_executor/start_routine_cmd',
     'cmd/routine_executor/cancel': '/routine_executor/cancel',
     'cmd/planning/command': '/planning_command',
-    'cmd/perception/camera_mode_cmd': '/robot_1/behavior/perception/camera_mode_cmd',
     'cmd/navigation/go_to_location': '/robot_1/behavior/go_to_location_command',
 }
 
@@ -123,6 +136,11 @@ class MqttRos2Bridge(Node):
                 self._typed_pubs[ros2_topic] = self.create_publisher(
                     msg_type, ros2_topic, 10)
 
+        self._select_clients = {
+            camera: self.create_client(Trigger, service)
+            for camera, service in CAMERA_SERVICES.items()
+        }
+
         self.get_logger().info(
             f'MQTT→ROS2 bridge started — broker: {MQTT_HOST}:{MQTT_PORT}'
         )
@@ -132,6 +150,8 @@ class MqttRos2Bridge(Node):
             self._relay_string(mqtt_topic, payload)
         elif mqtt_topic in TYPED_CMD_TOPIC_MAP:
             self._relay_typed(mqtt_topic, payload)
+        elif mqtt_topic == SELECT_CAMERA_TOPIC:
+            self._relay_select(payload)
 
     def _relay_string(self, mqtt_topic: str, payload: bytes) -> None:
         ros2_topic = STRING_CMD_TOPIC_MAP[mqtt_topic]
@@ -152,6 +172,28 @@ class MqttRos2Bridge(Node):
         self._typed_pubs[ros2_topic].publish(msg)
         self.get_logger().info(f'Relayed {mqtt_topic} → {ros2_topic}')
 
+    def _relay_select(self, payload: bytes) -> None:
+        try:
+            camera = parse_select_payload(payload)
+        except ValueError as exc:
+            self.get_logger().warning(
+                f'Dropping malformed payload on {SELECT_CAMERA_TOPIC}: {exc}')
+            self._publish_select_result(None, False, str(exc))
+            return
+        # The hub may take ~40 s to answer; never block the MQTT network thread.
+        threading.Thread(
+            target=self._select_camera, args=(camera,), daemon=True).start()
+
+    def _select_camera(self, camera) -> None:
+        ok, message = call_select(
+            self._select_clients[camera], Trigger.Request())
+        self._publish_select_result(camera, ok, message)
+
+    def _publish_select_result(self, camera, ok: bool, message: str) -> None:
+        self._mqtt.publish(
+            SELECT_RESULT_TOPIC, result_payload(camera, ok, message), qos=0)
+        self.get_logger().info(f'Camera select {camera!r}: ok={ok} {message}')
+
 
 def main() -> None:
     rclpy.init()
@@ -171,7 +213,10 @@ def main() -> None:
             time.sleep(2)
 
     node = MqttRos2Bridge(client)
-    all_cmd_topics = list(STRING_CMD_TOPIC_MAP) + list(TYPED_CMD_TOPIC_MAP)
+    all_cmd_topics = (
+        list(STRING_CMD_TOPIC_MAP) + list(TYPED_CMD_TOPIC_MAP)
+        + [SELECT_CAMERA_TOPIC]
+    )
 
     def on_connect(_client, _userdata, _flags, rc):
         if rc != 0:

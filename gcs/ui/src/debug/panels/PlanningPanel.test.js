@@ -1,8 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import PlanningPanel from './PlanningPanel';
-import { useMqttContext } from '../useMqtt';
+import { useMqttContext } from '../../shared/useMqtt';
 
-jest.mock('../useMqtt');
+jest.mock('../../shared/useMqtt');
 
 test('publishes the raw command string for the clicked button', () => {
   const publish = jest.fn();

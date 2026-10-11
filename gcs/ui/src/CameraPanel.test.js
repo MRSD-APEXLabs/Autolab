@@ -1,107 +1,78 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import mqtt from 'mqtt';
 import CameraPanel from './CameraPanel';
 
-// ── Mock WebSocket ─────────────────────────────────────────────────────────────
-let mockWsInstances = [];
+jest.mock('mqtt');
 
-class MockWebSocket {
-  constructor(url) {
-    this.url = url;
-    this.readyState = MockWebSocket.OPEN;
-    this.onopen = null;
-    this.onmessage = null;
-    this.onclose = null;
-    this.onerror = null;
-    this.send = jest.fn();
-    mockWsInstances.push(this);
-  }
-  close() {
-    this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
-  }
-}
-MockWebSocket.OPEN   = 1;
-MockWebSocket.CLOSED = 3;
-global.WebSocket = MockWebSocket;
+let client;
+beforeEach(() => {
+  const handlers = {};
+  client = {
+    on: jest.fn((event, cb) => { handlers[event] = cb; }),
+    publish: jest.fn(),
+    subscribe: jest.fn(),
+    unsubscribe: jest.fn(),
+    end: jest.fn(),
+    emit: (event, ...args) => handlers[event]?.(...args),
+  };
+  mqtt.connect.mockReturnValue(client);
+  global.fetch = jest.fn(() => new Promise(() => {}));
+});
 
-beforeEach(() => { mockWsInstances = []; });
+const bridged = (obj) => Buffer.from(JSON.stringify({ data: JSON.stringify(obj) }));
+const hubStatus = (status) => act(() => {
+  client.emit('connect');
+  client.emit('message', 'ros2/camera_hub/status', bridged({ reachable: true, error: null, ...status }));
+});
+const expand = () => fireEvent.click(screen.getByRole('button', { name: /expand/i }));
 
-// ── Tests ──────────────────────────────────────────────────────────────────────
-
-test('renders minimized by default showing only header', () => {
+test('renders minimized by default showing only the header', () => {
   render(<CameraPanel />);
   expect(screen.getByText('Camera Feeds')).toBeInTheDocument();
-  expect(screen.queryByTestId('camera-grid')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('camera-pair')).not.toBeInTheDocument();
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
 });
 
-test('opens three WebSocket connections on mount', () => {
+test('header names the active camera', () => {
   render(<CameraPanel />);
-  // stream(8766), wrist(8767), base(8767)
-  expect(mockWsInstances).toHaveLength(3);
-  expect(mockWsInstances[0].url).toContain(':8766');
-  expect(mockWsInstances[1].url).toContain(':8767');
-  expect(mockWsInstances[2].url).toContain(':8767');
+  expect(screen.getByText('none')).toBeInTheDocument();
+  hubStatus({ active: 'zedx', state: 'streaming' });
+  expect(screen.getByText('ZED X (base)')).toBeInTheDocument();
 });
 
-test('wrist and base sockets subscribe with correct camera name on open', () => {
+test('expanded shows annotated and raw streams of the active camera', () => {
   render(<CameraPanel />);
-  mockWsInstances[1].onopen?.();
-  mockWsInstances[2].onopen?.();
-  expect(mockWsInstances[1].send).toHaveBeenCalledWith(JSON.stringify({ camera: 'wrist' }));
-  expect(mockWsInstances[2].send).toHaveBeenCalledWith(JSON.stringify({ camera: 'base' }));
+  hubStatus({ active: 'zedx', state: 'streaming' });
+  expand();
+  const srcs = screen.getAllByRole('img').map((img) => img.getAttribute('src'));
+  expect(srcs).toEqual([
+    'http://localhost:8002/stream/annotated/zedx.mjpg', 'http://localhost:8002/stream/raw/zedx.mjpg']);
 });
 
-test('expands when header button is clicked', () => {
+test('minimizing unmounts the streams', () => {
   render(<CameraPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /expand/i }));
-  expect(screen.getByTestId('camera-grid')).toBeInTheDocument();
-});
-
-test('minimizes when header button is clicked while expanded', () => {
-  render(<CameraPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /expand/i }));
+  hubStatus({ active: 'zedx', state: 'streaming' });
+  expand();
   fireEvent.click(screen.getByRole('button', { name: /minimize/i }));
-  expect(screen.queryByTestId('camera-grid')).not.toBeInTheDocument();
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
 });
 
-test('shows no-signal placeholder before any frames arrive', () => {
+test('is view-only: no camera switch controls', () => {
   render(<CameraPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /expand/i }));
-  const placeholders = screen.getAllByText('No signal');
-  expect(placeholders.length).toBe(3);
+  expand();
+  expect(screen.queryByRole('button', { name: /ZED X/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Release/ })).not.toBeInTheDocument();
 });
 
-test('active stream image updates when stream WS receives a frame', async () => {
+test('detection strip summarizes tags and the planner target', () => {
   render(<CameraPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /expand/i }));
-
-  await act(async () => {
-    mockWsInstances[0].onmessage?.({
-      data: JSON.stringify({ image_jpeg_b64: 'abc123' }),
-    });
-  });
-
-  const img = screen.getAllByRole('img')[0];
-  expect(img.src).toContain('data:image/jpeg;base64,abc123');
-});
-
-test('wrist image updates when wrist WS receives a frame', async () => {
-  render(<CameraPanel />);
-  fireEvent.click(screen.getByRole('button', { name: /expand/i }));
-
-  await act(async () => {
-    mockWsInstances[1].onopen?.();
-    mockWsInstances[1].onmessage?.({
-      data: JSON.stringify({ image_jpeg_b64: 'wristdata' }),
-    });
-  });
-
-  const imgs = screen.getAllByRole('img');
-  expect(imgs.some(img => img.src.includes('wristdata'))).toBe(true);
-});
-
-test('WebSockets are closed on unmount', () => {
-  const { unmount } = render(<CameraPanel />);
-  unmount();
-  expect(mockWsInstances.every(ws => ws.readyState === MockWebSocket.CLOSED)).toBe(true);
+  hubStatus({ active: 'zedx', state: 'streaming' });
+  expand();
+  expect(screen.getByTestId('detection-strip')).toHaveTextContent('Tags —');
+  act(() => client.emit('message', 'ros2/inspect/json', bridged({
+    apriltags: [{ id: 21, pose: null }, { id: 0, pose: null }],
+    wellplates: [{ name: 'wellplate', conf: 0.91, pose: { position: [0, 0, 0.62], orientation: [0, 0, 0, 1] } }],
+  })));
+  expect(screen.getByTestId('detection-strip')).toHaveTextContent('Tags 0 · 21');
+  expect(screen.getByTestId('detection-strip')).toHaveTextContent('Wellplate 0.91 @ 0.62 m');
 });

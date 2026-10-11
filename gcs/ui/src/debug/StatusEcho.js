@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useMqttContext } from './useMqtt';
+import { useMqttContext } from '../shared/useMqtt';
 
 export default function StatusEcho({ topic, label }) {
   const { subscribe } = useMqttContext();

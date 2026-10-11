@@ -1,16 +1,19 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
-
 #include <atomic>
+#include <cstdint>
 #include <future>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <behavior_tree/behavior_tree.hpp>
 #include <behavior_tree_msgs/msg/manipulation_command.hpp>
+#include <manipulation_executive/manipulation_logic.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 class ManipulationExecutive : public rclcpp::Node {
 public:
@@ -19,19 +22,12 @@ public:
     enum class ManipType  { PICK_UP, PLACE, PICK_BASE, PICK_WELLPLATE };
     enum class ManipPhase {
         IDLE,
-        ACTIVATING_INSPECT,
+        SELECTING_CAMERA,
         PLANNING,
         WAITING_PLACE,
-        ACTIVATING_SERVO,
+        SERVOING,
         PLANNING_SAFE,
     };
-
-    // Debug-tool guard for the manual camera-mode command topic — only allow
-    // a manual mode change while no pick/place is in flight. Defined inline
-    // here (not in the .cpp) so it's unit-testable without linking main().
-    static bool camera_mode_cmd_allowed(ManipPhase phase) {
-        return phase == ManipPhase::IDLE;
-    }
 
 private:
     // ── BT nodes ──────────────────────────────────────────────────────────────
@@ -53,49 +49,66 @@ private:
     bool       manip_terminal_{false};
 
     std::string object_type_;    // e.g. "well_plate"
-    std::string target_machine_; // (place only) e.g. "ot2"
+    std::string target_machine_; // (place / pick_wellplate) e.g. "ot2"
 
     std::future<bool> pending_;
     bool              in_flight_{false};
+    // Set when the BT deactivates the action mid-flight; the async waits bail out.
+    std::atomic<bool> abort_{false};
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
-    std::string camera_edge_host_;
-    int         camera_edge_port_;
-    double      place_wait_s_;
+    double                         place_wait_s_;
+    std::map<std::string, int64_t> april_tags_;            // target_machine → AprilTag id
+    std::string                    camera_select_service_;
+    double                         camera_select_timeout_s_;
+    std::string                    servo_start_service_;
+    std::string                    servo_stop_service_;
+    std::string                    servo_status_topic_;
+    double                         servo_timeout_s_;
+    std::vector<std::string>       servo_success_results_;
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
+    rclcpp::CallbackGroup::SharedPtr io_group_;   // service clients + servo status
     rclcpp::Subscription<behavior_tree_msgs::msg::ManipulationCommand>::SharedPtr cmd_sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr camera_mode_cmd_sub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr camera_mode_status_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr phase_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
     // 0=unknown/waiting, 1=SUCCESS, 2=ERROR
     std::atomic<int> planning_result_{0};
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr planning_state_sub_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr camera_select_client_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr servo_start_client_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr servo_stop_client_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr servo_status_sub_;
+    std::mutex                          servo_mutex_;
+    manipulation_logic::ServoRunTracker servo_tracker_;   // guarded by servo_mutex_
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::ManipulationCommand::SharedPtr msg);
-    void camera_mode_cmd_callback(const std_msgs::msg::String::SharedPtr msg);
+    void servo_status_callback(const std_msgs::msg::String::SharedPtr msg);
     void timer_callback();
 
     // ── State machine ─────────────────────────────────────────────────────────
     void tick_manip(bt::Action* action, ManipType type);
     void reset_manip();
     void fail_manip(bt::Action* action);
+    void start_select_camera();
 
     // ── Async operations (blocking; run in std::async threads) ────────────────
-    // Send { cmd: mode, mode: <mode> } then poll { cmd: status }.
-    // wait_complete=false: return true once worker_alive==true (inspect — just confirm active).
-    // wait_complete=true:  return true once mode returns to idle (servo — wait for finish).
-    bool activate_camera_mode(const std::string& mode, bool wait_complete);
+    // Calls the camera hub's select service (the base ZED X, which the planner's
+    // /inspect/* topics come from) and waits for the camera to stream.
+    bool select_camera();
+
+    // Starts a visual_servoing run and waits for it to finish; true if its result
+    // is one of servo_success_results.
+    bool run_servo();
 
     // Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
-    // pose_type: "inspection" | "placement" | "safe" | "home_offset"
+    // pose_type: "inspection" | "placement" | "wellplate_placement" | "safe" | "home_offset"
     bool run_planning(const std::string& pose_type);
 
-    // ── WebSocket helper (synchronous, blocking) ───────────────────────────────
-    // Connects to camera_edge_host_:camera_edge_port_, sends msg, reads one
-    // response, closes. Returns response string or empty on error.
-    std::string ws_round_trip(const std::string& msg);
+    // Sends a Trigger request and waits up to timeout_s; false (with `message` set)
+    // if the service is missing, does not answer or answers success=false.
+    bool call_trigger(const rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr& client,
+                      double timeout_s, std::string& message);
 };

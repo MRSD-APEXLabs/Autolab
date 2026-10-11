@@ -1,6 +1,7 @@
 <!-- Brings up the full perception stack: camera_hub_node, a camera + depth node per camera (camera_ui's
      cameras.launch.xml, via camera_perception's with_cameras), and camera_perception's AprilTag/YOLO/point-cloud
-     nodes. Deliberately excludes camera_ui's web page (camera_ui.launch.xml / ui_node, port 8001); start that
+     nodes, plus image_stream_server (port 8002: annotated/raw MJPEG streams for the GCS UIs; with_stream_server).
+     Deliberately excludes camera_ui's web page (camera_ui.launch.xml / ui_node, port 8001); start that
      separately if you want the browser UI. See 3_perception/README.md for the full topic list. -->
 <launch>
   <arg name="zedx" default="true" description="run perception on the ZED X (/zedx)"/>
@@ -22,6 +23,8 @@
        zedx_depth_model, zedx_nano_depth_model, zedx_temporal_frames, zedx_nano_temporal_frames, live in
        camera_ui/launch/cameras.launch.xml and can be overridden on this command line. -->
   <arg name="depth_repo" default="" description="Fast-FoundationStereo checkout ('' = &lt;depth_models_dir&gt;/Fast-FoundationStereo)"/>
+  <arg name="with_stream_server" default="true" description="serve annotated/raw MJPEG streams (image_stream_server)"/>
+  <arg name="stream_port" default="8002" description="image_stream_server HTTP port"/>
 
   <include file="$(find-pkg-share camera_perception)/launch/perception.launch.xml">
     <arg name="zedx" value="$(var zedx)"/>
@@ -43,5 +46,9 @@
     <arg name="depth_backend" value="$(var depth_backend)"/>
     <arg name="depth_models_dir" value="$(var depth_models_dir)"/>
     <arg name="depth_repo" value="$(var depth_repo)"/>
+  </include>
+
+  <include file="$(find-pkg-share image_stream_server)/launch/image_stream_server.launch.xml" if="$(var with_stream_server)">
+    <arg name="stream_port" value="$(var stream_port)"/>
   </include>
 </launch>

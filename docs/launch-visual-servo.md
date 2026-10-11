@@ -1,34 +1,37 @@
 # Launch visual servoing — from scratch
 
-The grasp runs on the Xavier (`~/Autolab-Camera-Edge/visual_servo.py`) and drives the arm directly over the xArm SDK. Before starting:
+The grasp runs in the robot stack: `visual_servo_node` (`robot/ros_ws/src/autonomy/7_manipulation/visual_servoing`)
+servos on the wrist ZED X Nano and drives the arm directly over the xArm SDK. Before starting:
 
 - gripper mounted and its RS-485 cable connected
-- on the Xavier, `~/Autolab-Camera-Edge/config.py` has `DEBUG = False` (with `True` nothing moves)
 - nothing else executing on the arm (the planning stack may be up, but idle)
 - a well plate under the wrist camera, e-stop in reach
 
-## 1–2. Network + camera server
+## 1–3. Network, camera hub, perception
 
-Same as [launch-planning.md](launch-planning.md) steps 1–2.
+Same as [launch-planning.md](launch-planning.md) steps 1–3. The camera stack must be up: the servo reads
+`/zedx_nano/*` and switches the hub with `/camera_hub/select_zedx_nano`.
 
-## 3. Watch the wrist camera (optional)
+## 4. Visual servo node
 
-```bash
-ssh autolab@192.168.1.101 'cd ~/Autolab-Camera-Edge/example_client && python3 -m http.server 8080'
-# Firefox → http://192.168.1.101:8080/test.html → host 192.168.1.101 → Connect → Wrist tile
-```
-
-## 4a. Trigger directly (Jetson)
+Started by hand, never by the bringup, because it moves the arm. Default is a dry run (arm only read):
 
 ```bash
-/usr/bin/python3 ~/coding/percep/test_server.py ws://192.168.1.101:8765
-> servo        # arm → start pose, gripper opens, servos down onto the plate, closes on FSR contact, lifts
-> status       # worker_alive=false when finished
-> stop         # abort at any time
-> idle
+ros2 launch visual_servoing visual_servo.launch.xml                          # dry run
+ros2 launch visual_servoing visual_servo.launch.xml execute:=true grasp:=false   # moves, stops at the hover pose
+ros2 launch visual_servoing visual_servo.launch.xml execute:=true            # full grasp
 ```
 
-## 4b. Trigger through the pipeline (Jetson)
+Watch it with `ros2 topic echo /visual_servo/status` or the `/visual_servo/annotated_image` stream.
+
+## 5a. Trigger directly
+
+```bash
+ros2 service call /visual_servo/start std_srvs/srv/Trigger   # one run: servo to hover, descend, close, lift
+ros2 service call /visual_servo/stop std_srvs/srv/Trigger    # abort at any time
+```
+
+## 5b. Trigger through the pipeline (Jetson)
 
 Planning stack up ([launch-planning.md](launch-planning.md) step 4), then the executives:
 
@@ -41,10 +44,17 @@ docker exec -it autolab-robot-l4t-1 bash -lc 'export ROS_LOCALHOST_ONLY=1 FASTRT
 ```bash
 docker exec -it autolab-robot-l4t-1 bash -lc "export ROS_LOCALHOST_ONLY=1 FASTRTPS_DEFAULT_PROFILES_FILE=/home/robot/AutoLab/common/ros_packages/fastdds_loopback.xml; ros2 topic echo /robot_1/behavior/manipulation_phase"
 docker exec autolab-robot-l4t-1 bash -lc "export ROS_LOCALHOST_ONLY=1 FASTRTPS_DEFAULT_PROFILES_FILE=/home/robot/AutoLab/common/ros_packages/fastdds_loopback.xml; ros2 topic pub --once /robot_1/behavior/manipulation_command behavior_tree_msgs/msg/ManipulationCommand '{type: pick_base, object_type: well_plate, target_machine: \"\"}'"
-# sequence: inspect → plan above the plate → servo grasp → plan_home_offset
-# SUCCESS is reported when the Xavier's worker goes idle, whether or not a plate was grasped
+# pick_base: PLANNING (plan_home_offset) → SERVOING → SUCCESS
+# pick_up / place / pick_wellplate: SELECTING_CAMERA (ZED X) → PLANNING → … → PLANNING_SAFE
 ```
 
-## 5. Afterwards
+The servo step succeeds only when `/visual_servo/status` ends with a result in the executive's
+`servo_success_results` (`grasped`, `aligned`, and `stopped` for a dry run). The executive and the servo node
+must share a ROS domain; with `ROS_LOCALHOST_ONLY=1` that means the same machine.
+
+Which AprilTag each lab machine uses (`place` / `pick_wellplate` → `plan_april_<id>`) is set in
+`robot/ros_ws/src/autonomy/6_behavior/manipulation_executive/config/manipulation_executive.yaml` (`april_tags`).
+
+## 6. Afterwards
 
 Send `plan_home_offset` ([launch-planning.md](launch-planning.md) step 5). If the next plan won't execute, restart the planning launch.

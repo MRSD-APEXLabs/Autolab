@@ -1,0 +1,24 @@
+# manipulation_executive parameters. Loaded by launch/manipulation_executive.launch.xml.
+/**:
+  ros__parameters:
+    # Lab machine (ManipulationCommand.target_machine) → AprilTag id on that machine.
+    # place / pick_wellplate send /planning_command plan_april_<id>. Add a machine here, no rebuild.
+    april_tags:
+      ot2: 21
+      shaker: 22
+
+    place_wait_s: 10.0                 # s at the placement pose before planning to safe
+
+    # Camera hub (3_perception camera_hub_node): the base ZED X feeds the planner's /inspect/* topics,
+    # so it is selected before every plan that reads them
+    camera_select_service: /camera_hub/select_zedx
+    camera_select_timeout_s: 45.0      # the ZED X takes ~6 s; the hub's own select_timeout is 30 s
+
+    # Visual servo (7_manipulation visual_servoing, visual_servo_node — started by hand)
+    servo_start_service: /visual_servo/start
+    servo_stop_service: /visual_servo/stop
+    servo_status_topic: /visual_servo/status
+    servo_timeout_s: 180.0             # whole run; on timeout the executive stops the servo and fails
+    # status "result" values that count as SUCCESS. stopped = a dry run (execute:=false) ended;
+    # drop it to make dry runs fail the action
+    servo_success_results: [grasped, aligned, stopped]

@@ -1,8 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import ManipulationPanel from './ManipulationPanel';
-import { useMqttContext } from '../useMqtt';
+import { useMqttContext } from '../../shared/useMqtt';
 
-jest.mock('../useMqtt');
+jest.mock('../../shared/useMqtt');
 
 beforeEach(() => {
   useMqttContext.mockReturnValue({ publish: jest.fn(), connected: true, subscribe: () => () => {} });

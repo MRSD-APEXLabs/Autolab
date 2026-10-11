@@ -2,7 +2,8 @@
 
      Needs the camera stack (camera_ui's cameras.launch.xml: hub bridge, /zedx_nano camera and depth nodes).
      execute:=false (default): the arm is only read; a run shows the plate, target and command it would send.
-     execute:=true: the arm moves; grasp:=false stops it at the hover pose. Serves ws://0.0.0.0:8765/ for Autolab's manipulation_executive. -->
+     execute:=true: the arm moves; grasp:=false stops it at the hover pose. manipulation_executive drives it through
+     visual_servo/{start,stop,status}; the legacy Camera-Edge WebSocket is off unless control_port:=8765. -->
 <launch>
   <arg name="execute" default="false" description="true: command the arm; false: read-only dry run"/>
   <arg name="grasp" default="true" description="false: stop at the hover pose (first runs: check the fingertip height)"/>
@@ -11,7 +12,7 @@
   <arg name="yolo_models_dir" default="$(find-pkg-share camera_perception)/models/yolo"/>
   <arg name="model" default="best_wrist.pt"/>
   <arg name="device" default="cuda:0"/>
-  <arg name="control_port" default="8765" description="Camera-Edge control WebSocket; -1 disables it"/>
+  <arg name="control_port" default="-1" description="legacy Camera-Edge control WebSocket (8765); -1 disables it"/>
   <arg name="params_file" default="$(find-pkg-share visual_servoing)/config/visual_servo.yaml"/>
   <arg name="with_cameras" default="false" description="also launch camera_ui's cameras.launch.xml"/>
   <arg name="depth_models_dir" default="" description="neural weights directory (with_cameras only)"/>

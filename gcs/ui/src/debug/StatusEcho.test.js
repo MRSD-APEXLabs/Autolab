@@ -1,8 +1,8 @@
 import { render, screen, act } from '@testing-library/react';
 import StatusEcho from './StatusEcho';
-import { useMqttContext } from './useMqtt';
+import { useMqttContext } from '../shared/useMqtt';
 
-jest.mock('./useMqtt');
+jest.mock('../shared/useMqtt');
 
 test('shows placeholder before any message arrives', () => {
   useMqttContext.mockReturnValue({ subscribe: () => () => {} });

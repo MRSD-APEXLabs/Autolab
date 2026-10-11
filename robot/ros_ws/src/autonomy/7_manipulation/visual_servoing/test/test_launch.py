@@ -88,16 +88,17 @@ def test_default_launch_is_a_dry_run(launch):
     params = node['params']
     assert params['execute'] is False and params['preview'] is False and params['grasp.enable'] is True
     assert params['yolo.model'].endswith('/camera_perception/models/yolo/best_wrist.pt')   # shipped in the package
-    assert (params['robot_ip'], params['control_port'], params['yolo.device']) == ('192.168.1.236', 8765, 'cuda:0')
+    # the executive uses visual_servo/{start,stop,status}; the legacy WebSocket is opt-in
+    assert (params['robot_ip'], params['control_port'], params['yolo.device']) == ('192.168.1.236', -1, 'cuda:0')
     assert params['mount.tilt_deg'] == 20.0 and params['servo.hover_height'] == 0.08
 
 
 def test_launch_arguments(launch):
-    params = launch('execute:=true', 'grasp:=false', 'model:=best_top.pt', 'yolo_models_dir:=/models', 'control_port:=-1',
+    params = launch('execute:=true', 'grasp:=false', 'model:=best_top.pt', 'yolo_models_dir:=/models', 'control_port:=8765',
                     'robot_ip:=10.0.0.5', 'device:=cpu')['visual_servo']['params']
     assert params['execute'] is True and params['grasp.enable'] is False
     assert params['yolo.model'] == '/models/best_top.pt'
-    assert (params['control_port'], params['robot_ip'], params['yolo.device']) == (-1, '10.0.0.5', 'cpu')
+    assert (params['control_port'], params['robot_ip'], params['yolo.device']) == (8765, '10.0.0.5', 'cpu')
     nodes = launch('with_cameras:=true')
     assert sorted(nodes) == ['camera_hub', 'visual_servo', 'zedx_camera', 'zedx_depth', 'zedx_nano_camera',
                              'zedx_nano_depth']

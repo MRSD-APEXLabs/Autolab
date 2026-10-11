@@ -1,5 +1,5 @@
 import React from 'react';
-import { MqttProvider, useMqttContext } from './useMqtt';
+import { MqttProvider, useMqttContext } from '../shared/useMqtt';
 import NavigationPanel from './panels/NavigationPanel';
 import PlanningPanel from './panels/PlanningPanel';
 import PerceptionPanel from './panels/PerceptionPanel';
