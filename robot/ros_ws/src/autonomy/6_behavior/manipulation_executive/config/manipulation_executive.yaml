@@ -4,8 +4,8 @@
     # Lab machine (ManipulationCommand.target_machine) → AprilTag id on that machine.
     # place / pick_wellplate send /planning_command plan_april_<id>. Add a machine here, no rebuild.
     april_tags:
-      ot2: 1
-      shaker: 2
+      ot2: 21
+      shaker: 22
 
     place_wait_s: 10.0                 # s at the placement pose before planning to safe
 
