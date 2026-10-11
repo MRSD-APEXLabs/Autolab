@@ -1,6 +1,8 @@
 <launch>
     <group>
-        <push-ros-namespace namespace="$(env ROBOT_NAME)/behavior" />
+        <!-- Absolute, so the executives land on /$(env ROBOT_NAME)/behavior/* however this file is launched
+             (by hand or through robot_bringup). The rest of the robot stack is not namespaced. -->
+        <push-ros-namespace namespace="/$(env ROBOT_NAME)/behavior" />
 
         <!-- Behavior Tree -->
         <node pkg="behavior_tree" exec="behavior_tree_implementation">
@@ -12,19 +14,18 @@
         <node pkg="behavior_executive" exec="behavior_executive"
             output="screen">
             <!-- remap glue to AutoLab -->
-            <remap from="is_armed" to="/$(env ROBOT_NAME)/interface/is_armed" />
+            <remap from="is_armed" to="/interface/is_armed" />
             <!-- topics -->
-            <remap from="has_control" to="/$(env ROBOT_NAME)/interface/has_control" />
+            <remap from="has_control" to="/interface/has_control" />
             <!-- services -->
-            <remap from="robot_command" to="/$(env ROBOT_NAME)/interface/robot_command" />
-            <remap from="set_trajectory_mode" to="/$(env ROBOT_NAME)/trajectory_controller/set_trajectory_mode" />
-            <remap from="/global/trajectory" to="/$(env ROBOT_NAME)/global/trajectory" />
-            <!-- <remap from="get_random_walk_plan" to="/$(env ROBOT_NAME)/global/get_random_walk_plan" /> -->
-            <remap from="state_estimate_timed_out" to="/$(env ROBOT_NAME)/drone_safety_monitor/state_estimate_timed_out" />
-            <remap from="set_recording_status" to="/$(env ROBOT_NAME)/bag_record/set_recording_status" />
-            <remap from="reset_stuck" to="/$(env ROBOT_NAME)/droan/reset_stuck" />
-            <remap from="clear_map" to="/$(env ROBOT_NAME)/droan/clear_map" />
-            <remap from="stuck" to="/$(env ROBOT_NAME)/droan/stuck" />
+            <remap from="robot_command" to="/interface/robot_command" />
+            <remap from="set_trajectory_mode" to="/trajectory_controller/set_trajectory_mode" />
+            <!-- <remap from="get_random_walk_plan" to="/global/get_random_walk_plan" /> -->
+            <remap from="state_estimate_timed_out" to="/drone_safety_monitor/state_estimate_timed_out" />
+            <remap from="set_recording_status" to="/bag_record/set_recording_status" />
+            <remap from="reset_stuck" to="/droan/reset_stuck" />
+            <remap from="clear_map" to="/droan/clear_map" />
+            <remap from="stuck" to="/droan/stuck" />
 
         </node>
 

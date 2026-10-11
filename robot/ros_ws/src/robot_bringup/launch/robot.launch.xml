@@ -4,7 +4,8 @@
   <arg name="sim" default="true" />
   <arg name="record_bag" default="false" />
 
-  <push_ros_namespace namespace="$(env ROBOT_NAME)" />
+  <!-- No robot namespace here: nodes keep their own (mostly root) names. Only the behavior layer, which the GCS
+       commands, lives under /$(env ROBOT_NAME)/behavior (set in behavior.launch.xml). -->
 
   <set_parameter name="use_sim_time" value="true" if="$(var sim)" />
 
@@ -18,23 +19,30 @@
   </group>
 
   <!-- Robot State Publisher (replaces static transforms) -->
-  <include file="$(find-pkg-share robot_bringup)/launch/robot_state_publisher.launch.py">
-    <arg name="robot_name" value="$(env ROBOT_NAME)" />
-    <arg name="urdf_file_path" value="$(env ROBOT_URDF_FILE_PATH)" />
-    <arg name="ignore_timestamp" value="true" />
-    <arg name="use_sim_time" value="$(var sim)" />
-  </include>
+  <!-- (each include in a group: keeps its launch args from leaking into the includes after it) -->
+  <group>
+    <include file="$(find-pkg-share robot_bringup)/launch/robot_state_publisher.launch.py">
+      <arg name="robot_name" value="$(env ROBOT_NAME)" />
+      <arg name="urdf_file_path" value="$(env ROBOT_URDF_FILE_PATH)" />
+      <arg name="ignore_timestamp" value="true" />
+      <arg name="use_sim_time" value="$(var sim)" />
+    </include>
+  </group>
 
   <!-- Static TFs for simulation connection -->
-  <include file="$(find-pkg-share robot_bringup)/launch/static_transforms.launch.xml">
-    <arg name="robot_namespace" value="$(env ROBOT_NAME)" />
-  </include>
+  <group>
+    <include file="$(find-pkg-share robot_bringup)/launch/static_transforms.launch.xml">
+      <arg name="robot_namespace" value="$(env ROBOT_NAME)" />
+    </include>
+  </group>
 
   <!-- Autonomy -->
-  <include
-    file="$(find-pkg-share $(env AUTONOMY_LAUNCH_PACKAGE))/launch/$(env AUTONOMY_LAUNCH_FILE)">
-    <arg name="sim" value="$(var sim)" />
-  </include>
+  <group>
+    <include
+      file="$(find-pkg-share $(env AUTONOMY_LAUNCH_PACKAGE))/launch/$(env AUTONOMY_LAUNCH_FILE)">
+      <arg name="sim" value="$(var sim)" />
+    </include>
+  </group>
 
   <!-- Logging -->
   <!-- <include file="$(find-pkg-share logging_bringup)/launch/logging.launch.xml" /> -->

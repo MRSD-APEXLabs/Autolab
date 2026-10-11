@@ -14,7 +14,9 @@ Same as [launch-planning.md](launch-planning.md) steps 1–3. The camera stack m
 
 ## 4. Visual servo node
 
-Started by hand, never by the bringup, because it moves the arm. Default is a dry run (arm only read):
+The robot bringup (`autonomy_bringup` → `manipulation_bringup`, real robot only) already starts it with
+`execute:=true`; skip this step then (a second copy shares the node name and services). By hand, the default is a
+dry run (arm only read):
 
 ```bash
 ros2 launch visual_servoing visual_servo.launch.xml                          # dry run
