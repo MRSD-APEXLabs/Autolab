@@ -14,16 +14,19 @@
   <arg name="device" default="cuda:0" description="YOLO device (cpu without CUDA)"/>
   <arg name="servo_params_file" default="$(find-pkg-share visual_servoing)/config/visual_servo.yaml"/>
 
-  <include file="$(find-pkg-share visual_servoing)/launch/visual_servo.launch.xml">
-    <arg name="execute" value="$(var servo_execute)"/>
-    <arg name="grasp" value="$(var servo_grasp)"/>
-    <arg name="preview" value="$(var servo_preview)"/>
-    <arg name="robot_ip" value="$(var robot_ip)"/>
-    <arg name="yolo_models_dir" value="$(var yolo_models_dir)"/>
-    <arg name="model" value="$(var servo_model)"/>
-    <arg name="device" value="$(var device)"/>
-    <arg name="params_file" value="$(var servo_params_file)"/>
-    <!-- perception_bringup already starts the cameras -->
-    <arg name="with_cameras" value="false"/>
-  </include>
+  <!-- group: keep visual_servoing's args (params_file, ...) from leaking to whatever includes this file next -->
+  <group>
+    <include file="$(find-pkg-share visual_servoing)/launch/visual_servo.launch.xml">
+      <arg name="execute" value="$(var servo_execute)"/>
+      <arg name="grasp" value="$(var servo_grasp)"/>
+      <arg name="preview" value="$(var servo_preview)"/>
+      <arg name="robot_ip" value="$(var robot_ip)"/>
+      <arg name="yolo_models_dir" value="$(var yolo_models_dir)"/>
+      <arg name="model" value="$(var servo_model)"/>
+      <arg name="device" value="$(var device)"/>
+      <arg name="params_file" value="$(var servo_params_file)"/>
+      <!-- perception_bringup already starts the cameras -->
+      <arg name="with_cameras" value="false"/>
+    </include>
+  </group>
 </launch>

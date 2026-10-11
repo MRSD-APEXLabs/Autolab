@@ -27,9 +27,11 @@
     <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
   </include>
 
-  <!-- Manipulation (real arm only) -->
-  <include file="$(find-pkg-share $(env MANIPULATION_LAUNCH_PACKAGE))/launch/$(env MANIPULATION_LAUNCH_FILE)"
-    unless="$(var sim)" />
+  <!-- Manipulation (real arm only). The group scopes its launch args: an unscoped include leaks them (e.g.
+       visual_servoing's params_file) into the includes after it, such as manipulation_executive's. -->
+  <group unless="$(var sim)">
+    <include file="$(find-pkg-share $(env MANIPULATION_LAUNCH_PACKAGE))/launch/$(env MANIPULATION_LAUNCH_FILE)" />
+  </group>
 
   <!-- Behavior -->
   <include
