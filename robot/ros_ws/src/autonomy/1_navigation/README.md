@@ -6,7 +6,7 @@ Runs in the robot container (ROS 2 Humble) and on the host (ROS 2 Jazzy) from th
 ```
 1_navigation/
   swerve_navigation/    ament_python: swerve_bridge, cmd_vel_mux, joy_teleop, cloud_to_scan,
-                        point_to_goal, location_markers, follow_path_adapter, nav_api
+                        point_to_goal, location_markers, nav_api
   navigation_bringup/   ament_cmake: launch/, config/, urdf/, rviz/, behavior_trees/, maps/,
                         phoenix6/tuner_constants.py + the custom Smac-2D planner plugin (C++)
   scripts/install_deps.sh   container dependencies
@@ -36,19 +36,13 @@ this Jetson already contains unrelated Jazzy processes. It uses Fast DDS with sh
 both the stack and Docker RViz communicate over UDP. Set the same `NAVIGATION_DOMAIN_ID` for both
 commands only when a different isolated domain is required.
 
-The Humble apt repository currently supplies tf2 0.25.23, whose transform-message callback can
-deadlock RViz after it has been open for a short time. `rviz_docker.sh` detects affected versions,
-builds the upstream 0.25.24 fix once under `ros_ws/tf2_fix`, and applies it only to RViz. The first
-launch therefore needs network access and can take a minute; subsequent launches reuse the overlay.
-
-On Humble, `controller_server` was observed to stop updating its private TF buffer while `/tf`
-remained current for every fresh listener. `follow_path_adapter` therefore keeps the planner and
-RViz path in `map`, transforms the controller-facing copy with its own live listener, and forwards
-it in `odom` (the local-costmap frame). The `FreshOdomMPPIController` also feeds the live `/odom`
-pose into the controller's shared buffer so its robot-pose, progress, and goal checks cannot remain
-at startup. The adapter awaits controller action futures instead of polling them inside executor
-workers; overlapping path updates and recovery retries therefore cannot starve the proxy's own
-goal/result callbacks. Together these prevent a valid plan from aborting before producing velocity.
+The Humble apt repository on this robot supplies an affected tf2 release whose asynchronous
+transform callbacks can deadlock both RViz and Nav2 after they have been running for a while.
+`run.sh` and `rviz_docker.sh` detect affected versions, build the upstream 0.25.24 fix once under
+`ros_ws/tf2_fix`, and load the same overlay into every navigation process. The first launch may
+therefore need network access and take a minute; subsequent launches reuse the overlay. With the
+deadlock fixed at its source, the controller path stays identical to `~/nav_nav`: the behavior tree
+sends `FollowPath` directly to Nav2's stock MPPI controller.
 
 Then, in a second terminal inside the container (`sws` is enough, the packages are in
 `ros_ws/install`):
@@ -165,9 +159,9 @@ The lidar is blind behind and to the right of the robot over ~136°, so the stac
 nose-first (`nav_motion:=forward`) by default. On hardware the pad is the only e-stop: `B`
 latches stop, holding `LT` overrides Nav2, `X` cancels the goal.
 
-Recovery is intentionally non-driving: after a planner or controller failure Nav2 may clear its
-costmaps and wait, but it does not spin or back up. This avoids making a failed goal look like
-navigation and does not move the robot into the lidar's rear/right blind area.
+Recovery matches `~/nav_nav`: after clearing costmaps it may spin 1.57 rad to recover visibility,
+wait, or back up at 0.05 m/s for at most 0.15 m. The backup limit reduces exposure to the lidar's
+rear/right blind area but does not make contact safe.
 
 Hardware runs confirmed that the bridge publishes live odometry and the full Nav2 stack reaches
 the active lifecycle state. The container's Humble RViz was the unstable component, so it is now

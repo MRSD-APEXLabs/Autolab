@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/home/labx/coding/Autolab/robot/ros_ws_nav/build/navigation_bringup/libfresh_odom_controllers.so" "TARGETS" "fresh_odom_controllers" "LIBRARY_DESTINATION" "lib")

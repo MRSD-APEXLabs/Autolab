@@ -190,15 +190,6 @@ def _nodes(context):
 
     # Every node that commands velocity is remapped away from /cmd_vel (see module docstring).
     to_nav_raw = [('cmd_vel', 'cmd_vel_nav_raw')]
-    # Keep the controller action internal. follow_path_adapter exposes /follow_path to the BT and
-    # converts its map-frame route to the odom frame used by the local costmap. This bypasses a
-    # Humble controller_server TF buffer that can stop updating AMCL's map->odom edge.
-    # Humble does not expand a remap of an action's base name to its five hidden endpoints, so
-    # spell them out. (Later ROS distributions accept a single /follow_path remap.)
-    controller_remaps = to_nav_raw + [
-        (f'/follow_path/_action/{endpoint}', f'/follow_path_internal/_action/{endpoint}')
-        for endpoint in ('send_goal', 'get_result', 'cancel_goal', 'feedback', 'status')]
-
     actions = [
         LogInfo(msg=f"[navigation] map={map_yaml} nav_motion={arg('nav_motion')} "
                     f'goal_heading={goal_heading} approach={approach} '
@@ -245,14 +236,9 @@ def _nodes(context):
         _lifecycle_manager('lifecycle_manager_localization', LOCALIZATION_NODES),
 
         # ---- Nav2 ----
-        Node(package='swerve_navigation', executable='follow_path_adapter',
-             name='follow_path_adapter', output='both', parameters=[WALL_TIME, {
-                 'target_frame': 'odom',
-                 'source_action': '/follow_path',
-                 'target_action': '/follow_path_internal'}]),
         # controller_server is left unnamed as in nav2_bringup: its process also hosts the
         # local_costmap node.
-        nav2_node('nav2_controller', 'controller_server', remappings=controller_remaps),
+        nav2_node('nav2_controller', 'controller_server', remappings=to_nav_raw),
         nav2_node('nav2_smoother', 'smoother_server', name='smoother_server'),
         nav2_node('nav2_planner', 'planner_server', name='planner_server'),
         nav2_node('nav2_behaviors', 'behavior_server', name='behavior_server',

@@ -11,7 +11,7 @@ TF2_FIXED_VERSION=0.25.24
 TF2_FIX_ROOT=/home/robot/AutoLab/robot/ros_ws/tf2_fix/$TF2_FIXED_VERSION
 TF2_FIX_SETUP=$TF2_FIX_ROOT/install/local_setup.bash
 TF2_FIX_LIB=$TF2_FIX_ROOT/install/lib/libtf2.so
-TF2_BUILD_SCRIPT=/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/scripts/build_rviz_tf2_fix.sh
+TF2_BUILD_SCRIPT=/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/scripts/build_tf2_fix.sh
 
 usage() {
   cat <<'EOF'
@@ -64,10 +64,10 @@ if docker exec "$CONTAINER" pgrep -x rviz2 >/dev/null 2>&1; then
   exit 1
 fi
 
-# tf2 0.25.23 can deadlock RViz's MessageFilter: its transformable-request callback takes the
+# Old Humble tf2 can deadlock MessageFilter: its transformable-request callback takes the
 # timer mutex while the TF listener still holds the request mutex, opposite to waitForTransform.
 # Humble 0.25.24 invokes that callback after releasing the request mutex. Until the binary apt
-# repository catches up, build that one library once and overlay it only in the RViz process.
+# repository catches up, use the same fixed library as the navigation process.
 SYSTEM_TF2_VERSION="$(docker exec "$CONTAINER" \
   dpkg-query -W -f='${Version}' ros-humble-tf2 2>/dev/null || true)"
 TF2_OVERLAY=false
