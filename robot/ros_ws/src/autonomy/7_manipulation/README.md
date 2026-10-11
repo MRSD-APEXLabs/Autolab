@@ -33,8 +33,11 @@ itself before planning; the servo switches to the Nano and back on its own.
 The Camera-Edge control WebSocket (`edge_control.py`) is kept for the `apple_server_manip` copy but is off by
 default here (`control_port:=-1`); `control_port:=8765` turns it back on.
 
-Nothing here is in `autonomy_bringup`, on purpose: this node can move the arm, so it is started by hand rather
-than with the rest of autonomy. Without it, the executive's servo step fails with "is visual_servo_node running?".
+`manipulation_bringup` (`launch/manipulation.launch.xml`) starts the servo with the rest of autonomy on the real
+robot (`autonomy_bringup`, skipped when `sim:=true`; `MANIPULATION_LAUNCH_PACKAGE` / `MANIPULATION_LAUNCH_FILE` in
+`.env`) with `execute:=true`: the arm moves when the executive starts a run. `servo_execute:=false` on
+`manipulation.launch.xml` makes it a dry run.
+Without the node, the executive's servo step fails with "is visual_servo_node running?".
 
 ## Build
 

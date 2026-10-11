@@ -27,6 +27,10 @@
     <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
   </include>
 
+  <!-- Manipulation (real arm only) -->
+  <include file="$(find-pkg-share $(env MANIPULATION_LAUNCH_PACKAGE))/launch/$(env MANIPULATION_LAUNCH_FILE)"
+    unless="$(var sim)" />
+
   <!-- Behavior -->
   <include
     file="$(find-pkg-share $(env BEHAVIOR_LAUNCH_PACKAGE))/launch/$(env BEHAVIOR_LAUNCH_FILE)" />

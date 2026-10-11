@@ -1,0 +1,35 @@
+<!-- Brings up the manipulation stack: visual_servo_node (visual_servoing), which manipulation_executive drives through
+     /visual_servo/{start,stop,status}. Needs the camera stack (perception_bringup): the servo reads /zedx_nano/* and
+     switches the hub with /camera_hub/select_zedx_nano.
+
+     servo_execute:=true (default) commands the arm when a run is started; servo_execute:=false is a read-only dry run
+     (the executive counts its "stopped" result as success). servo_grasp:=false stops the arm at the hover pose. -->
+<launch>
+  <arg name="servo_execute" default="true" description="true: command the arm; false: read-only dry run"/>
+  <arg name="servo_grasp" default="true" description="false: stop at the hover pose"/>
+  <arg name="servo_preview" default="false" description="run the detector between runs too (annotated image)"/>
+  <arg name="robot_ip" default="192.168.1.236" description="xArm controller"/>
+  <arg name="yolo_models_dir" default="$(find-pkg-share camera_perception)/models/yolo"/>
+  <arg name="servo_model" default="best_wrist.pt" description="YOLO weights in yolo_models_dir for the wrist camera"/>
+  <arg name="device" default="cuda:0" description="YOLO device (cpu without CUDA)"/>
+  <arg name="servo_params_file" default="$(find-pkg-share visual_servoing)/config/visual_servo.yaml"/>
+
+  <group>
+    <!-- Root namespace: manipulation_executive and the camera hub use absolute /visual_servo/* and /camera_hub/*
+         names, while robot.launch.xml pushes the robot's namespace. -->
+    <push_ros_namespace namespace="/"/>
+
+    <include file="$(find-pkg-share visual_servoing)/launch/visual_servo.launch.xml">
+      <arg name="execute" value="$(var servo_execute)"/>
+      <arg name="grasp" value="$(var servo_grasp)"/>
+      <arg name="preview" value="$(var servo_preview)"/>
+      <arg name="robot_ip" value="$(var robot_ip)"/>
+      <arg name="yolo_models_dir" value="$(var yolo_models_dir)"/>
+      <arg name="model" value="$(var servo_model)"/>
+      <arg name="device" value="$(var device)"/>
+      <arg name="params_file" value="$(var servo_params_file)"/>
+      <!-- perception_bringup already starts the cameras -->
+      <arg name="with_cameras" value="false"/>
+    </include>
+  </group>
+</launch>
