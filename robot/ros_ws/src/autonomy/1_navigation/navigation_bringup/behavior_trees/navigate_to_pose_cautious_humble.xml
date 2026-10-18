@@ -6,8 +6,8 @@
   WouldAControllerRecoveryHelp / WouldAPlannerRecoveryHelp conditions. Without them the
   contextual clears run on every planner/controller failure and the system recoveries run on any
   failure, which is what Humble's own nav_to_pose_with_consistent_replanning tree does.
-  Recovery is deliberately non-driving: spinning was the apparent motion when navigation had
-  actually failed, and backing up is unsafe in the lidar's rear/right blind area.
+  As in the Jazzy/reference tree, BackUp is capped at 0.15 m and 0.05 m/s because the lidar
+  cannot see behind the robot, while Spin can recover visibility after an actual failure.
   Keep the two files in step.
 -->
 <root main_tree_to_execute="MainTree">
@@ -45,7 +45,9 @@
             <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
             <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
           </Sequence>
+          <Spin spin_dist="1.57"/>
           <Wait wait_duration="5.0"/>
+          <BackUp backup_dist="0.15" backup_speed="0.05"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the upstream Humble tf2 release containing the waitForTransform deadlock fix.
 #
-# Keep this as an RViz-only overlay. Replacing libtf2 underneath an already-running navigation
-# stack would mix library versions between processes and is unnecessary for the UI hang.
+# Humble binary repositories on this robot stop at an affected release. Both Nav2 and RViz use
+# asynchronous transform requests, so they must load this fixed libtf2 before either process starts.
 set -euo pipefail
 
 TF2_VERSION=0.25.24
@@ -11,14 +11,14 @@ TF2_COMMIT=404b7224d623d614f18fa9738dbf1716403d857e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROS_WS="$(cd -- "$SCRIPT_DIR/../../../.." && pwd)"
-FIX_ROOT="${RVIZ_TF2_FIX_ROOT:-$ROS_WS/tf2_fix/$TF2_VERSION}"
+FIX_ROOT="${TF2_FIX_ROOT:-$ROS_WS/tf2_fix/$TF2_VERSION}"
 SOURCE_DIR="$FIX_ROOT/cache/geometry2"
 BUILD_DIR="$FIX_ROOT/build"
 INSTALL_DIR="$FIX_ROOT/install"
 LOG_DIR="$FIX_ROOT/log"
 
 if [[ -r "$INSTALL_DIR/local_setup.bash" && -r "$INSTALL_DIR/lib/libtf2.so" ]]; then
-  echo "RViz tf2 $TF2_VERSION overlay already exists: $INSTALL_DIR"
+  echo "tf2 $TF2_VERSION overlay already exists: $INSTALL_DIR"
   exit 0
 fi
 
@@ -46,7 +46,7 @@ if [[ "$ACTUAL_COMMIT" != "$TF2_COMMIT" ]]; then
   exit 1
 fi
 
-echo "Building RViz-only tf2 $TF2_VERSION overlay..."
+echo "Building tf2 $TF2_VERSION overlay for Nav2 and RViz..."
 colcon --log-base "$LOG_DIR" build \
   --base-paths "$SOURCE_DIR/tf2" \
   --packages-select tf2 \
@@ -61,4 +61,4 @@ if [[ ! -r "$INSTALL_DIR/local_setup.bash" || ! -r "$INSTALL_DIR/lib/libtf2.so" 
   exit 1
 fi
 
-echo "RViz tf2 overlay ready: $INSTALL_DIR"
+echo "tf2 overlay ready: $INSTALL_DIR"

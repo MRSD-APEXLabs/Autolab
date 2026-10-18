@@ -3,7 +3,7 @@
 <package format="3">
   <name>swerve_navigation</name>
   <version>1.0.0</version>
-  <description>Navigation nodes for the MK5 swerve base: phoenix6 hardware bridge, VLP-16 cloud to scan, joystick teleop, cmd_vel mux, controller path adapter, goal helpers, and nav_api.</description>
+  <description>Navigation nodes for the MK5 swerve base: phoenix6 hardware bridge, VLP-16 cloud to scan, joystick teleop, cmd_vel mux, goal helpers, and nav_api.</description>
   <maintainer email="arnavkha@andrew.cmu.edu">Arnav</maintainer>
   <license>Apache-2.0</license>
 

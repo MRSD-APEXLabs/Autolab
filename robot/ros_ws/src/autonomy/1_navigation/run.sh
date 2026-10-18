@@ -84,6 +84,28 @@ set +u
 source "$NAV_WS/install/setup.bash"
 set -u
 
+# tf2 before 0.25.24 has an ABBA deadlock between waitForTransform and transformable-request
+# callbacks. It was observed both in RViz and inside Nav2's private transform buffers. Use the
+# upstream fixed library for the whole Humble stack so the working reference's direct
+# planner -> controller action path remains reliable; Jazzy already contains the fix.
+if [[ "$NAV_DISTRO" == humble ]]; then
+  TF2_FIXED_VERSION=0.25.24
+  TF2_FIX_SETUP="$NAV_WS/tf2_fix/$TF2_FIXED_VERSION/install/local_setup.bash"
+  SYSTEM_TF2_VERSION="$(dpkg-query -W -f='${Version}' ros-humble-tf2 2>/dev/null || true)"
+  if [[ -z "$SYSTEM_TF2_VERSION" ]] || \
+     ! dpkg --compare-versions "$SYSTEM_TF2_VERSION" ge "$TF2_FIXED_VERSION"; then
+    "$SRC_DIR/scripts/build_tf2_fix.sh"
+    if [[ ! -r "$TF2_FIX_SETUP" ]]; then
+      echo "ERROR: fixed tf2 overlay is missing: $TF2_FIX_SETUP" >&2
+      exit 1
+    fi
+    set +u
+    source "$TF2_FIX_SETUP"
+    set -u
+    echo "tf2:        $TF2_FIXED_VERSION overlay (system package is ${SYSTEM_TF2_VERSION:-missing})"
+  fi
+fi
+
 # Two stacks on one ROS domain would both publish /cmd_vel.
 running="$(pgrep -af 'ros2 launch navigation_bringup|lib/swerve_navigation/|ros2 launch nav5_bringup|lib/nav5/' || true)"
 if [[ -n "$running" ]]; then

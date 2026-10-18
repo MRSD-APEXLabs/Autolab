@@ -8,3 +8,4 @@ venv/
 .venv_jog/
 build.log
 output.txt
+robot/ros_ws_nav/
