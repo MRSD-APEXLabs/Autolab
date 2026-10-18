@@ -58,12 +58,19 @@ def build_config(param):
             target_pressure=tuple(int(v) for v in param('gripper.target_pressure', list(grip.target_pressure))),
             stop_pressure=tuple(int(v) for v in param('gripper.stop_pressure', list(grip.stop_pressure))),
             final_squeeze=int(param('gripper.final_squeeze', grip.final_squeeze)),
+            final_squeeze_settle=float(param('gripper.final_squeeze_settle', grip.final_squeeze_settle)),
             nudge_mm=float(param('gripper.nudge_mm', grip.nudge_mm)),
             nudge_speed=float(param('gripper.nudge_speed', grip.nudge_speed)),
             use_fsr=bool(param('gripper.use_fsr', grip.use_fsr)),
             close_offset=int(param('gripper.close_offset', grip.close_offset)),
             close_settle=float(param('gripper.close_settle', grip.close_settle)),
-            tare_samples=int(param('gripper.tare_samples', grip.tare_samples))),
+            tare_samples=int(param('gripper.tare_samples', grip.tare_samples)),
+            fsr_polarity=tuple(int(v) for v in param('gripper.fsr_polarity', list(grip.fsr_polarity))),
+            fsr_samples=int(param('gripper.fsr_samples', grip.fsr_samples)),
+            fsr_sample_interval=float(param('gripper.fsr_sample_interval', grip.fsr_sample_interval)),
+            fsr_nudge_sign=tuple(int(v) for v in param('gripper.fsr_nudge_sign', list(grip.fsr_nudge_sign))),
+            max_nudge_mm=float(param('gripper.max_nudge_mm', grip.max_nudge_mm)),
+            max_nudges=int(param('gripper.max_nudges', grip.max_nudges))),
     )
     if config.finger_axis not in ('x', 'y'):
         raise ValueError(f"servo.finger_axis must be 'x' or 'y', got {config.finger_axis!r}")
@@ -71,6 +78,21 @@ def build_config(param):
         raise ValueError('servo.grasp_offset and servo.plate_size need 2 values')
     if config.control_rate <= 0.0:
         raise ValueError('servo.control_rate must be > 0')
+    grip = config.gripper
+    if len(grip.fsr_polarity) != 2 or any(v not in (-1, 1) for v in grip.fsr_polarity):
+        raise ValueError('gripper.fsr_polarity needs two values, each +1 or -1')
+    if len(grip.target_pressure) != 2 or len(grip.stop_pressure) != 2:
+        raise ValueError('gripper.target_pressure and gripper.stop_pressure need 2 values')
+    if grip.fsr_samples < 1 or grip.tare_samples < 0 or not np.isfinite(grip.fsr_sample_interval) or grip.fsr_sample_interval < 0:
+        raise ValueError('gripper needs fsr_samples >= 1, tare_samples >= 0 and fsr_sample_interval >= 0')
+    if grip.fsr_nudge_sign not in ((1, -1), (-1, 1)):
+        raise ValueError('gripper.fsr_nudge_sign must be [1, -1] or [-1, 1]')
+    if grip.max_nudges < 1 or not np.isfinite(grip.max_nudge_mm) or grip.max_nudge_mm <= 0:
+        raise ValueError('gripper.max_nudges and gripper.max_nudge_mm must be > 0')
+    if grip.rate <= 0 or grip.nudge_mm < 0:
+        raise ValueError('gripper.rate must be > 0 and gripper.nudge_mm must be >= 0')
+    if grip.final_squeeze < 0 or not np.isfinite(grip.final_squeeze_settle) or grip.final_squeeze_settle < 0:
+        raise ValueError('gripper.final_squeeze and gripper.final_squeeze_settle must be >= 0')
     return config
 
 

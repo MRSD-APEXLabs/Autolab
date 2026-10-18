@@ -127,13 +127,16 @@ def fit_plane(points, min_points=20, trials=64, tolerance=None):
     good = lengths > 1e-12
     if good.any():
         normals, a = normals[good] / lengths[good, None], a[good]
-        support = (np.abs((points[None, :, :] - a[:, None, :]) @ normals[:, :, None])[..., 0] <= tolerance).sum(axis=1)
+        # These are three-element dot products. Batched matmul invokes threaded
+        # BLAS for each trial, which can take over a second on the Jetson.
+        distances = np.einsum('tpc,tc->tp', points[None, :, :] - a[:, None, :], normals)
+        support = (np.abs(distances) <= tolerance).sum(axis=1)
         best = int(np.argmax(support))
-        inliers = np.abs((points - a[best]) @ normals[best]) <= tolerance
+        inliers = np.abs(np.einsum('pc,c->p', points - a[best], normals[best])) <= tolerance
         if inliers.sum() >= min_points:
             points = points[inliers]
     centroid, normal = _least_squares_plane(points)
-    inliers = np.abs((points - centroid) @ normal) <= tolerance
+    inliers = np.abs(np.einsum('pc,c->p', points - centroid, normal)) <= tolerance
     if min_points <= inliers.sum() < len(points):
         centroid, normal = _least_squares_plane(points[inliers])
     if float(normal @ centroid) > 0.0:   # the camera is at the origin: face it

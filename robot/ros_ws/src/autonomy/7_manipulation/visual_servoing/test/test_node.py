@@ -97,7 +97,7 @@ def test_dry_run_through_ros(ros):
     node = VisualServoNode(arm=arm, detector=FakeDetector(arm, Mount()), namespace=ns,
                            cli_args=['--ros-args', '--params-file', str(YAML)],
                            parameter_overrides=[Parameter(k, value=v) for k, v in overrides.items()])
-    assert node.config.finger_axis == 'y' and node.config.gripper.stop_pressure == (25, -1)
+    assert node.config.finger_axis == 'y' and node.config.gripper.stop_pressure == (150, 150)
     unread = [k for k in yaml_params() if not k.startswith('yolo.') and not node.has_parameter(k)]
     assert unread == []                                   # every YAML entry is a parameter of the node
 
