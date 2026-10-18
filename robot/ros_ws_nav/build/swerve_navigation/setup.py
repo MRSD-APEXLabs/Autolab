@@ -1,1 +1,0 @@
-/home/labx/coding/Autolab/robot/ros_ws/src/autonomy/1_navigation/swerve_navigation/setup.py
