@@ -1,35 +1,55 @@
 <!-- AUTONOMY -->
+<!-- Each subsystem is included inside its own <group>: in Humble an include's launch args (params_file,
+     robot_ip, ...) otherwise leak into every include after it, overriding those files' own defaults. -->
 <launch>
 
   <arg name="sim" default="true" />
 
   <!-- Interface -->
-  <include
-    file="$(find-pkg-share $(env INTERFACE_LAUNCH_PACKAGE))/launch/$(env INTERFACE_LAUNCH_FILE)" />
+  <group>
+    <include
+      file="$(find-pkg-share $(env INTERFACE_LAUNCH_PACKAGE))/launch/$(env INTERFACE_LAUNCH_FILE)" />
+  </group>
 
   <!-- Navigation -->
-  <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)">
-    <arg name="sim" value="$(var sim)" />
-  </include>
+  <group>
+    <include file="$(find-pkg-share $(env NAVIGATION_LAUNCH_PACKAGE))/launch/$(env NAVIGATION_LAUNCH_FILE)">
+      <arg name="sim" value="$(var sim)" />
+    </include>
+  </group>
 
   <!-- Perception -->
-  <include
-    file="$(find-pkg-share $(env PERCEPTION_LAUNCH_PACKAGE))/launch/$(env PERCEPTION_LAUNCH_FILE)" />
+  <group>
+    <include
+      file="$(find-pkg-share $(env PERCEPTION_LAUNCH_PACKAGE))/launch/$(env PERCEPTION_LAUNCH_FILE)" />
+  </group>
 
   <!-- Local -->
-  <include file="$(find-pkg-share $(env LOCAL_LAUNCH_PACKAGE))/launch/$(env LOCAL_LAUNCH_FILE)" />
+  <group>
+    <include file="$(find-pkg-share $(env LOCAL_LAUNCH_PACKAGE))/launch/$(env LOCAL_LAUNCH_FILE)" />
+  </group>
 
   <!-- Global -->
-  <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
+  <group>
+    <include file="$(find-pkg-share $(env GLOBAL_LAUNCH_PACKAGE))/launch/$(env GLOBAL_LAUNCH_FILE)" />
+  </group>
 
   <!-- Planning -->
-  <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)">
-    <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
-  </include>
+  <group>
+    <include file="$(find-pkg-share $(env PLANNING_LAUNCH_PACKAGE))/launch/$(env PLANNING_LAUNCH_FILE)">
+      <arg name="show_rviz" value="false" />  <!-- autolaunch is headless -->
+    </include>
+  </group>
+
+  <!-- Manipulation (real arm only) -->
+  <group unless="$(var sim)">
+    <include file="$(find-pkg-share $(env MANIPULATION_LAUNCH_PACKAGE))/launch/$(env MANIPULATION_LAUNCH_FILE)" />
+  </group>
 
   <!-- Behavior -->
-  <include
-    file="$(find-pkg-share $(env BEHAVIOR_LAUNCH_PACKAGE))/launch/$(env BEHAVIOR_LAUNCH_FILE)" />
-
+  <group>
+    <include
+      file="$(find-pkg-share $(env BEHAVIOR_LAUNCH_PACKAGE))/launch/$(env BEHAVIOR_LAUNCH_FILE)" />
+  </group>
 
 </launch>

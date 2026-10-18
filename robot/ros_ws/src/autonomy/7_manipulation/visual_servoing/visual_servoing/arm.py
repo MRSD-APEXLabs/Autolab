@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 MODE_POSITION, MODE_SERVO, MODE_VELOCITY = 0, 1, 5
 GRIPPER_DEVICE = 0x08
+GRIPPER_BAUDRATE = 57600  # Nano SoftwareSerial needs more timing margin than 115200
+GRIPPER_FSR_CUTOFF = 600  # closing force cutoff in the Nano firmware
 
 
 class ArmError(RuntimeError):
@@ -166,8 +168,8 @@ class XArm:
 
     def gripper_setup(self):
         arm = self._motion()
-        arm.set_tgpio_modbus_timeout(50)
-        arm.set_tgpio_modbus_baudrate(115200)
+        self._check(arm.set_tgpio_modbus_timeout(100), 'set_tgpio_modbus_timeout')
+        self._check(arm.set_tgpio_modbus_baudrate(GRIPPER_BAUDRATE), 'set_tgpio_modbus_baudrate')
 
     def gripper_set(self, value, settle=0.5):
         """Target position 0 (open) .. 1000."""

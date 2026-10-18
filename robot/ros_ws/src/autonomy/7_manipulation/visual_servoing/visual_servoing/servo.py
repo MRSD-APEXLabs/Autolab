@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 
-from .arm import ArmError, flange_for_tip, level_pose
+from .arm import ArmError, GRIPPER_FSR_CUTOFF, flange_for_tip, level_pose
 from .control import (Gains, PlateFilter, PoseHistory, finger_angle_offset, grasp_yaw, hover_target, plate_in_base,
                       servo_command)
 from .mount import Mount
@@ -25,21 +25,28 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class GripperConfig:
-    """The Camera-Edge FSR grasp (config.py): close in steps, nudge sideways while only one finger presses."""
+    """Close on tared FSR pressure; unload an active pad while centring the plate."""
     close_start: int = 50              # GRIPPER_CLOSE
-    step: int = 20                     # GRIPPER_STEP
+    step: int = 10                     # replacement pads need smaller closing steps
     max_close: int = 350
     samples: int = 100                 # N_SAMPLES
     rate: float = 2.0                  # LOOP_HZ
-    target_pressure: tuple = (15, -1)  # one finger above this and not the other: nudge (Camera-Edge: 250, 120)
-    stop_pressure: tuple = (25, -1)    # all FSRs in use above this: done; negative leaves one out (Camera-Edge: 370, 140)
-    final_squeeze: int = 30
-    nudge_mm: float = 1.0              # NUDGE_MM
-    nudge_speed: float = 30.0          # mm/s
-    use_fsr: bool = False              # False: close to the gripper's position + close_offset, no FSR feedback
+    target_pressure: tuple = (60, 60) # early contact above each finger's unloaded baseline
+    stop_pressure: tuple = (150, 150) # both fingers must press; a negative threshold disables that finger
+    final_squeeze: int = 40            # additional close command after both fingers reach grip pressure
+    final_squeeze_settle: float = 1.0 # seconds for the final adjustment immediately before lifting
+    nudge_mm: float = 0.5
+    nudge_speed: float = 5.0           # mm/s
+    use_fsr: bool = True              # False: close to the gripper's position + close_offset, no FSR feedback
     close_offset: int = 350            # gripper units; 350 held the plate on the arm (2026-09-22)
     close_settle: float = 4.0          # s for the fingers to close before lifting (1.5 lifted mid-close)
-    tare_samples: int = 5              # FSR reads at the hover, gripper open; the pressures count from their median (0: raw)
+    tare_samples: int = 25             # FSR reads at the hover, gripper open; pressures count from their median (0: raw)
+    fsr_polarity: tuple = (1, 1)       # +1: contact raises ADC; -1: contact lowers ADC
+    fsr_samples: int = 5              # median of this many reads for each contact decision
+    fsr_sample_interval: float = 0.05 # seconds between independent ADC readings
+    fsr_nudge_sign: tuple = (1, -1)   # direction along flange finger axis that unloads each pad
+    max_nudge_mm: float = 5.0         # maximum displacement from the initial grasp position
+    max_nudges: int = 10              # bound oscillations / an unresponsive second sensor
 
 
 @dataclass
@@ -72,9 +79,9 @@ class ServoConfig:
     final_speed: float = 8.0            # mm/s
     lift: float = 0.10                  # m after closing
     lift_speed: float = 50.0            # mm/s
-    max_retries: int = 3                # GRASP_MAX_RETRIES
+    max_retries: int = 0                # one attempt per start command; retries explicitly opt in
     retry_lift: float = 0.05            # m, GRASP_RETRY_LIFT_MM
-    return_to_start: bool = True        # back to the pose the run started from (Camera-Edge _initial_pose)
+    return_to_start: bool = False       # keep the lifted pose; returning is an explicit option
     return_speed: float = 100.0         # mm/s
     gains: Gains = field(default_factory=Gains)
     gripper: GripperConfig = field(default_factory=GripperConfig)
@@ -265,6 +272,8 @@ class ServoRunner:
                 if cfg.grasp:
                     self.arm.gripper_setup()
                     self.arm.gripper_open()
+                    if cfg.gripper.use_fsr:
+                        self._wait(cfg.gripper.close_settle)  # finish opening before the unloaded tare
                 if cfg.level_at_start:
                     self.arm.move_flange(level_pose(start_pose), cfg.level_speed)
             for attempt in range(cfg.max_retries + 1):
@@ -282,7 +291,8 @@ class ServoRunner:
                     log.info('grasp failed: retry %d/%d', attempt + 1, cfg.max_retries)
                     self._retry_lift()
                 else:
-                    self._set(result='failed', message=f'no grasp after {cfg.max_retries + 1} attempts')
+                    count = cfg.max_retries + 1
+                    self._set(result='failed', message=f'no grasp after {count} attempt' + ('s' if count != 1 else ''))
             self._controlled_end = True
         except Aborted:
             self._set(result='aborted', message='stopped')
@@ -393,7 +403,7 @@ class ServoRunner:
         grasp_tip[2] -= cfg.grasp_depth
         grasp_tip = self._offset_target(grasp_tip, yaw)
         above = grasp_tip + np.array([0.0, 0.0, cfg.final_segment])
-        base = self._fsr_baseline()
+        base = self._fsr_baseline() if gcfg.use_fsr else (0, 0)
         self._set(grasp_tip_mm=[round(v * 1000, 1) for v in grasp_tip])
         self._check_abort()
         self.arm.move_flange(flange_for_tip(above, yaw, self.mount.flange_T_tip), cfg.approach_speed)
@@ -415,53 +425,174 @@ class ServoRunner:
         value = gcfg.close_start
         self.arm.gripper_set(value)
         fsr = (None, None)
+        nudge_total, nudges = 0.0, 0
+        last_nudged_finger = None
         for i in range(gcfg.samples):
             self._check_abort()
-            fsr = self.arm.gripper_fsr()
+            fsr = self._sample_fsr(gcfg.fsr_samples)
             self._set(fsr=list(fsr), gripper=value)
-            if fsr[0] is None:
-                self._wait(1.0 / gcfg.rate)
-                continue
-            rise = (fsr[0] - base[0], fsr[1] - base[1])
+            rise = self._fsr_pressure(fsr, base)
+            self._set(fsr_pressure=list(rise))
             if self._pressed(rise):
-                self.arm.gripper_set(value + gcfg.final_squeeze)
                 break
-            hit1, hit2 = rise[0] > gcfg.target_pressure[0], rise[1] > gcfg.target_pressure[1]
-            if all(t >= 0 for t in gcfg.stop_pressure) and hit1 != hit2:
-                # one finger touches, the other not: slide towards the free finger. Camera-Edge's nudge(-1 mm)
-                # for FSR1 took the finger axis as if roll were 0, so it moved along flange +y: kept as tuned.
-                self._nudge(gcfg.nudge_mm if hit1 else -gcfg.nudge_mm, yaw)
-                value += gcfg.step // 4
-            else:
-                value = min(value + gcfg.step, gcfg.max_close)
+            finger = self._unbalanced_finger(rise)
+            if finger is not None:
+                # A switch to the opposite pad means the previous nudge unloaded
+                # the first jaw. With a fixed opening the controller can bounce
+                # between the pads forever. Take up a quarter step of slack only
+                # after that switch, while below the firmware force cutoff, then
+                # re-read both sensors before another correction.
+                if (last_nudged_finger is not None and finger != last_nudged_finger
+                        and max(fsr) <= GRIPPER_FSR_CUTOFF and value < gcfg.max_close):
+                    previous = value
+                    value = min(value + max(1, gcfg.step // 4), gcfg.max_close)
+                    if not self.arm.gripper_set(value):
+                        raise ArmError('gripper balance adjustment command failed')
+                    self._set(gripper=value, balance_close_increment=value - previous)
+                    last_nudged_finger = None
+                    continue
+                # Move the loaded jaw away from the plate, bringing the other jaw
+                # closer. Hold the opening while centring; further squeezing here
+                # increases the force on the finger that already touches.
+                signed_mm = gcfg.nudge_mm * gcfg.fsr_nudge_sign[finger]
+                nudge_total += signed_mm
+                nudges += 1
+                if abs(nudge_total) > gcfg.max_nudge_mm or nudges > gcfg.max_nudges:
+                    raise RunFailed('FSR contact did not balance within the gripper nudge limits: '
+                                    f'pressure={rise}, gripper={value}, nudges={nudges - 1}')
+                self._nudge(signed_mm, yaw)
+                last_nudged_finger = finger
+                self._set(nudge_fsr=finger + 1, nudge_mm=signed_mm, nudge_total_mm=nudge_total, nudges=nudges)
+                self._wait(1.0 / gcfg.rate)
+                after = self._sample_fsr(gcfg.fsr_samples)
+                after_rise = self._fsr_pressure(after, base)
+                self._set(fsr=list(after), fsr_pressure=list(after_rise),
+                          nudge_pressure_before=list(rise), nudge_pressure_after=list(after_rise))
+                log.info('FSR%d nudge %+.1f mm: pressure %s -> %s, gripper %d',
+                         finger + 1, signed_mm, rise, after_rise, value)
+                # A plate resting on the base can follow the loaded jaw. Even
+                # with the correct unloading direction, a fixed opening then
+                # never brings the opposite pad into contact. Take up a small
+                # amount of slack only after a measured reduction in load.
+                if (not self._pressed(after_rise)
+                        and self._unbalanced_finger(after_rise) == finger
+                        and rise[finger] - after_rise[finger] >= max(20, .1 * rise[finger])
+                        and max(after) <= GRIPPER_FSR_CUTOFF and value < gcfg.max_close):
+                    previous = value
+                    value = min(value + max(1, gcfg.step // 4), gcfg.max_close)
+                    if not self.arm.gripper_set(value):
+                        raise ArmError('gripper balance adjustment command failed')
+                    self._set(gripper=value, balance_close_increment=value - previous)
+                    log.info('FSR load reduced: taking up slack, gripper %d -> %d', previous, value)
+                    last_nudged_finger = None
+                continue
+            value = min(value + gcfg.step, gcfg.max_close)
             self.arm.gripper_set(value)
+        else:
+            self._set(fsr_contact_confirmed=False)
+            log.warning('FSR thresholds not reached: retaining the gripper command without a lift')
+            return False
 
+        self._set(fsr_contact_confirmed=True, phase='grip_settling',
+                  grip_contact_fsr=list(fsr), grip_contact_pressure=list(rise))
+        self._wait(gcfg.close_settle)
+        settled_fsr = self._sample_fsr(gcfg.fsr_samples)
+        self._set(fsr_before_squeeze=list(settled_fsr),
+                  pressure_before_squeeze=list(self._fsr_pressure(settled_fsr, base)))
+        self._squeeze_before_lift()
+        prelift_fsr = self._sample_fsr(gcfg.fsr_samples)
+        prelift_pressure = self._fsr_pressure(prelift_fsr, base)
+        self._set(fsr_before_lift=list(prelift_fsr), pressure_before_lift=list(prelift_pressure))
+        log.info('Grip contact %s; settled %s; after squeeze %s (baseline %s)',
+                 fsr, settled_fsr, prelift_fsr, base)
+        if not self._held_after_lift(prelift_pressure):
+            raise RunFailed(f'grip lost before lift after final squeeze: pressure={prelift_pressure}')
+        self._check_abort()
         self._set(phase='lifting')
         pose = self.arm.flange_pose()
         lifted = pose.copy()
         lifted[2, 3] += cfg.lift
         self.arm.move_flange(lifted, cfg.lift_speed)
-        fsr = self.arm.gripper_fsr()
-        self._set(fsr=list(fsr))
-        ok = fsr[0] is not None and self._pressed((fsr[0] - base[0], fsr[1] - base[1]))
+        fsr = self._sample_fsr(gcfg.fsr_samples)
+        rise = self._fsr_pressure(fsr, base)
+        self._set(fsr=list(fsr), fsr_pressure=list(rise))
+        # Both pads confirmed contact before lifting. Lifting changes how the
+        # plate loads the pads; one pad can unload while the opposing pad still
+        # carries the plate. Require retained pressure on at least one enabled
+        # pad instead of incorrectly treating that redistribution as a lost grip.
+        ok = self._held_after_lift(rise)
+        self._set(hold_contact_confirmed=ok,
+                  hold_fsr_active=[t >= 0 and r > t for r, t in zip(rise, gcfg.stop_pressure)])
         log.info('grasp check after lift: fsr=%s (baseline %s) -> %s', fsr, base, 'held' if ok else 'not held')
         return ok
 
+    def _squeeze_before_lift(self):
+        """After the main grip settles, send and verify the final increment before moving the arm."""
+        cfg = self.config.gripper
+        self._check_abort()
+        before = self.arm.gripper_position()
+        if before is None or not 0 <= before <= cfg.max_close:
+            raise ArmError(f'cannot verify gripper setpoint before final squeeze: {before}')
+        target = min(before + cfg.final_squeeze, cfg.max_close)
+        self._set(phase='squeezing', gripper_before_squeeze=before, gripper_squeeze_target=target,
+                  gripper_squeeze_delta=target - before, squeeze_command_verified=False)
+        if target > before:
+            if not self.arm.gripper_set(target, settle=0.0):
+                raise ArmError('final gripper squeeze command failed')
+        readback = self.arm.gripper_position()
+        if readback != target:
+            raise ArmError(f'final gripper squeeze readback mismatch: requested {target}, read {readback}')
+        self._set(gripper=target, gripper_after_squeeze=readback, squeeze_command_verified=True)
+        log.info('PRE-LIFT SQUEEZE: gripper %d -> %d (%+d), register readback %d',
+                 before, target, target - before, readback)
+        self._wait(cfg.final_squeeze_settle)
+
     def _pressed(self, rise):
-        """Every FSR in use rose above its stop pressure. A negative stop pressure leaves that FSR out: on the arm
-        FSR2 read 0 with the plate held (2026-09-22), so both-fingers-pressed never came and nudging can't balance."""
+        """Every enabled finger exceeds its stop pressure; a negative threshold disables that finger."""
         used = [(r, t) for r, t in zip(rise, self.config.gripper.stop_pressure) if t >= 0]
         return bool(used) and all(r > t for r, t in used)
 
+    def _held_after_lift(self, rise):
+        """After both pads confirmed the grasp, retain contact on either enabled pad."""
+        return any(t >= 0 and r > t for r, t in zip(rise, self.config.gripper.stop_pressure))
+
+    def _unbalanced_finger(self, pressure):
+        """Which finger needs unloading; also balance when both touch but only one has enough force."""
+        cfg = self.config.gripper
+        if any(t < 0 for t in cfg.stop_pressure):
+            return None  # balancing requires two working sensors
+        for thresholds in (cfg.stop_pressure, cfg.target_pressure):
+            active = [p > t for p, t in zip(pressure, thresholds)]
+            if active[0] != active[1]:
+                return 0 if active[0] else 1
+        return None
+
     def _fsr_baseline(self):
-        """Median FSR readings with the gripper open and nothing between the fingers. An idle FSR need not read 0:
-        on the arm FSR1 idled at ~360 and FSR2 at 0 (2026-09-22), so raw readings would count as a touch."""
-        reads = [self.arm.gripper_fsr() for _ in range(max(0, self.config.gripper.tare_samples))]
-        reads = [r for r in reads if r[0] is not None]
-        base = tuple(int(v) for v in np.median(np.array(reads), axis=0)) if reads else (0, 0)
+        """Median unloaded readings at the hover pose. Mounting preload makes the idle ADC values nonzero."""
+        count = self.config.gripper.tare_samples
+        base = self._sample_fsr(count) if count > 0 else (0, 0)
         self._set(fsr_baseline=list(base))
-        log.info('FSR baseline %s from %d reads', base, len(reads))
+        log.info('FSR baseline %s from %d reads', base, count)
         return base
+
+    def _fsr_pressure(self, fsr, baseline):
+        """Positive contact signal in ADC counts, with each finger's measured polarity."""
+        return tuple((value - zero) * polarity for value, zero, polarity in
+                     zip(fsr, baseline, self.config.gripper.fsr_polarity))
+
+    def _sample_fsr(self, count):
+        """Reject isolated spikes and fail a grasp if a majority of sensor replies are invalid."""
+        reads = []
+        for i in range(count):
+            self._check_abort()
+            reading = self.arm.gripper_fsr()
+            if all(v is not None and 0 <= v <= 1023 for v in reading):
+                reads.append(reading)
+            if i + 1 < count:
+                self._wait(self.config.gripper.fsr_sample_interval)
+        if len(reads) <= count // 2:
+            raise RunFailed(f'FSR sampling failed: {len(reads)}/{count} valid replies')
+        return tuple(int(v) for v in np.median(reads, axis=0))
 
     def _nudge(self, signed_mm, yaw):
         """Move `signed_mm` along the finger axis (flange y for finger_axis 'y')."""
@@ -479,3 +610,5 @@ class ServoRunner:
         pose[2, 3] += cfg.retry_lift
         self.arm.move_flange(pose, cfg.level_speed)
         self.arm.gripper_open()
+        if cfg.gripper.use_fsr:
+            self._wait(cfg.gripper.close_settle)
