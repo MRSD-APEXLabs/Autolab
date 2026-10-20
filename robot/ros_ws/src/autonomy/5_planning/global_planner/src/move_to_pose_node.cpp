@@ -911,7 +911,7 @@ int main(int argc, char *argv[])
             if (!live_task_type)
                 RCLCPP_WARN(node->get_logger(), "Using default task type: %s.", task_type.c_str());
 
-            const double PREGRASP_Z_OFFSET = 0.00;
+            const double PREGRASP_Z_OFFSET = 0.03;
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
@@ -967,7 +967,7 @@ int main(int argc, char *argv[])
 
             geometry_msgs::msg::Pose pregrasp_pose = target_position;
 
-            const double PREGRASP_Z_OFFSET = 0.00;
+            const double PREGRASP_Z_OFFSET = 0.03;
             pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
             const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
@@ -992,7 +992,7 @@ int main(int argc, char *argv[])
             geometry_msgs::msg::Point home_point;
             home_point.x = -0.048;
             home_point.y = 0.443;
-            home_point.z = 0.247;
+            home_point.z = 0.302;  // 0.247 + 0.055 force sensor
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =

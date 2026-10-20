@@ -172,4 +172,19 @@
     <disable_collisions link1="gripper_v43_1" link2="wrist_2_p4_1" reason="Never"/>
     <disable_collisions link1="wrist_1_p4_1" link2="wrist_2_p4_1" reason="Adjacent"/>
     <disable_collisions link1="camera_link" link2="gripper_v43_1" reason="Adjacent" />
+    <!-- force sensor: rigid between flange and gripper -->
+    <disable_collisions link1="end_effector_p4_1" link2="force_sensor_link" reason="Adjacent"/>
+    <disable_collisions link1="force_sensor_link" link2="gripper_v43_1" reason="Adjacent"/>
+    <disable_collisions link1="Az_Back_Right_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Az_Back_left_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Az_Front_Left_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Az_Front_right_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Finger_left_2" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Finger_right_2" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Wheel_Back_Left_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Wheel_Back_Right_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Wheel_Front_Left_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="Wheel_Front_Right_1" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="camera_link" link2="force_sensor_link" reason="Never"/>
+    <disable_collisions link1="wrist_2_p4_1" link2="force_sensor_link" reason="Never"/>
 </robot>
