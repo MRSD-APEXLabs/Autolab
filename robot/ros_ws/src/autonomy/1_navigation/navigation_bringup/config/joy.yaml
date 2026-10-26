@@ -1,4 +1,4 @@
-# Gamepad: joy_node (ros-jazzy-joy 3.3.0, raw SDL joystick API) + nav5 joy_teleop.
+# Gamepad: joy_node (ros-jazzy-joy 3.3.0, raw SDL joystick API) + swerve_navigation joy_teleop.
 
 joy_node:
   ros__parameters:

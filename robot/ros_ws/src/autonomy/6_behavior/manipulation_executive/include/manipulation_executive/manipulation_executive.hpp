@@ -64,7 +64,6 @@ private:
     std::string                    servo_start_service_;
     std::string                    servo_stop_service_;
     std::string                    servo_status_topic_;
-    double                         servo_timeout_s_;
     std::vector<std::string>       servo_success_results_;
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────

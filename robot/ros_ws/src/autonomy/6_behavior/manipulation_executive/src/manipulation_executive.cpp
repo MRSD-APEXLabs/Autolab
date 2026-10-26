@@ -29,7 +29,6 @@ ManipulationExecutive::ManipulationExecutive()
     servo_start_service_     = param("servo_start_service",     rclcpp::ParameterValue("/visual_servo/start")).as_string();
     servo_stop_service_      = param("servo_stop_service",      rclcpp::ParameterValue("/visual_servo/stop")).as_string();
     servo_status_topic_      = param("servo_status_topic",      rclcpp::ParameterValue("/visual_servo/status")).as_string();
-    servo_timeout_s_         = param("servo_timeout_s",         rclcpp::ParameterValue(180.0)).as_double();
     servo_success_results_   = param("servo_success_results",
                                      rclcpp::ParameterValue(std::vector<std::string>{"grasped", "aligned", "stopped"}))
                                    .as_string_array();
@@ -492,6 +491,8 @@ bool ManipulationExecutive::select_camera()
 // until that run ends. The servo node switches the hub to the wrist camera
 // itself and back to the base camera afterwards. Success only for results in
 // servo_success_results (grasped, aligned and — dry run — stopped by default).
+// No timeout is applied — the servo is expected to always publish a terminal
+// result; the run fails only if /visual_servo/status loses its publisher.
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_servo()
@@ -510,9 +511,6 @@ bool ManipulationExecutive::run_servo()
     }
     RCLCPP_INFO(this->get_logger(), "Visual servo started: %s", message.c_str());
 
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                              std::chrono::duration<double>(servo_timeout_s_));
     while (rclcpp::ok()) {
         std::this_thread::sleep_for(100ms);
 
@@ -535,11 +533,10 @@ bool ManipulationExecutive::run_servo()
 
         if (abort_.load()) return false;   // reset_manip() already sent stop
 
-        if (std::chrono::steady_clock::now() > deadline) {
+        if (servo_status_sub_->get_publisher_count() == 0) {
             RCLCPP_ERROR(this->get_logger(),
-                         "Visual servo did not finish within %.0f s — stopping it",
-                         servo_timeout_s_);
-            servo_stop_client_->async_send_request(std::make_shared<Trigger::Request>());
+                         "%s has no publisher — visual_servo_node is gone, failing",
+                         servo_status_topic_.c_str());
             return false;
         }
     }
