@@ -18,9 +18,10 @@
     <include file="$(find-pkg-share robot_bringup)/launch/real.launch.xml" />
   </group>
 
-  <!-- Robot State Publisher (replaces static transforms) -->
+  <!-- On real hardware planning_bringup publishes the full calibrated robot
+       model. A second publisher here gives Chassis_1 a conflicting parent. -->
   <!-- (each include in a group: keeps its launch args from leaking into the includes after it) -->
-  <group>
+  <group if="$(var sim)">
     <include file="$(find-pkg-share robot_bringup)/launch/robot_state_publisher.launch.py">
       <arg name="robot_name" value="$(env ROBOT_NAME)" />
       <arg name="urdf_file_path" value="$(env ROBOT_URDF_FILE_PATH)" />
