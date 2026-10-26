@@ -18,7 +18,6 @@
     servo_start_service: /visual_servo/start
     servo_stop_service: /visual_servo/stop
     servo_status_topic: /visual_servo/status
-    servo_timeout_s: 180.0             # whole run; on timeout the executive stops the servo and fails
     # status "result" values that count as SUCCESS. stopped = a dry run (execute:=false) ended;
     # drop it to make dry runs fail the action
     servo_success_results: [grasped, aligned, stopped]

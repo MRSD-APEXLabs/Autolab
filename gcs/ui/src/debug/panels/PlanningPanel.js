@@ -7,8 +7,9 @@ const COMMANDS = [
   { label: 'Home', value: 'plan_home' },
   { label: 'Home Offset', value: 'plan_home_offset' },
   { label: 'Wellplate', value: 'plan_wellplate' },
-  { label: 'AprilTag: OT2', value: 'plan_april_1' },
-  { label: 'AprilTag: Shaker', value: 'plan_april_2' },
+  // ids match manipulation_executive.yaml april_tags
+  { label: 'AprilTag: OT2', value: 'plan_april_21' },
+  { label: 'AprilTag: Shaker', value: 'plan_april_22' },
 ];
 
 export default function PlanningPanel() {

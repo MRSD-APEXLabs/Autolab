@@ -26,8 +26,8 @@ visual_servoing  ◄──/visual_servo/{start,stop,status}──  6_behavior/ma
 
 `manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
 counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,
-`stopped` by default; see `manipulation_executive/config/manipulation_executive.yaml`). A BT deactivation or its
-`servo_timeout_s` calls `/visual_servo/stop`. The executive selects the base camera (`/camera_hub/select_zedx`)
+`stopped` by default; see `manipulation_executive/config/manipulation_executive.yaml`). There is no timeout: a BT
+deactivation calls `/visual_servo/stop`, and the run fails if `/visual_servo/status` loses its publisher. The executive selects the base camera (`/camera_hub/select_zedx`)
 itself before planning; the servo switches to the Nano and back on its own.
 
 The Camera-Edge control WebSocket (`edge_control.py`) is kept for the `apple_server_manip` copy but is off by
