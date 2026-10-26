@@ -96,8 +96,12 @@ Roll it out in two stages:
    `ft_finger_sign` (make `lateral` positive when the FSRs choose a `+` nudge, FSR1 with `fsr_nudge_sign: [1, -1]`).
    Choose `ft_lateral_deadband_n` above the free-closing noise, `ft_hold_min_n` from the `after lift` `|dFz|`,
    and `ft_contact_n` above the `grasp height` Fz. A failed sensor read only logs a warning here.
-2. **Act** (`use_ft: true`). F/T wins where the two disagree: it picks the nudge direction (or none, closing
-   instead), stops the final descent when `|Fz| > ft_contact_n` and backs off `ft_contact_backoff`, and the
+2. **Act** (`use_ft: true`). F/T wins where the two disagree about which pad is pushing (or that none is). Once
+   one pad touches, the close is **tracked** instead of nudged: every gripper step also slides the arm
+   `ft_track_mm_per_step` towards the other pad, more while the touching pad pushes harder than
+   `ft_track_force_n`, so it rests on the plate while the other pad comes in (`F/T tracking ...` lines; the
+   slide is limited to `ft_track_max_mm`). Without tracking, a plate held 6 mm off-centre made the touching pad
+   load and unload at every step until the 5 mm nudge limit failed the run. F/T also stops the final descent when `|Fz| > ft_contact_n` and backs off `ft_contact_backoff`, and the
    `after lift` Fz change decides whether the grasp held. A failed sensor read fails the run.
 
 ### Safety

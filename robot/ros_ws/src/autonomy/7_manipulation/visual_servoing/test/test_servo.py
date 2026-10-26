@@ -483,18 +483,19 @@ def test_ft_off_balance_decision_is_logged_as_would(caplog):
         assert any(line.startswith(phase) for line in lines), phase
 
 
-def test_ft_overrides_an_opposite_fsr_nudge():
+def test_ft_overrides_the_fsr_side_when_tracking():
     status, arm = run(fsr=ONE_PAD, ft=wrench(-3.0, fz=-1.5, contact=PUSHING), gripper=GripperConfig(**WITH_FT))
     assert status['result'] == 'grasped', status
-    assert nudge_mm(arm) == pytest.approx(-1.0)
+    assert nudge_mm(arm) == pytest.approx(-1.0)          # towards FSR1: F/T says FSR2 pushes, at the 2-step cap
+    assert status["track_fsr"] == 2 and arm.gripper_values == [0, 50, 70, 90, 110, 140]   # step 20
     assert status['ft_hold'] is True and status['ft_hold_delta_n'] == pytest.approx(1.5)
 
 
-def test_ft_agreeing_nudge_can_scale_with_the_force():
-    status, arm = run(fsr=ONE_PAD, ft=wrench(3.0, fz=-1.5, contact=PUSHING),
-                      gripper=GripperConfig(**dict(WITH_FT, ft_mm_per_n=1.0)))
+@pytest.mark.parametrize('lateral, slide', [(1.5, 0.65), (3.0, 1.0), (1.2, 0.56)])
+def test_ft_tracking_slides_more_the_harder_the_pad_pushes(lateral, slide):
+    status, arm = run(fsr=ONE_PAD, ft=wrench(lateral, fz=-1.5, contact=PUSHING), gripper=GripperConfig(**WITH_FT))
     assert status['result'] == 'grasped', status
-    assert nudge_mm(arm) == pytest.approx(3.0) and status['ft_decision'].startswith('agree')
+    assert nudge_mm(arm) == pytest.approx(slide) and status['track_fsr'] == 1
 
 
 def test_ft_without_lateral_force_closes_instead_of_nudging():
@@ -509,7 +510,7 @@ def test_ft_only_imbalance_nudges_before_the_fsrs_see_it():
     pushing = lambda arm: arm.gripper_values and arm.gripper_values[-1] >= 70 and len(arm.moves) <= 3
     status, arm = run(fsr=fsr, ft=wrench(2.0, fz=-1.5, contact=pushing), gripper=GripperConfig(**WITH_FT))
     assert status['result'] == 'grasped', status
-    assert nudge_mm(arm) == pytest.approx(1.0) and arm.gripper_values == [0, 50, 70, 100]   # nudged at 70
+    assert nudge_mm(arm) == pytest.approx(0.8) and arm.gripper_values == [0, 50, 70, 90, 120]   # tracked from 70, step 20
 
 
 def test_ft_contact_stops_the_descent_and_backs_off():
@@ -544,3 +545,46 @@ def test_ft_read_failure_fails_only_with_use_ft(use_ft):
     else:
         assert status['result'] == 'grasped', status
         assert 'F/T sampling failed' in status['ft_error'] and 'ft' not in status
+
+
+def held_off_centre(offset_mm=6.0):
+    """A plate held still `offset_mm` towards FSR1 (+ flange y of the grasp pose; a + slide unloads FSR1). One
+    gripper unit moves each jaw 0.05 mm, a centred plate is touched at 180, a pad presses 3 N and 250 ADC per mm."""
+    def penetrations(arm):
+        grasp = arm.moves[2][0]
+        slide = float(np.dot(arm.pose[:3, 3] - grasp[:3, 3], grasp[:3, 1]) * 1000)
+        gap = (180 - (arm.gripper_values[-1] if arm.gripper_values else 0)) * 0.05   # each jaw outside the plate
+        return max(0.0, offset_mm - slide - gap), max(0.0, slide - offset_mm - gap)
+
+    def fsr(value, arm):
+        if len(arm.moves) < 3:
+            return (0, 0)
+        return tuple(int(min(1023, 250 * p)) for p in penetrations(arm))
+
+    def ft(arm):
+        lifted = arm.moves and arm.moves[-1][1] == 50.0
+        pad1, pad2 = penetrations(arm) if len(arm.moves) >= 3 else (0.0, 0.0)
+        return [0.0, 0.0 if lifted else 3.0 * (pad1 - pad2), -1.5 if lifted else 0.0, 0.0, 0.0, 0.0]
+    return fsr, ft
+
+
+def test_a_plate_held_off_centre_runs_out_of_nudges_without_tracking():
+    fsr, ft = held_off_centre()
+    status, arm = run(fsr=fsr, ft=ft, gripper=GripperConfig(fsr_samples=1, ft_samples=1, nudge_speed=30.0))
+    assert status['result'] == 'failed' and 'nudge limits' in status['message'], status
+
+
+def test_tracking_closes_on_a_plate_held_off_centre():
+    fsr, ft = held_off_centre()
+    status, arm = run(fsr=fsr, ft=ft, gripper=GripperConfig(fsr_samples=1, ft_samples=1, nudge_speed=30.0,
+                                                            use_ft=True, ft_lateral_deadband_n=0.5))
+    assert status['result'] == 'grasped', status
+    assert 5.0 < status['track_walk_mm'] < 7.5      # ~ the 6 mm offset
+    assert max(arm.gripper_values[:-1]) < 220     # closed on the plate, not squeezing it
+
+
+def test_tracking_stops_at_its_slide_limit():
+    fsr, ft = held_off_centre(12.0)
+    status, arm = run(fsr=fsr, ft=ft, gripper=GripperConfig(fsr_samples=1, ft_samples=1, nudge_speed=30.0,
+                                                            use_ft=True, ft_lateral_deadband_n=0.5, max_close=500))
+    assert status['result'] == 'failed' and 'ft_track_max_mm' in status['message'], status

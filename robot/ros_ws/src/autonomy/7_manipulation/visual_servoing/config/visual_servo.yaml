@@ -114,7 +114,12 @@
       ft_finger_axis: 1               # sensor force along the finger axis: 0 fx, 1 fy, 2 fz (FSR2 alone: Fy -2.7 N)
       ft_finger_sign: 1               # +1/-1 so that lateral > 0 when a + nudge (fsr_nudge_sign) unloads it
       ft_lateral_deadband_n: 0.5      # N; smaller sideways force counts as none (free closing <= 0.24 N)
-      ft_mm_per_n: 0.0                # > 0: nudge mm per N of lateral force, within [nudge_mm, 4 nudge_mm]
       ft_contact_n: 2.0               # N of |Fz| during the final descent that stops it (0.14-0.34 N at grasp height)
       ft_contact_backoff: 0.002       # m back up after that contact
       ft_hold_min_n: 0.3              # N of Fz change over the lift that counts as holding the plate (plate 0.60-0.69 N)
+      # use_ft: once one pad touches, every gripper step also slides the arm towards the other pad (tracked
+      # closing), instead of nudging away and touching again. A plate held 6 mm off-centre needed ~6 mm of slide.
+      ft_track_mm_per_step: 0.5       # mm of slide per gripper step: one step (10) moves each jaw ~0.5 mm
+      ft_track_force_n: 1.0           # N the touching pad is kept at; it pushed 1.1-1.7 N after each step
+      ft_track_gain_mm_per_n: 0.3     # extra mm of slide per N above that (0.5 mm unloaded ~1.4 N)
+      ft_track_max_mm: 10.0           # mm, total arm slide allowed while tracking

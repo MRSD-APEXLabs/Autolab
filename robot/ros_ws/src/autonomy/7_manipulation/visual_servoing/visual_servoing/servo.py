@@ -54,7 +54,12 @@ class GripperConfig:
     ft_finger_axis: int = 1           # sensor force component along the finger axis (0 fx, 1 fy, 2 fz)
     ft_finger_sign: int = 1           # lateral = sign * F[axis] > 0: a + nudge (fsr_nudge_sign) unloads it
     ft_lateral_deadband_n: float = 1.0  # below this the wrist feels no sideways push
-    ft_mm_per_n: float = 0.0          # > 0: nudge this many mm per N of lateral force, in [nudge_mm, 4 nudge_mm]
+    # use_ft replaces the touch / nudge away / touch again cycle with tracked closing: once one pad touches, each
+    # gripper step also slides the arm towards the other pad, keeping the touching pad lightly on the plate
+    ft_track_mm_per_step: float = 0.5  # arm slide per gripper step: the jaw travel of one step (10 units, 2026-10-26)
+    ft_track_force_n: float = 1.0     # sideways force the touching pad is held at
+    ft_track_gain_mm_per_n: float = 0.3  # extra slide per N above that force (0.5 mm unloaded ~1.4 N on the arm)
+    ft_track_max_mm: float = 10.0     # total arm slide from the grasp position while tracking
     ft_contact_n: float = 5.0         # |Fz| above this during the final descent: the fingertips touched
     ft_contact_backoff: float = 0.002  # m back up after a descent contact
     ft_hold_min_n: float = 0.4        # Fz change over the lift that counts as holding the plate
@@ -452,6 +457,9 @@ class ServoRunner:
             if self._pressed(rise):
                 break
             finger, lateral = self._ft_balance(self._unbalanced_finger(rise), rise)
+            if finger is not None and gcfg.use_ft and lateral is not None:
+                value, nudge_total = self._track_close(finger, lateral, value, yaw, base, nudge_total)
+                continue
             if finger is not None:
                 # A switch to the opposite pad means the previous nudge unloaded
                 # the first jaw. With a fixed opening the controller can bounce
@@ -470,7 +478,7 @@ class ServoRunner:
                 # Move the loaded jaw away from the plate, bringing the other jaw
                 # closer. Hold the opening while centring; further squeezing here
                 # increases the force on the finger that already touches.
-                signed_mm = self._nudge_mm(lateral) * gcfg.fsr_nudge_sign[finger]
+                signed_mm = gcfg.nudge_mm * gcfg.fsr_nudge_sign[finger]
                 nudge_total += signed_mm
                 nudges += 1
                 if abs(nudge_total) > gcfg.max_nudge_mm or nudges > gcfg.max_nudges:
@@ -699,11 +707,38 @@ class ServoRunner:
         self._ft_log('balance', wrench, decision, pressure)
         return (ft_finger if cfg.use_ft else finger), lateral
 
-    def _nudge_mm(self, lateral):
+    def _track_close(self, finger, lateral, value, yaw, base, walked):
+        """One pad (`finger`) touches. Each step slides the arm towards the other pad and closes the gripper one
+        step, so the touching pad stays on the plate while the other comes in at twice the jaw speed. The slide is
+        one step's jaw travel, more while the touching pad pushes harder than ft_track_force_n, less once it lets
+        go. Returns (gripper value, total slide in mm) when both pads press or the other pad takes the load."""
         cfg = self.config.gripper
-        if not cfg.use_ft or cfg.ft_mm_per_n <= 0.0 or lateral is None:
-            return cfg.nudge_mm
-        return float(np.clip(cfg.ft_mm_per_n * abs(lateral), cfg.nudge_mm, 4 * cfg.nudge_mm))
+        sign = cfg.fsr_nudge_sign[finger]
+        push = sign * lateral                       # > 0: the touching pad pushes the plate
+        self._set(phase='tracking', track_fsr=finger + 1)
+        while value < cfg.max_close:
+            self._check_abort()
+            slide = float(np.clip(cfg.ft_track_mm_per_step + cfg.ft_track_gain_mm_per_n * (push - cfg.ft_track_force_n),
+                                  0.0, 2 * cfg.ft_track_mm_per_step))
+            if abs(walked + sign * slide) > cfg.ft_track_max_mm:
+                raise RunFailed(f'F/T tracking would slide the arm more than ft_track_max_mm '
+                                f'{cfg.ft_track_max_mm:.1f} mm: walked {walked:+.1f} mm, gripper {value}')
+            if slide > 0.0:
+                self._nudge(sign * slide, yaw)
+                walked += sign * slide
+            value = min(value + cfg.step, cfg.max_close)
+            if not self.arm.gripper_set(value):
+                raise ArmError('gripper tracking close command failed')
+            fsr = self._sample_fsr(cfg.fsr_samples)
+            rise = self._fsr_pressure(fsr, base)
+            wrench = self._ft_read()
+            push = sign * self._lateral(wrench)
+            self._set(gripper=value, fsr=list(fsr), fsr_pressure=list(rise), track_walk_mm=round(walked, 2))
+            self._ft_log(f'tracking FSR{finger + 1} slide {sign * slide:+.2f} mm', wrench,
+                         f'gripper {value}, walked {walked:+.1f} mm', rise)
+            if self._pressed(rise) or push < -cfg.ft_lateral_deadband_n:
+                break
+        return value, walked
 
     def _descend(self, target, speed):
         """Final descent onto the plate. With use_ft, stop on a wrist Fz spike (the tray) and back off."""
