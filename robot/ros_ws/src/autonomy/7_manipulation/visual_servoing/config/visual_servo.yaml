@@ -69,16 +69,16 @@
 
     grasp:
       enable: true                    # false: stop at the hover pose
-      depth: -0.003                   # negative depth puts fingertips above the plate top: 3 mm above,
+      depth: -0.0045                   # negative depth puts fingertips above the plate top: 3 mm above,
                                       # 1 mm less descent than the previous -0.002 setting
       approach_speed: 30.0            # mm/s down to final_segment above the grasp height
       final_segment: 0.02
       final_speed: 8.0                # mm/s
       lift: 0.10
       lift_speed: 50.0
-      max_retries: 0                  # one grasp attempt per start command; keep the gripper closed afterwards
+      max_retries: 3                  # one grasp attempt per start command; keep the gripper closed afterwards
       retry_lift: 0.05
-      return_to_start: false          # retain the lifted pose; a new run may have started down at the plate
+      return_to_start: true          # retain the lifted pose; a new run may have started down at the plate
       return_speed: 100.0
 
     gripper:                          # the Camera-Edge FSR close (config.py values)
