@@ -169,14 +169,22 @@ class XArm:
 
     # -- F/T sensor --------------------------------------------------------------------------------
     # The UFACTORY 6-axis F/T sensor between the flange and the gripper, as in the SDK's
-    # 8005-read_force_data.py. None of these move the arm, so they only need a connection.
+    # 8005-read_force_data.py. None of these move the arm, so they only need a connection. Enabling or zeroing
+    # the sensor leaves the controller in state 5 (the next set_position fails with code 9, "not ready"), so
+    # both re-enter the current mode afterwards, as UFACTORY's force examples set state 0 after the sensor setup.
     def ft_enable(self):
         arm = self._require()
         self._check(arm.set_ft_sensor_enable(1), 'set_ft_sensor_enable')
         time.sleep(0.5)   # the example's settling time before zeroing
+        self._ready_again()
 
     def ft_zero(self):
         self._check(self._require().set_ft_sensor_zero(), 'set_ft_sensor_zero')
+        self._ready_again()
+
+    def _ready_again(self):
+        if not self.read_only and self.mode is not None:
+            self._set_mode(self.mode)
 
     def ft_force(self):
         """[fx, fy, fz (N), tx, ty, tz (N m)] since the last ft_zero, from the report socket; None if unavailable."""
