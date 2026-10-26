@@ -39,10 +39,11 @@ def tool_down(x, y, z, yaw_deg=0.0):
 
 class FakeArm:
     """XArm stand-in. Velocity commands are integrated about the TCP point up to their deadman `duration`;
-    set_position moves are instant. `fsr(value, arm)` gives the finger readings for a gripper value.
+    blocking set_position moves are instant, wait=False ones run at their speed in simulated time.
+    `fsr(value, arm)` gives the finger readings for a gripper value, `ft(arm)` the F/T wrench (None: a failed read).
     `on_pose(t, base_T_flange)` runs on every pose read (the camera and test hooks)."""
 
-    def __init__(self, clock, pose, read_only=False, tcp_offset=(0, 0, 140, 0, 0, 0), fsr=None):
+    def __init__(self, clock, pose, read_only=False, tcp_offset=(0, 0, 140, 0, 0, 0), fsr=None, ft=None):
         self.clock, self.read_only = clock, read_only
         self.flange_T_tcp = np.eye(4)
         self._offset = xarm_pose_matrix(tcp_offset)
@@ -50,6 +51,9 @@ class FakeArm:
         self.mode = None
         self.connected = False
         self.fsr = fsr or (lambda value, arm: (0, 0))
+        self.ft = ft or (lambda arm: [0.0] * 6)
+        self.ft_zeroes, self.halts = 0, 0
+        self._moving = None       # (start pose, target, speed m/s, start time) of a wait=False move
         self.on_pose = None
         self.modes, self.moves, self.gripper_values, self.velocities = [], [], [], []
         self.connects = 0
@@ -61,6 +65,14 @@ class FakeArm:
         v, wz, expiry = self._command
         dt = max(0.0, min(now, expiry) - self._last)
         self._last = now
+        if self._moving is not None:
+            start, target, speed, t0 = self._moving
+            distance = np.linalg.norm(target[:3, 3] - start[:3, 3])
+            done = 1.0 if distance == 0.0 else min(1.0, (now - t0) * speed / distance)
+            self.pose = target.copy()
+            self.pose[:3, 3] = start[:3, 3] + done * (target[:3, 3] - start[:3, 3])
+            if done >= 1.0:
+                self._moving = None
         if dt > 0.0 and self.mode == MODE_VELOCITY:
             tcp = self.pose @ self._offset
             tcp[:3, :3] = rot_z(wz * dt) @ tcp[:3, :3]
@@ -122,12 +134,40 @@ class FakeArm:
         self._integrate()
         self._command = (np.zeros(3), 0.0, 0.0)
 
-    def move_flange(self, base_T_flange, speed_mm_s, acc_mm_s2=500.0):
+    def move_flange(self, base_T_flange, speed_mm_s, acc_mm_s2=500.0, wait=True):
         self._motion()
         if self.mode != MODE_POSITION:
             raise ArmError('position command outside position mode')
-        self.pose = np.asarray(base_T_flange, dtype=float).copy()
-        self.moves.append((self.pose.copy(), float(speed_mm_s)))
+        self._integrate()
+        target = np.asarray(base_T_flange, dtype=float).copy()
+        self.moves.append((target.copy(), float(speed_mm_s)))
+        if wait:
+            self._moving = None
+            self.pose = target
+        else:
+            self._moving = (self.pose.copy(), target, float(speed_mm_s) / 1000.0, self.clock.time())
+
+    def halt(self):
+        self._motion()
+        self._integrate()
+        self._moving = None
+        self.halts += 1
+
+    def ft_enable(self):
+        if not self.connected:
+            raise ArmError('xArm not connected')
+
+    def ft_zero(self):
+        if not self.connected:
+            raise ArmError('xArm not connected')
+        self.ft_zeroes += 1
+
+    def ft_force(self):
+        if not self.connected:
+            raise ArmError('xArm not connected')
+        self._integrate()
+        value = self.ft(self)
+        return None if value is None else [float(v) for v in value]
 
     def gripper_setup(self):
         self._motion()

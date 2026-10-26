@@ -70,7 +70,16 @@ def build_config(param):
             fsr_sample_interval=float(param('gripper.fsr_sample_interval', grip.fsr_sample_interval)),
             fsr_nudge_sign=tuple(int(v) for v in param('gripper.fsr_nudge_sign', list(grip.fsr_nudge_sign))),
             max_nudge_mm=float(param('gripper.max_nudge_mm', grip.max_nudge_mm)),
-            max_nudges=int(param('gripper.max_nudges', grip.max_nudges))),
+            max_nudges=int(param('gripper.max_nudges', grip.max_nudges)),
+            use_ft=bool(param('gripper.use_ft', grip.use_ft)),
+            ft_samples=int(param('gripper.ft_samples', grip.ft_samples)),
+            ft_finger_axis=int(param('gripper.ft_finger_axis', grip.ft_finger_axis)),
+            ft_finger_sign=int(param('gripper.ft_finger_sign', grip.ft_finger_sign)),
+            ft_lateral_deadband_n=float(param('gripper.ft_lateral_deadband_n', grip.ft_lateral_deadband_n)),
+            ft_mm_per_n=float(param('gripper.ft_mm_per_n', grip.ft_mm_per_n)),
+            ft_contact_n=float(param('gripper.ft_contact_n', grip.ft_contact_n)),
+            ft_contact_backoff=float(param('gripper.ft_contact_backoff', grip.ft_contact_backoff)),
+            ft_hold_min_n=float(param('gripper.ft_hold_min_n', grip.ft_hold_min_n))),
     )
     if config.finger_axis not in ('x', 'y'):
         raise ValueError(f"servo.finger_axis must be 'x' or 'y', got {config.finger_axis!r}")
@@ -93,6 +102,12 @@ def build_config(param):
         raise ValueError('gripper.rate must be > 0 and gripper.nudge_mm must be >= 0')
     if grip.final_squeeze < 0 or not np.isfinite(grip.final_squeeze_settle) or grip.final_squeeze_settle < 0:
         raise ValueError('gripper.final_squeeze and gripper.final_squeeze_settle must be >= 0')
+    if grip.ft_samples < 1 or grip.ft_finger_axis not in (0, 1, 2) or grip.ft_finger_sign not in (-1, 1):
+        raise ValueError('gripper needs ft_samples >= 1, ft_finger_axis 0, 1 or 2 and ft_finger_sign +1 or -1')
+    ft_values = (grip.ft_lateral_deadband_n, grip.ft_mm_per_n, grip.ft_contact_n, grip.ft_contact_backoff,
+                 grip.ft_hold_min_n)
+    if not all(np.isfinite(v) and v >= 0 for v in ft_values):
+        raise ValueError('gripper F/T thresholds (ft_lateral_deadband_n .. ft_hold_min_n) must be >= 0')
     return config
 
 

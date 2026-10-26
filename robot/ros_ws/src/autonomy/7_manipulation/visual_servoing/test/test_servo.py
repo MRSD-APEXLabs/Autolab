@@ -20,13 +20,13 @@ def held_from(value):
     return lambda v, arm: (400, 200) if v >= value else (0, 0)
 
 
-def run(start=START, fsr=held_from(130), prepare=None, hook=None, camera=None, **config):
+def run(start=START, fsr=held_from(130), prepare=None, hook=None, camera=None, ft=None, **config):
     config.setdefault('dry_run', False)
     config.setdefault('return_to_start', True)  # exercise the optional return in the original simulations
     config.setdefault('gripper', GripperConfig(**LEGACY_GRIPPER))
     config = ServoConfig(**config)
     clock = FakeClock()
-    arm = FakeArm(clock, start, read_only=config.dry_run, fsr=fsr)
+    arm = FakeArm(clock, start, read_only=config.dry_run, fsr=fsr, ft=ft)
     runner = ServoRunner(arm, MOUNT, config, clock=clock.time, sleep=clock.sleep, prepare=prepare)
     cam = Camera(runner, MOUNT, CENTER, np.radians(LONG_DEG), **(camera or {}))
 
@@ -441,3 +441,106 @@ def test_prepare_runs_first_and_its_failure_fails_the_run():
     status, arm = run(prepare=broken)
     assert status['result'] == 'failed' and status['message'] == 'RuntimeError: camera hub down'
     assert arm.connects == 0 and arm.modes == []
+
+
+# -- the wrist F/T sensor ----------------------------------------------------------------------------
+WITH_FT = dict(TWO_FINGERS, use_ft=True, ft_samples=1)
+
+
+def wrench(lateral=0.0, fz=0.0, contact=lambda arm: True):
+    """Fy `lateral` while `contact(arm)`, plus `fz` once the plate is lifted (the lift is the 50 mm/s move)."""
+    def ft(arm):
+        lifted = arm.moves and arm.moves[-1][1] == 50.0
+        return [0.0, lateral if contact(arm) and not lifted else 0.0, fz if lifted else 0.0, 0.0, 0.0, 0.0]
+    return ft
+
+
+# FSR1 alone presses from gripper value 90 on (FSRs: nudge +1 mm), both once the arm has nudged
+ONE_PAD = lambda v, arm: (400, 200) if len(arm.moves) > 3 else ((300, 50) if v >= 90 else (0, 0))
+PUSHING = lambda arm: arm.gripper_values and arm.gripper_values[-1] >= 90 and len(arm.moves) <= 3
+
+
+def nudge_mm(arm):
+    grasp, nudged = arm.moves[2][0], arm.moves[3][0]
+    return float(np.dot(nudged[:3, 3] - grasp[:3, 3], grasp[:3, 1]) * 1000)
+
+
+def test_ft_off_logs_a_disagreement_but_nudges_as_the_fsrs_say():
+    status, arm = run(fsr=ONE_PAD, ft=wrench(-3.0, contact=PUSHING), gripper=GripperConfig(**TWO_FINGERS))
+    assert status['result'] == 'grasped', status
+    assert nudge_mm(arm) == pytest.approx(1.0) and arm.halts == 0 and arm.ft_zeroes == 1
+    assert arm.gripper_values == [0, 50, 70, 90, 120]
+    assert 'ft' in status and 'ft_hold_delta_n' in status and status['ft_hold'] is False
+
+
+def test_ft_off_balance_decision_is_logged_as_would(caplog):
+    caplog.set_level('INFO', logger='visual_servoing.servo')
+    run(fsr=ONE_PAD, ft=wrench(-3.0, contact=PUSHING), gripper=GripperConfig(**TWO_FINGERS))
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith('F/T')]
+    assert any('disagree: opposite sides, would: unload FSR2' in line for line in lines), lines
+    for phase in ('F/T zero', 'F/T grasp height', 'F/T balance', 'F/T contact confirmed', 'F/T before squeeze',
+                  'F/T before lift', 'F/T after lift'):
+        assert any(line.startswith(phase) for line in lines), phase
+
+
+def test_ft_overrides_an_opposite_fsr_nudge():
+    status, arm = run(fsr=ONE_PAD, ft=wrench(-3.0, fz=-1.5, contact=PUSHING), gripper=GripperConfig(**WITH_FT))
+    assert status['result'] == 'grasped', status
+    assert nudge_mm(arm) == pytest.approx(-1.0)
+    assert status['ft_hold'] is True and status['ft_hold_delta_n'] == pytest.approx(1.5)
+
+
+def test_ft_agreeing_nudge_can_scale_with_the_force():
+    status, arm = run(fsr=ONE_PAD, ft=wrench(3.0, fz=-1.5, contact=PUSHING),
+                      gripper=GripperConfig(**dict(WITH_FT, ft_mm_per_n=1.0)))
+    assert status['result'] == 'grasped', status
+    assert nudge_mm(arm) == pytest.approx(3.0) and status['ft_decision'].startswith('agree')
+
+
+def test_ft_without_lateral_force_closes_instead_of_nudging():
+    fsr = lambda v, arm: (400, 200) if v >= 110 else ((300, 50) if v >= 90 else (0, 0))
+    status, arm = run(fsr=fsr, ft=wrench(fz=-1.5), gripper=GripperConfig(**WITH_FT))
+    assert status['result'] == 'grasped', status
+    assert len(arm.moves) == 5 and arm.gripper_values[:5] == [0, 50, 70, 90, 110]   # no nudge move
+
+
+def test_ft_only_imbalance_nudges_before_the_fsrs_see_it():
+    fsr = lambda v, arm: (400, 200) if len(arm.moves) > 3 else (0, 0)
+    pushing = lambda arm: arm.gripper_values and arm.gripper_values[-1] >= 70 and len(arm.moves) <= 3
+    status, arm = run(fsr=fsr, ft=wrench(2.0, fz=-1.5, contact=pushing), gripper=GripperConfig(**WITH_FT))
+    assert status['result'] == 'grasped', status
+    assert nudge_mm(arm) == pytest.approx(1.0) and arm.gripper_values == [0, 50, 70, 100]   # nudged at 70
+
+
+def test_ft_contact_stops_the_descent_and_backs_off():
+    touching = lambda arm: tip(arm.pose)[2] < CENTER[2] + 0.006
+    ft = lambda arm: [0.0, 0.0, 8.0 if touching(arm) else 0.0] + [0.0] * 3 if not (
+        arm.moves and arm.moves[-1][1] == 50.0) else [0.0, 0.0, -1.5, 0.0, 0.0, 0.0]
+    status, arm = run(ft=ft, gripper=GripperConfig(**WITH_FT))
+    assert status['result'] == 'grasped', status
+    assert arm.halts == 1 and status['ft_contact'] is True
+    assert status['ft_contact_tip_mm'][2] == pytest.approx((CENTER[2] + 0.006 + 0.002) * 1000, abs=0.6)
+
+
+def test_ft_descent_without_contact_reaches_the_grasp_height():
+    status, arm = run(ft=wrench(fz=-1.5), gripper=GripperConfig(**WITH_FT))
+    assert status['result'] == 'grasped', status
+    assert arm.halts == 0 and status['ft_contact'] is False
+    assert arm.moves[2][1] == 8.0 and status['grasp_tip_mm'][2] == pytest.approx((CENTER[2] + 0.002) * 1000, abs=0.1)
+
+
+@pytest.mark.parametrize('use_ft, result', [(True, 'failed'), (False, 'grasped')])
+def test_ft_hold_check_decides_only_with_use_ft(use_ft, result):
+    status, arm = run(ft=wrench(), gripper=GripperConfig(**dict(TWO_FINGERS, use_ft=use_ft, ft_samples=1)))
+    assert status['result'] == result, status
+    assert status['ft_hold'] is False and status['hold_contact_confirmed'] is True
+
+
+@pytest.mark.parametrize('use_ft', [True, False])
+def test_ft_read_failure_fails_only_with_use_ft(use_ft):
+    status, arm = run(ft=lambda arm: None, gripper=GripperConfig(**dict(TWO_FINGERS, use_ft=use_ft, ft_samples=1)))
+    if use_ft:
+        assert status['result'] == 'failed' and 'F/T' in status['message'], status
+    else:
+        assert status['result'] == 'grasped', status
+        assert 'F/T sampling failed' in status['ft_error'] and 'ft' not in status
