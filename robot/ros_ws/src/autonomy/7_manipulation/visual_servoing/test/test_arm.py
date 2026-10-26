@@ -2,6 +2,7 @@
 import threading
 import types
 
+import numpy as np
 import pytest
 
 from visual_servoing.arm import ArmError, XArm
@@ -37,3 +38,65 @@ def test_connect_fails_without_a_report(monkeypatch):
     with pytest.raises(ArmError, match='no state report'):
         arm.connect()
     assert not arm.connected
+
+
+class ForceAPI(ReportingAPI):
+    """Like the arm (2026-10-26): enabling or zeroing the sensor leaves state 5, where set_position fails with 9."""
+
+    def __init__(self, ip, is_radian=False):
+        super().__init__(ip, is_radian, delay=0.0)
+        self.calls, self.ft_ext_force = [], [0.5, -1.0, 2.0, 0.01, 0.02, 0.03]
+        self.state, self.mode = 0, 0
+
+    def set_ft_sensor_enable(self, on):
+        self.calls.append(('enable', on))
+        self.state = 5
+        return 0
+
+    def set_ft_sensor_zero(self):
+        self.calls.append(('zero',))
+        self.state = 5
+        return 0
+
+    def clean_error(self):
+        return 0
+
+    def clean_warn(self):
+        return 0
+
+    def motion_enable(self, enable):
+        return 0
+
+    def set_mode(self, mode):
+        self.mode = mode
+        return 0
+
+    def set_state(self, state):
+        self.state = state
+        return 0
+
+    def set_position(self, **kwargs):
+        return 0 if self.state == 0 else 9
+
+
+def test_ft_sensor_works_on_a_read_only_arm(monkeypatch):
+    monkeypatch.setattr('visual_servoing.arm.time.sleep', lambda s: None)
+    arm = XArm('192.0.2.1', api_factory=ForceAPI, read_only=True)
+    arm.connect()
+    arm.ft_enable()
+    arm.ft_zero()
+    assert arm._arm.calls == [('enable', 1), ('zero',)]
+    assert arm.ft_force() == [0.5, -1.0, 2.0, 0.01, 0.02, 0.03]
+    arm._arm.ft_ext_force = [float('nan')] * 6
+    assert arm.ft_force() is None
+
+
+def test_ft_setup_leaves_the_arm_ready_to_move(monkeypatch):
+    monkeypatch.setattr('visual_servoing.arm.time.sleep', lambda s: None)
+    arm = XArm('192.0.2.1', api_factory=ForceAPI)
+    arm.connect()
+    arm.position_mode()
+    arm.ft_enable()
+    arm.ft_zero()
+    assert arm._arm.state == 0 and arm._arm.mode == 0
+    arm.move_flange(np.eye(4), 30.0)    # code 9 here before the fix

@@ -47,6 +47,22 @@ class GripperConfig:
     fsr_nudge_sign: tuple = (1, -1)   # direction along flange finger axis that unloads each pad
     max_nudge_mm: float = 5.0         # maximum displacement from the initial grasp position
     max_nudges: int = 10              # bound oscillations / an unresponsive second sensor
+    # The wrist F/T sensor is read and logged at every grasp decision; use_ft lets it act: it overrides the FSR
+    # nudge direction, stops the final descent on contact and decides the hold check after the lift
+    use_ft: bool = False
+    ft_samples: int = 5               # median of this many reads (fsr_sample_interval apart) per decision
+    ft_finger_axis: int = 1           # sensor force component along the finger axis (0 fx, 1 fy, 2 fz)
+    ft_finger_sign: int = 1           # lateral = sign * F[axis] > 0: a + nudge (fsr_nudge_sign) unloads it
+    ft_lateral_deadband_n: float = 1.0  # below this the wrist feels no sideways push
+    # use_ft replaces the touch / nudge away / touch again cycle with tracked closing: once one pad touches, each
+    # gripper step also slides the arm towards the other pad, keeping the touching pad lightly on the plate
+    ft_track_mm_per_step: float = 0.5  # arm slide per gripper step: the jaw travel of one step (10 units, 2026-10-26)
+    ft_track_force_n: float = 1.0     # sideways force the touching pad is held at
+    ft_track_gain_mm_per_n: float = 0.3  # extra slide per N above that force (0.5 mm unloaded ~1.4 N on the arm)
+    ft_track_max_mm: float = 10.0     # total arm slide from the grasp position while tracking
+    ft_contact_n: float = 5.0         # |Fz| above this during the final descent: the fingertips touched
+    ft_contact_backoff: float = 0.002  # m back up after a descent contact
+    ft_hold_min_n: float = 0.4        # Fz change over the lift that counts as holding the plate
 
 
 @dataclass
@@ -110,6 +126,7 @@ class ServoRunner:
         self._abort = threading.Event()
         self._thread = None
         self._on_done = None
+        self._ft_ok = False         # the F/T sensor was zeroed for this grasp and still reads
         self._status = {'phase': 'idle', 'running': False, 'result': None, 'message': '', 'dry_run': config.dry_run}
 
     # -- API -----------------------------------------------------------------------------------------
@@ -392,7 +409,8 @@ class ServoRunner:
                 next_tick = self.clock()
 
     def _grasp(self):
-        """Descend onto the plate, close on the FSRs, lift. True if both fingers ended above threshold."""
+        """Descend onto the plate, close on the FSRs, lift. True if the FSRs (with use_ft, the wrist Fz) say the
+        plate is held. The F/T sensor is logged at every decision; with use_ft it also steers the nudges."""
         cfg, gcfg = self.config, self.config.gripper
         self._set(phase='descending')
         self.arm.stop()
@@ -403,12 +421,13 @@ class ServoRunner:
         grasp_tip[2] -= cfg.grasp_depth
         grasp_tip = self._offset_target(grasp_tip, yaw)
         above = grasp_tip + np.array([0.0, 0.0, cfg.final_segment])
+        self._ft_setup()
         base = self._fsr_baseline() if gcfg.use_fsr else (0, 0)
         self._set(grasp_tip_mm=[round(v * 1000, 1) for v in grasp_tip])
         self._check_abort()
         self.arm.move_flange(flange_for_tip(above, yaw, self.mount.flange_T_tip), cfg.approach_speed)
         self._check_abort()
-        self.arm.move_flange(flange_for_tip(grasp_tip, yaw, self.mount.flange_T_tip), cfg.final_speed)
+        self._descend(flange_for_tip(grasp_tip, yaw, self.mount.flange_T_tip), cfg.final_speed)
 
         self._set(phase='closing')
         if not gcfg.use_fsr:
@@ -416,12 +435,14 @@ class ServoRunner:
             value = min((current or 0) + gcfg.close_offset, 1000)
             self.arm.gripper_set(value, settle=gcfg.close_settle)
             self._set(gripper=value, gripper_before=current, fsr=list(self.arm.gripper_fsr()))
+            ft_before = self._ft_read()
+            self._ft_log('before lift', ft_before)
             self._set(phase='lifting')
             lifted = self.arm.flange_pose()
             lifted[2, 3] += cfg.lift
             self.arm.move_flange(lifted, cfg.lift_speed)
             log.info('closed the gripper %s -> %d without FSR feedback, lifted', current, value)
-            return True
+            return self._ft_hold(ft_before, True)
         value = gcfg.close_start
         self.arm.gripper_set(value)
         fsr = (None, None)
@@ -435,7 +456,10 @@ class ServoRunner:
             self._set(fsr_pressure=list(rise))
             if self._pressed(rise):
                 break
-            finger = self._unbalanced_finger(rise)
+            finger, lateral = self._ft_balance(self._unbalanced_finger(rise), rise)
+            if finger is not None and gcfg.use_ft and lateral is not None:
+                value, nudge_total = self._track_close(finger, lateral, value, yaw, base, nudge_total)
+                continue
             if finger is not None:
                 # A switch to the opposite pad means the previous nudge unloaded
                 # the first jaw. With a fixed opening the controller can bounce
@@ -470,6 +494,7 @@ class ServoRunner:
                           nudge_pressure_before=list(rise), nudge_pressure_after=list(after_rise))
                 log.info('FSR%d nudge %+.1f mm: pressure %s -> %s, gripper %d',
                          finger + 1, signed_mm, rise, after_rise, value)
+                self._ft_log(f'after nudge {signed_mm:+.1f} mm', self._ft_read(), pressure=after_rise)
                 # A plate resting on the base can follow the loaded jaw. Even
                 # with the correct unloading direction, a fixed opening then
                 # never brings the opposite pad into contact. Take up a small
@@ -495,16 +520,20 @@ class ServoRunner:
 
         self._set(fsr_contact_confirmed=True, phase='grip_settling',
                   grip_contact_fsr=list(fsr), grip_contact_pressure=list(rise))
+        self._ft_log('contact confirmed', self._ft_read(), pressure=rise)
         self._wait(gcfg.close_settle)
         settled_fsr = self._sample_fsr(gcfg.fsr_samples)
         self._set(fsr_before_squeeze=list(settled_fsr),
                   pressure_before_squeeze=list(self._fsr_pressure(settled_fsr, base)))
+        self._ft_log('before squeeze', self._ft_read(), pressure=self._fsr_pressure(settled_fsr, base))
         self._squeeze_before_lift()
         prelift_fsr = self._sample_fsr(gcfg.fsr_samples)
         prelift_pressure = self._fsr_pressure(prelift_fsr, base)
         self._set(fsr_before_lift=list(prelift_fsr), pressure_before_lift=list(prelift_pressure))
         log.info('Grip contact %s; settled %s; after squeeze %s (baseline %s)',
                  fsr, settled_fsr, prelift_fsr, base)
+        ft_before = self._ft_read()
+        self._ft_log('before lift', ft_before, pressure=prelift_pressure)
         if not self._held_after_lift(prelift_pressure):
             raise RunFailed(f'grip lost before lift after final squeeze: pressure={prelift_pressure}')
         self._check_abort()
@@ -524,7 +553,7 @@ class ServoRunner:
         self._set(hold_contact_confirmed=ok,
                   hold_fsr_active=[t >= 0 and r > t for r, t in zip(rise, gcfg.stop_pressure)])
         log.info('grasp check after lift: fsr=%s (baseline %s) -> %s', fsr, base, 'held' if ok else 'not held')
-        return ok
+        return self._ft_hold(ft_before, ok)
 
     def _squeeze_before_lift(self):
         """After the main grip settles, send and verify the final increment before moving the arm."""
@@ -593,6 +622,179 @@ class ServoRunner:
         if len(reads) <= count // 2:
             raise RunFailed(f'FSR sampling failed: {len(reads)}/{count} valid replies')
         return tuple(int(v) for v in np.median(reads, axis=0))
+
+    # -- F/T sensor --------------------------------------------------------------------------------------
+    def _ft_setup(self):
+        """Switch the sensor on and zero it at the hover with the gripper open, beside the FSR tare."""
+        self._ft_ok = False
+        try:
+            self.arm.ft_enable()
+            raw = self.arm.ft_force()
+            self.arm.ft_zero()
+        except (ArmError, AttributeError) as exc:
+            self._ft_failed(f'F/T sensor setup failed: {exc}')
+            return
+        self._ft_ok = True
+        if raw is not None:
+            log.info('F/T zero: raw F=[%.2f %.2f %.2f] N T=[%.3f %.3f %.3f] N m before zeroing', *raw)
+        self._set(ft_raw_at_zero=[round(v, 3) for v in raw] if raw is not None else None)
+
+    def _ft_failed(self, message):
+        """With use_ft the grasp relies on the sensor and fails; without, the F/T log stops for this grasp."""
+        if self.config.gripper.use_ft:
+            raise RunFailed(message)
+        log.warning('%s: continuing without F/T (use_ft off)', message)
+        self._ft_ok = False
+        self._set(ft_error=message)
+
+    def _ft_read(self):
+        """Median wrench of ft_samples reads, or None when the sensor is unavailable (use_ft off)."""
+        if not self._ft_ok:
+            return None
+        cfg = self.config.gripper
+        reads = []
+        for i in range(cfg.ft_samples):
+            self._check_abort()
+            try:
+                value = self.arm.ft_force()
+            except ArmError:
+                value = None
+            if value is not None:
+                reads.append(value)
+            if i + 1 < cfg.ft_samples:
+                self._wait(cfg.fsr_sample_interval)
+        if len(reads) <= cfg.ft_samples // 2:
+            self._ft_failed(f'F/T sampling failed: {len(reads)}/{cfg.ft_samples} valid reads')
+            return None
+        return [float(v) for v in np.median(reads, axis=0)]
+
+    def _lateral(self, wrench):
+        cfg = self.config.gripper
+        return cfg.ft_finger_sign * wrench[cfg.ft_finger_axis]
+
+    def _ft_log(self, phase, wrench, decision='', pressure=None):
+        """One log line (and the status fields) per grasp decision, whether or not use_ft is on."""
+        if wrench is None:
+            return
+        lateral = self._lateral(wrench)
+        self._set(ft=[round(v, 3) for v in wrench], ft_lateral=round(lateral, 3), ft_phase=phase,
+                  ft_decision=decision)
+        log.info('F/T %s: F=[%.2f %.2f %.2f] N T=[%.3f %.3f %.3f] N m lateral=%+.2f N%s%s', phase, *wrench, lateral,
+                 f' fsr_pressure={list(pressure)}' if pressure is not None else '', f' -> {decision}' if decision else '')
+
+    def _ft_balance(self, finger, pressure):
+        """Cross-check the FSR balancing choice (`finger` to unload, None: none) against the sideways wrist force.
+        Returns the finger to unload, F/T's choice with use_ft, and the lateral force (None without F/T)."""
+        cfg = self.config.gripper
+        wrench = self._ft_read()
+        if wrench is None:
+            return finger, None
+        lateral = self._lateral(wrench)
+        ft_finger = None
+        if abs(lateral) > cfg.ft_lateral_deadband_n:
+            ft_finger = cfg.fsr_nudge_sign.index(1 if lateral > 0 else -1)
+        if finger == ft_finger:
+            decision = 'balanced' if finger is None else 'agree'
+        else:
+            if finger is None:
+                decision = 'disagree: F/T-only imbalance'
+            elif ft_finger is None:
+                decision = 'disagree: no lateral force'
+            else:
+                decision = 'disagree: opposite sides'
+            action = 'close' if ft_finger is None else f'unload FSR{ft_finger + 1}'
+            decision += f', F/T override: {action}' if cfg.use_ft else f', would: {action}'
+        self._ft_log('balance', wrench, decision, pressure)
+        return (ft_finger if cfg.use_ft else finger), lateral
+
+    def _track_close(self, finger, lateral, value, yaw, base, walked):
+        """One pad (`finger`) touches. Each step slides the arm towards the other pad and closes the gripper one
+        step, so the touching pad stays on the plate while the other comes in at twice the jaw speed. The slide is
+        one step's jaw travel, more while the touching pad pushes harder than ft_track_force_n, less once it lets
+        go. Returns (gripper value, total slide in mm) when both pads press or the other pad takes the load."""
+        cfg = self.config.gripper
+        sign = cfg.fsr_nudge_sign[finger]
+        push = sign * lateral                       # > 0: the touching pad pushes the plate
+        self._set(phase='tracking', track_fsr=finger + 1)
+        while value < cfg.max_close:
+            self._check_abort()
+            slide = float(np.clip(cfg.ft_track_mm_per_step + cfg.ft_track_gain_mm_per_n * (push - cfg.ft_track_force_n),
+                                  0.0, 2 * cfg.ft_track_mm_per_step))
+            if abs(walked + sign * slide) > cfg.ft_track_max_mm:
+                raise RunFailed(f'F/T tracking would slide the arm more than ft_track_max_mm '
+                                f'{cfg.ft_track_max_mm:.1f} mm: walked {walked:+.1f} mm, gripper {value}')
+            if slide > 0.0:
+                self._nudge(sign * slide, yaw)
+                walked += sign * slide
+            value = min(value + cfg.step, cfg.max_close)
+            if not self.arm.gripper_set(value):
+                raise ArmError('gripper tracking close command failed')
+            fsr = self._sample_fsr(cfg.fsr_samples)
+            rise = self._fsr_pressure(fsr, base)
+            wrench = self._ft_read()
+            push = sign * self._lateral(wrench)
+            self._set(gripper=value, fsr=list(fsr), fsr_pressure=list(rise), track_walk_mm=round(walked, 2))
+            self._ft_log(f'tracking FSR{finger + 1} slide {sign * slide:+.2f} mm', wrench,
+                         f'gripper {value}, walked {walked:+.1f} mm', rise)
+            if self._pressed(rise) or push < -cfg.ft_lateral_deadband_n:
+                break
+        return value, walked
+
+    def _descend(self, target, speed):
+        """Final descent onto the plate. With use_ft, stop on a wrist Fz spike (the tray) and back off."""
+        cfg = self.config.gripper
+        if not (cfg.use_ft and self._ft_ok):
+            self.arm.move_flange(target, speed)
+            self._ft_log('grasp height', self._ft_read())
+            return
+        start = self.arm.flange_pose()
+        deadline = self.clock() + np.linalg.norm(target[:3, 3] - start[:3, 3]) * 1000.0 / speed * 2.0 + 2.0
+        self.arm.move_flange(target, speed, wait=False)
+        try:
+            while True:
+                self._check_abort()
+                wrench = self.arm.ft_force()
+                if wrench is None:
+                    raise RunFailed('F/T read failed during the final descent')
+                if abs(wrench[2]) > cfg.ft_contact_n:
+                    self.arm.halt()
+                    backed = self.arm.flange_pose()
+                    backed[2, 3] += cfg.ft_contact_backoff
+                    self.arm.move_flange(backed, speed)
+                    self._set(ft_contact=True, ft_contact_tip_mm=[round(v * 1000, 1) for v in self._tip(backed)])
+                    self._ft_log('descent contact', wrench, f'stopped, backed off {cfg.ft_contact_backoff * 1000:.1f} mm')
+                    return
+                if np.linalg.norm(self.arm.flange_pose()[:3, 3] - target[:3, 3]) < 0.0005:
+                    break
+                if self.clock() > deadline:
+                    raise RunFailed('final descent did not reach the grasp height')
+                self.sleep(cfg.fsr_sample_interval)
+        except BaseException:
+            try:
+                self.arm.halt()
+            except Exception as exc:
+                log.warning('halting the descent failed: %s', exc)
+            raise
+        self._set(ft_contact=False)
+        self._ft_log('grasp height', self._ft_read())
+
+    def _ft_hold(self, before, fsr_held):
+        """After the lift: Fz must change by the plate's weight. Returns the grasp verdict, F/T's with use_ft."""
+        cfg = self.config.gripper
+        after = self._ft_read()
+        if before is None or after is None:
+            return fsr_held
+        delta = abs(after[2] - before[2])
+        held = delta >= cfg.ft_hold_min_n
+        verdict = 'held' if held else 'not held'
+        if held == fsr_held:
+            decision = f'agree: {verdict}'
+        else:
+            decision = f'disagree: FSR {"held" if fsr_held else "not held"}, ' + (
+                f'F/T override: {verdict}' if cfg.use_ft else f'would: {verdict}')
+        self._set(ft_hold_delta_n=round(delta, 3), ft_hold=held)
+        self._ft_log(f'after lift (|dFz| {delta:.2f} N)', after, decision)
+        return held if cfg.use_ft else fsr_held
 
     def _nudge(self, signed_mm, yaw):
         """Move `signed_mm` along the finger axis (flange y for finger_axis 'y')."""

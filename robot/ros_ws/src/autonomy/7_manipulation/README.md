@@ -67,7 +67,7 @@ ros2 service call /visual_servo/stop std_srvs/srv/Trigger
 | name | type | |
 |---|---|---|
 | `/visual_servo/start`, `/visual_servo/stop` | `std_srvs/Trigger` | start a run (returns at once) / abort it |
-| `/visual_servo/status` | `std_msgs/String` | JSON at 2 Hz and at the end of a run (transient local): `phase`, `result`, `message`, `attempt`, `error_mm`, `error_yaw_deg`, `plate_mm`, `target_mm`, `start_tip_mm`, `command_mm_s`, `fsr`, `mode` |
+| `/visual_servo/status` | `std_msgs/String` | JSON at 2 Hz and at the end of a run (transient local): `phase`, `result`, `message`, `attempt`, `error_mm`, `error_yaw_deg`, `plate_mm`, `target_mm`, `start_tip_mm`, `command_mm_s`, `fsr`, `mode`; during a grasp also `ft`, `ft_lateral`, `ft_phase`, `ft_decision`, `ft_hold_delta_n`, `ft_hold`, `ft_contact` |
 | `/visual_servo/annotated_image` | `Image` bgr8 | wrist image with the plate box, the fingertip model and the state; published only while subscribed |
 | `ws://0.0.0.0:8765/` | WebSocket | the legacy Camera-Edge control protocol, only with `control_port:=8765` |
 
@@ -75,6 +75,34 @@ Launch arguments: `execute` (false), `grasp` (true), `preview` (false), `robot_i
 `yolo_models_dir` + `model` (best_wrist.pt), `device` (cuda:0), `control_port` (-1, off), `params_file`
 (`config/visual_servo.yaml`, every other parameter with comments), and `with_cameras` (false) with
 `depth_models_dir` / `depth_repo` to start the camera stack too.
+
+### F/T sensor
+
+The UFACTORY 6-axis F/T sensor between the flange and the gripper cross-checks the FSR close. It measures the
+whole wrist, not each pad: one pad pushing the plate shows up as a sideways force along the finger axis, which a
+balanced grip cancels; a held plate raises Fz by its weight after the lift; a fingertip on the tray spikes Fz.
+
+Each grasp switches the sensor on and zeroes it at the hover with the gripper open, next to the FSR tare. It then
+logs one `F/T <phase>: F=[..] N T=[..] N m lateral=.. N fsr_pressure=[..] -> <decision>` line at every decision:
+`zero`, `grasp height` (or `descent contact`), every `balance` step, `after nudge`, `contact confirmed`,
+`before squeeze`, `before lift`, `after lift`. The decision says whether F/T agrees with the FSRs
+(`agree`, `disagree: opposite sides`, `disagree: no lateral force`, `disagree: F/T-only imbalance`) and, with
+`gripper.use_ft: false`, what it `would` have done. The same values go into `/visual_servo/status`.
+
+Roll it out in two stages:
+
+1. **Watch** (`use_ft: false`, the default). Nothing moves differently. Grasp a few times and read the
+   `F/T balance` lines when only one pad presses. They give `ft_finger_axis` (the component that grows) and
+   `ft_finger_sign` (make `lateral` positive when the FSRs choose a `+` nudge, FSR1 with `fsr_nudge_sign: [1, -1]`).
+   Choose `ft_lateral_deadband_n` above the free-closing noise, `ft_hold_min_n` from the `after lift` `|dFz|`,
+   and `ft_contact_n` above the `grasp height` Fz. A failed sensor read only logs a warning here.
+2. **Act** (`use_ft: true`). F/T wins where the two disagree about which pad is pushing (or that none is). Once
+   one pad touches, the close is **tracked** instead of nudged: every gripper step also slides the arm
+   `ft_track_mm_per_step` towards the other pad, more while the touching pad pushes harder than
+   `ft_track_force_n`, so it rests on the plate while the other pad comes in (`F/T tracking ...` lines; the
+   slide is limited to `ft_track_max_mm`). Without tracking, a plate held 6 mm off-centre made the touching pad
+   load and unload at every step until the 5 mm nudge limit failed the run. F/T also stops the final descent when `|Fz| > ft_contact_n` and backs off `ft_contact_backoff`, and the
+   `after lift` Fz change decides whether the grasp held. A failed sensor read fails the run.
 
 ### Safety
 
@@ -85,6 +113,12 @@ Launch arguments: `execute` (false), `grasp` (true), `preview` (false), `robot_i
   or 5 s without a detection fails the run. Without a fresh detection for 0.5 s the arm holds still.
 - Nothing else may command the arm during a run — `xarm_ros2` trajectories, ACT, teleop. Every run ends in
   mode 1, state 0, so `xarm_ros2` can take over again.
+- **Offsets since the F/T sensor (2026-10-26):** the sensor adds 55 mm between the flange and the gripper. The
+  camera and the fingertips both hang below it, so the camera-to-fingertip model, and with it the servo and the
+  grasp, is unchanged. But `mount.tip_mm` / `camera_offset_mm` were measured from the EE point before the sensor
+  (2026-09-22) with `mount.ee_below_flange_mm: 0.0`; it should now be 55. Until it is, absolute heights are 55 mm
+  off: `servo.min_tip_z` sits 55 mm lower than it reads, and `plate_mm`, `target_mm`, `start_tip_mm` in the status
+  read 55 mm high.
 - **Before the first grasp on this workspace**, check the fingertip height with a dry run and then a hover-only
   run (`execute:=true grasp:=false`), as `2_manipulation/README.md` describes. The mount model was measured on
   the arm on 2026-09-22; the grasp itself has only been run in simulation and against recorded episodes.

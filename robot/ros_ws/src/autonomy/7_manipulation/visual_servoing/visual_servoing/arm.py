@@ -150,14 +150,49 @@ class XArm:
         except Exception as exc:
             log.warning('zero velocity failed: %s', exc)
 
-    def move_flange(self, base_T_flange, speed_mm_s, acc_mm_s2=500.0):
-        """Blocking linear move of the flange to `base_T_flange` (position mode)."""
+    def move_flange(self, base_T_flange, speed_mm_s, acc_mm_s2=500.0, wait=True):
+        """Linear move of the flange to `base_T_flange` (position mode); with wait=False it returns at once and
+        halt() stops it."""
         arm = self._motion()
         if self.mode != MODE_POSITION:
             raise ArmError('position command outside position mode')
         x, y, z, roll, pitch, yaw = matrix_xarm_pose(base_T_flange @ self.flange_T_tcp)
         self._check(arm.set_position(x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw, speed=float(speed_mm_s),
-                                     mvacc=float(acc_mm_s2), is_radian=False, wait=True), 'set_position')
+                                     mvacc=float(acc_mm_s2), is_radian=False, wait=bool(wait)), 'set_position')
+
+    def halt(self):
+        """Stop a position move where it is (state 4 drops the queued motion), then accept commands again."""
+        arm = self._motion()
+        self._check(arm.set_state(4), 'set_state(4)')
+        time.sleep(0.1)
+        self._set_mode(self.mode if self.mode is not None else MODE_POSITION)
+
+    # -- F/T sensor --------------------------------------------------------------------------------
+    # The UFACTORY 6-axis F/T sensor between the flange and the gripper, as in the SDK's
+    # 8005-read_force_data.py. None of these move the arm, so they only need a connection. Enabling or zeroing
+    # the sensor leaves the controller in state 5 (the next set_position fails with code 9, "not ready"), so
+    # both re-enter the current mode afterwards, as UFACTORY's force examples set state 0 after the sensor setup.
+    def ft_enable(self):
+        arm = self._require()
+        self._check(arm.set_ft_sensor_enable(1), 'set_ft_sensor_enable')
+        time.sleep(0.5)   # the example's settling time before zeroing
+        self._ready_again()
+
+    def ft_zero(self):
+        self._check(self._require().set_ft_sensor_zero(), 'set_ft_sensor_zero')
+        self._ready_again()
+
+    def _ready_again(self):
+        if not self.read_only and self.mode is not None:
+            self._set_mode(self.mode)
+
+    def ft_force(self):
+        """[fx, fy, fz (N), tx, ty, tz (N m)] since the last ft_zero, from the report socket; None if unavailable."""
+        values = getattr(self._require(), 'ft_ext_force', None)
+        if values is None or len(values) < 6:
+            return None
+        values = [float(v) for v in values[:6]]
+        return values if np.isfinite(values).all() else None
 
     # -- gripper -----------------------------------------------------------------------------------
     def _modbus(self, data):
