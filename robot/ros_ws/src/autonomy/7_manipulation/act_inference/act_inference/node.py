@@ -101,8 +101,12 @@ class ActInferenceNode(Node):
         return self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
 
     def _run_done(self, status):
-        log = self.get_logger().info if status['result'] == 'done' else self.get_logger().warn
-        log(f'ACT run ended: {status["result"]} {status["message"]}')
+        # one call site per severity: rclpy refuses a severity change at the same call site
+        text = f'ACT run ended: {status["result"]} {status["message"]}'
+        if status['result'] == 'done':
+            self.get_logger().info(text)
+        else:
+            self.get_logger().warn(text)
         self._publish_status()
 
     def _on_start(self, request, response):
