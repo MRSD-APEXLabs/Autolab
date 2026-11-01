@@ -167,6 +167,7 @@ def test_warm_up_runs_one_prediction_on_blank_inputs(monkeypatch):
     assert (policy, stats, device) == ('policy', 'stats', 'device') and width == 480
     assert pose.shape == (6,) and rgb.shape == (600, 960, 3) and rgb.dtype == np.uint8
     assert depth.shape == (600, 960) and depth.dtype == np.uint16
+    assert (depth > 0).all()   # an RGB-depth policy refuses an all-invalid frame
 
 
 def test_cli_defaults_to_prediction_only():

@@ -82,10 +82,11 @@ def limit_action(current, proposed, motion, period, initial, enable_rotation, ra
 
 
 def warm_up(policy, record_width=480):
-    """One prediction on blank inputs, so CUDA initialization is paid before the first rollout."""
+    """One prediction on a blank image and a flat 0.5 m depth plane (an RGB-depth policy refuses
+    all-invalid depth), so CUDA initialization is paid before the first rollout."""
     model, stats, device = policy
     predict_chunk(model, stats, device, np.zeros(6), np.zeros((600, 960, 3), np.uint8), record_width,
-                  np.zeros((600, 960), np.uint16))
+                  np.full((600, 960), 500, np.uint16))
 
 
 def run_act_rollout(config, rollout, policy=None, stop=None):
