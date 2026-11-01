@@ -3,7 +3,9 @@ import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
 import StatusEcho from '../StatusEcho';
 
-const TYPES = ['pick_up', 'place', 'pick_base', 'pick_wellplate'];
+const TYPES = ['pick_up', 'place', 'pick_base', 'pick', 'place_base'];
+// types that go to (or from) a lab machine's AprilTag
+const MACHINE_TYPES = ['place', 'pick'];
 const TARGET_MACHINES = ['ot2', 'shaker'];
 
 export default function ManipulationPanel() {
@@ -16,7 +18,7 @@ export default function ManipulationPanel() {
     publish('cmd/manipulation/command', JSON.stringify({
       type,
       object_type: objectType,
-      target_machine: type === 'place' ? targetMachine : '',
+      target_machine: MACHINE_TYPES.includes(type) ? targetMachine : '',
     }));
   };
 
@@ -34,7 +36,7 @@ export default function ManipulationPanel() {
           Object Type
           <input value={objectType} onChange={(e) => setObjectType(e.target.value)} className="w-full border rounded px-2 py-1 mt-1" />
         </label>
-        {type === 'place' && (
+        {MACHINE_TYPES.includes(type) && (
           <label className="text-xs text-gray-600">
             Target Machine
             <select value={targetMachine} onChange={(e) => setTargetMachine(e.target.value)} className="w-full border rounded px-2 py-1 mt-1">

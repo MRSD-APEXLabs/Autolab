@@ -41,23 +41,24 @@ inline std::string machine_names(const std::map<std::string, int64_t>& april_tag
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// visual_servo/status (std_msgs/String JSON from visual_servoing's servo_node)
+// Status of a started run (std_msgs/String JSON): visual_servo/status from
+// visual_servoing's servo_node, act_inference/status from act_inference_node
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct ServoStatus {
+struct RunStatus {
     bool        running{false};
-    std::string result;          // "" while running; grasped|aligned|failed|aborted|stopped|done after
+    std::string result;          // "" while running; after: grasped|aligned|failed|aborted|stopped|done
     std::string message;
     std::string phase;
-    double      started{-1.0};   // servo node's monotonic start time — identifies the run
+    double      started{-1.0};   // the node's monotonic start time — identifies the run
 };
 
-inline std::optional<ServoStatus> parse_servo_status(const std::string& text)
+inline std::optional<RunStatus> parse_run_status(const std::string& text)
 {
     try {
         auto doc = nlohmann::json::parse(text);
         if (!doc.is_object()) return std::nullopt;
-        ServoStatus s;
+        RunStatus s;
         s.running = doc.value("running", false);
         if (doc.contains("result")  && doc["result"].is_string())  s.result  = doc["result"];
         if (doc.contains("message") && doc["message"].is_string()) s.message = doc["message"];
@@ -69,21 +70,26 @@ inline std::optional<ServoStatus> parse_servo_status(const std::string& text)
     }
 }
 
-// Follows one servo run through its status messages. The status topic is
-// transient-local, so the previous run's final status arrives first: a run only
-// counts once it has been seen running, and it finishes when that same run
-// (same `started`) reports running == false.
-class ServoRunTracker {
+// Follows one run through its status messages. The status topic is
+// transient-local, so the previous run's final status arrives first. Without
+// the previous run's `started`, a run only counts once it has been seen
+// running. With it, any other `started` is this run — also one that ended
+// before it was ever published running (a failure within one status period).
+// The run finishes when that same run (same `started`) reports running == false.
+class RunTracker {
 public:
-    void update(const ServoStatus& s)
+    RunTracker() = default;
+    explicit RunTracker(double previous_started)
+        : know_previous_(true), previous_started_(previous_started) {}
+
+    void update(const RunStatus& s)
     {
         if (finished_) return;
         if (!seen_running_) {
-            if (s.running) {
-                seen_running_ = true;
-                started_      = s.started;
-            }
-            return;
+            const bool new_run = know_previous_ ? s.started != previous_started_ : s.running;
+            if (!new_run) return;
+            seen_running_ = true;
+            started_      = s.started;
         }
         if (!s.running && s.started == started_) {
             finished_ = true;
@@ -98,6 +104,8 @@ public:
     const std::string& message()      const { return message_; }
 
 private:
+    bool        know_previous_{false};
+    double      previous_started_{-1.0};
     bool        seen_running_{false};
     bool        finished_{false};
     double      started_{-1.0};
@@ -105,7 +113,7 @@ private:
     std::string message_;
 };
 
-inline bool servo_succeeded(const std::string& result,
+inline bool run_succeeded(const std::string& result,
                             const std::vector<std::string>& success_results)
 {
     if (result.empty()) return false;

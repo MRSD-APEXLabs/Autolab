@@ -50,7 +50,18 @@ STEPS = {
         ),
         'watch_topic': 'behavior/place_object_status',
     },
-    'pick_wellplate': {
+    'place_base': {
+        'msg_type': 'manipulation',
+        'publish_topic': 'behavior/manipulation_command',
+        'required_params': [],
+        'make_msg': lambda params: ManipulationCommand(
+            type='place_base',
+            object_type='well_plate',
+            target_machine='',
+        ),
+        'watch_topic': 'behavior/place_base_object_status',
+    },
+    'pick': {
         'msg_type': 'manipulation',
         'publish_topic': 'behavior/manipulation_command',
         'required_params': ['target_machine'],

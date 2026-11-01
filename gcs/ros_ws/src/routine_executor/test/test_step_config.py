@@ -15,7 +15,7 @@ def test_step_has_required_keys():
 
 
 def test_msg_type_values():
-    valid_types = {'manipulation', 'lab_machine', 'string', 'pose'}
+    valid_types = {'manipulation', 'lab_machine', 'string', 'pose', 'wait'}
     for name, config in STEPS.items():
         assert config['msg_type'] in valid_types, f"Step '{name}' has invalid msg_type: {config['msg_type']}"
 
@@ -71,6 +71,8 @@ def test_make_msg_ot2_serializes_dict_parameters_json():
 
 def test_watch_topic_format():
     for name, config in STEPS.items():
+        if config['msg_type'] == 'wait':   # waits publish and watch nothing
+            continue
         topic = config['watch_topic']
         assert isinstance(topic, str) and len(topic) > 0
         assert not topic.startswith('/'), f"Step '{name}' watch_topic should be relative, not absolute"
@@ -78,6 +80,8 @@ def test_watch_topic_format():
 
 def test_publish_topic_format():
     for name, config in STEPS.items():
+        if config['msg_type'] == 'wait':
+            continue
         topic = config['publish_topic']
         assert isinstance(topic, str) and len(topic) > 0
         assert not topic.startswith('/'), f"Step '{name}' publish_topic should be relative, not absolute"
@@ -205,3 +209,19 @@ def test_go_to_pose_watch_topic():
 
 def test_go_to_pose_publish_topic():
     assert STEPS['go_to_pose']['publish_topic'] == 'behavior/navigate_to_pose_command'
+
+
+def test_pick_wellplate_removed():
+    assert 'pick_wellplate' not in STEPS
+
+
+def test_make_msg_place_base():
+    from behavior_tree_msgs.msg import ManipulationCommand
+    msg = STEPS['place_base']['make_msg']({'name': 'place_base'})
+    assert isinstance(msg, ManipulationCommand)
+    assert msg.type == 'place_base' and msg.object_type == 'well_plate' and msg.target_machine == ''
+
+
+def test_place_base_watch_topic_and_params():
+    assert STEPS['place_base']['watch_topic'] == 'behavior/place_base_object_status'
+    assert STEPS['place_base']['required_params'] == []

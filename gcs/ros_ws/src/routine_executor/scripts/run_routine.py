@@ -8,12 +8,15 @@ Usage:
 Steps accept parameters using colon-separated key=value pairs:
     pick_base
     place:target_machine=ot2
+    pick:target_machine=shaker
+    place_base
     shaker:pwm=200
     ot2:parameters_json='{"steps":[]}'
 
 Examples:
     python3 run_routine.py pick_base "place:target_machine=ot2" ot2 pick_up "shaker:pwm=200"
     python3 run_routine.py --robot robot_1 --retries 3 pick_base "place:target_machine=shaker"
+    python3 run_routine.py "pick:target_machine=shaker" place_base
 """
 
 import argparse

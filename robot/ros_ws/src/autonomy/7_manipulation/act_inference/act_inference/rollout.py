@@ -81,15 +81,28 @@ def limit_action(current, proposed, motion, period, initial, enable_rotation, ra
     return result
 
 
-def run_act_rollout(config, rollout):
+def warm_up(policy, record_width=480):
+    """One prediction on blank inputs, so CUDA initialization is paid before the first rollout."""
+    model, stats, device = policy
+    predict_chunk(model, stats, device, np.zeros(6), np.zeros((600, 960, 3), np.uint8), record_width,
+                  np.zeros((600, 960), np.uint16))
+
+
+def run_act_rollout(config, rollout, policy=None, stop=None):
+    """Runs one rollout; 'done' when duration_sec elapses, 'stopped' when stopped early.
+
+    `policy` is a load_policy() result (None: load from rollout.ckpt_dir). `stop` is a
+    threading.Event that ends the rollout; without one, Enter on a terminal does.
+    """
     if abs(config.motion.loop_hz - 50) > 1e-6:
         raise ValueError('These policies use 50 Hz action chunks; use --control-hz 50')
-    policy, stats, device = load_policy(rollout.ckpt_dir)
+    policy, stats, device = policy or load_policy(rollout.ckpt_dir)
     camera = make_camera(config)
     # Real state is read even in prediction-only mode. enable()/servo() are execute-only.
     robot = XArm6Robot(config.robot_ip, config.motion, dry_run=False, read_only=not rollout.execute)
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='act-inference')
     future = None
+    result = 'done'
     try:
         camera.start()
         if not camera.calibration.get('rectified'):
@@ -106,19 +119,26 @@ def run_act_rollout(config, rollout):
         initial = target = robot.initialize_target_pose()
         # Check initial action before enabling any motion.
         limit_action(target, actions[0], config.motion, 1 / 50, initial, rollout.enable_rotation, rollout.workspace_radius)
+        if stop is not None and stop.is_set():
+            return 'stopped'
         if rollout.execute:
             robot.enable()
         print('LIVE EXECUTION' if rollout.execute else 'PREDICTION ONLY: robot state reads, no motion commands', flush=True)
         print('Policy inputs: RGB + metric depth + validity + TCP pose' if getattr(policy, 'use_depth', False)
               else 'Policy inputs: RGB + TCP pose (depth is preview only)', flush=True)
-        print('Ctrl-C or Enter stops. Orientation ' + ('enabled.' if rollout.enable_rotation else 'held fixed.'), flush=True)
+        print(('Ctrl-C or Enter stops. ' if stop is None else '') +
+              'Orientation ' + ('enabled.' if rollout.enable_rotation else 'held fixed.'), flush=True)
         start = chunk_time = last_submit = time.monotonic()
         last_print = 0.0
         period = 1 / config.motion.loop_hz
         while time.monotonic() - start < rollout.duration_sec:
             tick = time.monotonic()
-            if sys.stdin.isatty() and select.select([sys.stdin], [], [], 0)[0]:
+            if stop is not None and stop.is_set():
+                result = 'stopped'
+                break
+            if stop is None and sys.stdin.isatty() and select.select([sys.stdin], [], [], 0)[0]:
                 sys.stdin.readline()
+                result = 'stopped'
                 break
             camera.check_mode()
             frame = camera.latest()
@@ -150,10 +170,12 @@ def run_act_rollout(config, rollout):
                 cv2.imshow('ACT depth: 0.1-1.0 m, near=red far=blue invalid=black',
                            colorize_depth(frame.depth))
                 if cv2.waitKey(1) in (27, ord('q')):
+                    result = 'stopped'
                     break
             time.sleep(max(0, period - (time.monotonic() - tick)))
     except KeyboardInterrupt:
         print('Stopping ACT rollout', flush=True)
+        result = 'stopped'
     finally:
         try:
             robot.close()
@@ -164,3 +186,4 @@ def run_act_rollout(config, rollout):
                 pool.shutdown(wait=False, cancel_futures=True)
                 if config.preview:
                     cv2.destroyAllWindows()
+    return result

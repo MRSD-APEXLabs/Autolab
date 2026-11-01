@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 import time
 
 import numpy as np
@@ -125,6 +126,47 @@ def test_control_rate_must_match_the_policy(monkeypatch):
     setup_fake(monkeypatch)
     with pytest.raises(ValueError, match='50 Hz'):
         ar.run_act_rollout(InferenceConfig(motion=MotionConfig(loop_hz=30)), ar.RolloutConfig(Path('unused')))
+
+
+def test_rollout_returns_done_after_duration(monkeypatch):
+    setup_fake(monkeypatch)
+    assert ar.run_act_rollout(InferenceConfig(), ar.RolloutConfig(Path('unused'), duration_sec=.06)) == 'done'
+
+
+def test_stop_event_ends_the_loop_as_stopped(monkeypatch):
+    calls = setup_fake(monkeypatch)
+    stop = threading.Event()
+    threading.Timer(.1, stop.set).start()
+    t0 = time.monotonic()
+    result = ar.run_act_rollout(InferenceConfig(), ar.RolloutConfig(Path('unused'), execute=True, duration_sec=5),
+                                stop=stop)
+    assert result == 'stopped' and time.monotonic() - t0 < 1.0
+    assert calls[-2:] == ['robot-close', 'camera-stop']
+
+
+def test_stop_set_before_start_never_enables(monkeypatch):
+    calls = setup_fake(monkeypatch)
+    stop = threading.Event()
+    stop.set()
+    assert ar.run_act_rollout(InferenceConfig(), ar.RolloutConfig(Path('unused'), execute=True), stop=stop) == 'stopped'
+    assert 'enable' not in calls
+    assert calls[-2:] == ['robot-close', 'camera-stop']
+
+
+def test_preloaded_policy_skips_loading(monkeypatch):
+    setup_fake(monkeypatch)
+    monkeypatch.setattr(ar, 'load_policy', lambda p: pytest.fail('policy reloaded'))
+    ar.run_act_rollout(InferenceConfig(), ar.RolloutConfig(Path('unused'), duration_sec=.06), policy=(None, None, None))
+
+
+def test_warm_up_runs_one_prediction_on_blank_inputs(monkeypatch):
+    seen = []
+    monkeypatch.setattr(ar, 'predict_chunk', lambda *args: seen.append(args) or np.zeros((50, 6)))
+    ar.warm_up(('policy', 'stats', 'device'))
+    (policy, stats, device, pose, rgb, width, depth), = seen
+    assert (policy, stats, device) == ('policy', 'stats', 'device') and width == 480
+    assert pose.shape == (6,) and rgb.shape == (600, 960, 3) and rgb.dtype == np.uint8
+    assert depth.shape == (600, 960) and depth.dtype == np.uint16
 
 
 def test_cli_defaults_to_prediction_only():

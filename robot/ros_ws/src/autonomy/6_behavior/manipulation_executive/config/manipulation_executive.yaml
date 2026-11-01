@@ -2,12 +2,10 @@
 /**:
   ros__parameters:
     # Lab machine (ManipulationCommand.target_machine) → AprilTag id on that machine.
-    # place / pick_wellplate send /planning_command plan_april_<id>. Add a machine here, no rebuild.
+    # place / pick send /planning_command plan_april_<id>. Add a machine here, no rebuild.
     april_tags:
       ot2: 21
       shaker: 22
-
-    place_wait_s: 10.0                 # s at the placement pose before planning to safe
 
     # Camera hub (3_perception camera_hub_node): the base ZED X feeds the planner's /inspect/* topics,
     # so it is selected before every plan that reads them
@@ -21,3 +19,12 @@
     # status "result" values that count as SUCCESS. stopped = a dry run (execute:=false) ended;
     # drop it to make dry runs fail the action
     servo_success_results: [grasped, aligned, stopped]
+
+    # ACT inference (7_manipulation act_inference, act_inference_node — started by manipulation_bringup).
+    # place and place_base run it after reaching the placement / home_offset pose, then plan to safe
+    act_start_service: /act_inference/start
+    act_stop_service: /act_inference/stop
+    act_status_topic: /act_inference/status
+    # status "result" values that count as SUCCESS. done = the rollout ran its full duration
+    # (also with execute:=false); stopped / failed fail the action
+    act_success_results: [done]
