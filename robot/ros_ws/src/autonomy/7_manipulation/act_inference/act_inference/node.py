@@ -27,12 +27,12 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from .config import InferenceConfig, RolloutConfig
+from .config import InferenceConfig, MotionConfig, RolloutConfig
 from .rollout import load_policy, run_act_rollout, warm_up
 from .runner import ActRunner
 
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm_final_ckpt_placing'
+DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_20261029'
 
 
 class ActInferenceNode(Node):
@@ -43,10 +43,36 @@ class ActInferenceNode(Node):
         self.ckpt_dir = Path(param('ckpt_dir', str(DEFAULT_CKPT))).expanduser()
         self.config = InferenceConfig(robot_ip=param('robot_ip', '192.168.1.236'),
                                       camera_source=param('camera_source', 'ros'),
-                                      ros_namespace=param('ros_namespace', '/zedx_nano'))
+                                      ros_namespace=param('ros_namespace', '/zedx_nano'),
+                                      camera_host=param('camera_host', '192.168.1.101'),
+                                      camera_port=int(param('camera_port', 8090)),
+                                      record_image_width=int(param('record_image_width', 480)),
+                                      depth_width=int(param('depth_width', 640)),
+                                      depth_backend=param('depth_backend', 'neural'),
+                                      depth_model=param('depth_model', 'raft-realtime'),
+                                      depth_repo=param('depth_repo', ''),
+                                      depth_models_dir=param('depth_models_dir', ''),
+                                      max_frame_age=float(param('max_frame_age', 0.25)),
+                                      preview=bool(param('preview', False)),
+                                      motion=MotionConfig(loop_hz=float(param('control_hz', 50.0)),
+                                                          translation_speed=float(param('translation_speed', 0.01)),
+                                                          rotation_speed=float(param('rotation_speed', 0.15)),
+                                                          max_tracking_error=float(param('max_tracking_error', 0.03))))
         self.rollout = RolloutConfig(ckpt_dir=self.ckpt_dir, execute=bool(param('execute', True)),
-                                     duration_sec=float(param('duration_sec', 10.0)),
-                                     enable_rotation=bool(param('enable_rotation', False)))
+                                     duration_sec=float(param('duration_sec', 60.0)),
+                                     enable_rotation=bool(param('enable_rotation', True)),
+                                     query_interval=float(param('query_interval', 0.2)),
+                                     prediction_timeout=float(param('prediction_timeout', 0.75)),
+                                     workspace_radius=float(param('workspace_radius', 0.15)),
+                                     contact_gap=float(param('contact_gap', 0.001)),
+                                     contact_hold=float(param('contact_hold', 0.3)),
+                                     contact_max_lag=float(param('contact_max_lag', 0.1)),
+                                     settle_motion=float(param('settle_motion', 0.002)),
+                                     settle_queries=int(param('settle_queries', 3)),
+                                     approach_speed=float(param('approach_speed', 0.003)),
+                                     approach_distance=float(param('approach_distance', 0.012)),
+                                     ensemble=int(param('ensemble', 5)),
+                                     final_offset=tuple(float(v) / 1000 for v in param('final_offset_mm', [0.0, 0.0, 0.0])))
         self.select_service = param('select_service', '/camera_hub/select_zedx_nano')
         self.select_timeout = float(param('select_timeout', 20.0))
         self._rollout_fn = rollout_fn

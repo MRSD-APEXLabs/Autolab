@@ -8,6 +8,10 @@ Started by manipulation_bringup (manipulation.launch.xml). See ../README.md. The
 matters: the neural depth backend starts its GPU worker with multiprocessing's "spawn" method,
 which re-imports this script.
 """
+import os
+
+os.environ.setdefault('OMP_NUM_THREADS', '2')
+
 from act_inference.node import main
 
 if __name__ == '__main__':

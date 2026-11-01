@@ -20,7 +20,7 @@
   <arg name="act_dir" default="/home/robot/AutoLab/robot/ros_ws/src/autonomy/7_manipulation/act_inference"
        description="act_inference source folder (not built; run from there)"/>
   <arg name="act_execute" default="true" description="true: command the arm; false: prediction only"/>
-  <arg name="act_duration_sec" default="10.0" description="length of one ACT placing rollout"/>
+  <arg name="act_duration_sec" default="60.0" description="length of one ACT placing rollout"/>
 
   <!-- group: keep visual_servoing's args (params_file, ...) from leaking to whatever includes this file next -->
   <group>

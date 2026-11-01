@@ -3,6 +3,7 @@
 Copied from teleop/robot.py. With read_only=True (every run without --execute) only
 state is read; enable() and servo() refuse to run.
 """
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -26,6 +27,8 @@ class XArm6Robot:
         self._target = np.zeros(6)
         self._reference = None
         self._enabled = False
+        self._ft_started_by_us = False
+        self.force_torque_config = None
 
     @staticmethod
     def _check(code, operation):
@@ -75,6 +78,56 @@ class XArm6Robot:
         # Clean states 4 (software stop) and 5 (mode/configuration changed) need
         # set_state(0). Only enable() re-arms them after an explicit session start;
         # a transition to either state during execution remains a stop condition.
+
+    def prepare_force_torque(self, enable=False):
+        """Sampling only; never zero, calibrate, or select a force control mode."""
+        if self.dry_run:
+            self.force_torque_config = {'simulated': True}
+            return
+        code, config = self._arm.get_ft_sensor_config()
+        self._check(code, 'get_ft_sensor_config')
+        if config[0] != 0:
+            raise RuntimeError('F/T observations require non-force mode (0)')
+        if not config[1]:
+            if not enable or self.read_only:
+                raise RuntimeError('F/T sampling is disabled; enable sensor sampling in xArm Studio before prediction-only inference')
+            self._ft_started_by_us = True
+            self._check(self._arm.set_ft_sensor_enable(1), 'set_ft_sensor_enable')
+        self.force_torque_config = config
+        self._check_ft_sensor_error()
+        self.force_torque()  # validate before motion or file creation
+
+    def _check_ft_sensor_error(self):
+        # On firmware 2.7.0 this query knocks an enabled arm into state 5 ("configuration changed"), which
+        # stops it (measured 2026-10-29), so it runs only before enable() and is never polled while running.
+        if self._enabled:
+            return
+        code, error = self._arm.get_ft_sensor_error()
+        self._check(code, 'get_ft_sensor_error')
+        if error:
+            raise RuntimeError(f'F/T sensor error: {error}')
+
+    def force_torque(self):
+        """[Fx,Fy,Fz,Tx,Ty,Tz], N and Nm, SDK native sensor coordinates.
+
+        Filtered, load/offset-compensated external wrench; no TCP transform.
+        Poll the controller rather than using a potentially stale SDK report cache.
+        """
+        if self.dry_run:
+            return np.zeros(6)
+        code, config = self._arm.get_ft_sensor_config()
+        self._check(code, 'get_ft_sensor_config')
+        if not config[1] or config[0] != 0:
+            raise RuntimeError('F/T sampling disabled or controller in force mode')
+        # The sensor-error register is checked once, before enable() (see _check_ft_sensor_error); config and
+        # data are queried every sample; controller faults are also checked by observation().
+        code, data = self._arm.get_ft_sensor_data(is_raw=False)
+        self._check(code, 'get_ft_sensor_data')
+        wrench = np.asarray(data, dtype=float)
+        if wrench.shape != (6,) or not np.isfinite(wrench).all():
+            raise RuntimeError('Invalid F/T sensor reading')
+        self.force_torque_config = config
+        return wrench
 
     def observation(self):
         if self.dry_run:
@@ -141,5 +194,10 @@ class XArm6Robot:
                 if self._enabled:
                     self._check(self._arm.set_state(4), 'stop')
             finally:
-                self._arm.disconnect()
-                self._arm = None
+                try:
+                    if self._ft_started_by_us:
+                        self._check(self._arm.set_ft_sensor_enable(0), 'restore_ft_sensor_sampling')
+                finally:
+                    self._ft_started_by_us = False
+                    self._arm.disconnect()
+                    self._arm = None

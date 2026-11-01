@@ -64,7 +64,10 @@ class ActRunner:
             self._check_abort()
             self._set(phase='running')
             outcome = self._run(self._stop)
-            result, message = ('stopped', 'stopped') if outcome == 'stopped' else ('done', 'duration elapsed')
+            if outcome not in ('done', 'stopped'):
+                raise RuntimeError(f'Unexpected rollout result: {outcome!r}')
+            result, message = (('stopped', 'stopped') if self._stop.is_set() or outcome == 'stopped'
+                               else ('done', 'rollout completed'))
         except RunAborted:
             result, message = 'stopped', 'stopped'
         except Exception as exc:

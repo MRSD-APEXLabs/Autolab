@@ -26,6 +26,10 @@ def test_start_stop_and_status_over_ros():
                             parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_client', namespace=namespace)
+    assert node.ckpt_dir.name == 'xarm6_placing_act_ft_20261029'
+    assert node.rollout.duration_sec == 60 and node.rollout.enable_rotation
+    assert node.rollout.workspace_radius == .15 and node.rollout.final_offset == (0., 0., 0.)
+    assert node.config.motion.translation_speed == .01 and node.config.motion.rotation_speed == .15
     statuses = []
     client_node.create_subscription(String, 'act_inference/status', lambda m: statuses.append(json.loads(m.data)),
                                     QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL))

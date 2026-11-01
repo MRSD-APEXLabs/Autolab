@@ -17,6 +17,18 @@ def build_parser():
     parser.add_argument('--query-interval', type=float, default=0.2, help='seconds between policy queries')
     parser.add_argument('--prediction-timeout', type=float, default=0.75, help='stop if a query or the current chunk is older than this, seconds')
     parser.add_argument('--workspace-radius', type=float, default=0.1, help='Maximum predicted translation distance from start, meters')
+    parser.add_argument('--contact-gap', type=float, default=0.001,
+                        help='with --execute: stop once the target stays this many meters below the TCP while it no longer descends (0 disables)')
+    parser.add_argument('--contact-hold', type=float, default=0.3, help='seconds of continuous pressing before the contact stop')
+    parser.add_argument('--settle-motion', type=float, default=0.002,
+                        help='meters: a chunk predicting less travel than this means the policy has arrived (0 disables)')
+    parser.add_argument('--settle-queries', type=int, default=3, help='arrived chunks in a row that end the rollout')
+    parser.add_argument('--approach-speed', type=float, default=0.003,
+                        help='m/s once the policy predicts less than --approach-distance of travel (0 keeps full speed)')
+    parser.add_argument('--approach-distance', type=float, default=0.012, help='meters of predicted travel that start the slow approach')
+    parser.add_argument('--ensemble', type=int, default=5, help='near the goal, average this many recent chunks (1 disables)')
+    parser.add_argument('--final-offset-mm', type=float, nargs=3, default=(0.0, 0.0, 0.0), metavar=('X', 'Y', 'Z'),
+                        help='after the policy settles, move once by this much (mm, robot base frame, at most 10 mm)')
     parser.add_argument('--robot-ip', default='192.168.1.236')
     parser.add_argument('--camera-source', choices=CAMERA_SOURCES, default='nano-stream',
                         help="'nano-stream': stereo pairs straight from the Xavier, depth computed in this process (default); "
@@ -54,7 +66,11 @@ def configs_from_args(args):
                             rotation_speed=args.rotation_speed))
     rollout = RolloutConfig(ckpt_dir=args.ckpt_dir, execute=args.execute, duration_sec=args.duration_sec,
                             enable_rotation=args.enable_rotation, query_interval=args.query_interval,
-                            prediction_timeout=args.prediction_timeout, workspace_radius=args.workspace_radius)
+                            prediction_timeout=args.prediction_timeout, workspace_radius=args.workspace_radius,
+                            contact_gap=args.contact_gap, contact_hold=args.contact_hold,
+                            settle_motion=args.settle_motion, settle_queries=args.settle_queries,
+                            approach_speed=args.approach_speed, approach_distance=args.approach_distance,
+                            ensemble=args.ensemble, final_offset=tuple(v / 1000 for v in args.final_offset_mm))
     return config, rollout
 
 

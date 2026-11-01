@@ -1,4 +1,5 @@
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -8,6 +9,28 @@ torch = pytest.importorskip('torch')
 from act_inference.act.image_inputs import encode_image  # noqa: E402
 from act_inference.rollout import load_policy, predict_chunk  # noqa: E402
 from inference_fakes import write_tiny_checkpoint  # noqa: E402
+
+
+def test_bundled_ft_placing_checkpoint_without_hardware():
+    from act_inference.rollout import warm_up
+    directory = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_20261029'
+    loaded = load_policy(directory)
+    policy, stats, device = loaded
+    assert policy.use_depth and policy.use_force_torque and policy.state_inputs == 'none'
+    assert policy.action_representation == 'relative_tcp_tool_v1'
+    warm_up(loaded)
+    rgb = np.zeros((600, 960, 3), np.uint8)
+    depth = np.full((600, 960), 500, np.uint16)
+    pose = np.array([.3, 0, .2, 3.1, 0, 0])
+    wrench = stats['force_torque_mean']
+    actions = predict_chunk(policy, stats, device, pose, rgb, 480, depth, wrench)
+    assert actions.shape[1] == 6 and np.isfinite(actions).all()
+    shifted_pose = pose.copy()
+    shifted_pose[:3] += [.1, .2, .3]
+    shifted = predict_chunk(policy, stats, device, shifted_pose, rgb, 480, depth, wrench)
+    np.testing.assert_allclose(shifted[:, :3], actions[:, :3] + [.1, .2, .3], atol=1e-7)
+    with pytest.raises(ValueError, match='requires a force/torque'):
+        predict_chunk(policy, stats, device, pose, rgb, 480, depth)
 
 
 @pytest.mark.parametrize('use_depth', [False, True])
