@@ -3,7 +3,7 @@ import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
 import StatusEcho from '../StatusEcho';
 
-const TYPES = ['pick_up', 'place', 'pick_base', 'pick', 'place_base'];
+const TYPES = ['pick_base', 'place', 'pick', 'place_base'];
 // types that go to (or from) a lab machine's AprilTag
 const MACHINE_TYPES = ['place', 'pick'];
 const TARGET_MACHINES = ['ot2', 'shaker'];

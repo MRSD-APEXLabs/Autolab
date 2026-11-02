@@ -19,7 +19,7 @@ class ManipulationExecutive : public rclcpp::Node {
 public:
     ManipulationExecutive();
 
-    enum class ManipType  { PICK_UP, PLACE, PICK_BASE, PICK, PLACE_BASE };
+    enum class ManipType  { PLACE, PICK_BASE, PICK, PLACE_BASE };
     enum class ManipPhase {
         IDLE,
         SELECTING_CAMERA,
@@ -31,14 +31,12 @@ public:
 
 private:
     // ── BT nodes ──────────────────────────────────────────────────────────────
-    bt::Condition* pick_up_condition_;
     bt::Condition* place_condition_;
     bt::Condition* pick_base_condition_;
     bt::Condition* pick_condition_;
     bt::Condition* place_base_condition_;
     std::vector<bt::Condition*> conditions_;
 
-    bt::Action* pick_up_action_;
     bt::Action* place_action_;
     bt::Action* pick_base_action_;
     bt::Action* pick_action_;
@@ -63,7 +61,7 @@ private:
     };
 
     // ── Manipulation state (shared; only one action active at a time) ──────────
-    ManipType  manip_type_    {ManipType::PICK_UP};
+    ManipType  manip_type_    {ManipType::PICK};
     ManipPhase manip_phase_   {ManipPhase::IDLE};
     bool       manip_terminal_{false};
 
@@ -91,6 +89,9 @@ private:
     rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr camera_select_client_;
     RemoteRun servo_;
     RemoteRun act_;
+    // ACT start services by target: <act_start_prefix_>/<target>, target = base or a lab machine
+    std::string act_start_prefix_;
+    std::map<std::string, rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr> act_starts_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -112,14 +113,14 @@ private:
     // /inspect/* topics come from) and waits for the camera to stream.
     bool select_camera();
 
-    // Starts a remote run (visual servo, ACT) and waits for it to finish; true if
-    // its result is one of the run's success_results.
-    bool run_remote(RemoteRun& run);
+    // Calls `start` (one of the run's start services) and waits for the run to finish;
+    // true if its result is one of the run's success_results.
+    bool run_remote(RemoteRun& run, rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr start);
     // Fire-and-forget stop request (if the service is up)
     void send_stop(RemoteRun& run);
 
     // Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
-    // pose_type: "inspection" | "placement" | "wellplate_placement" | "safe" | "home_offset"
+    // pose_type: "machine_tag" | "safe" | "home_offset"
     bool run_planning(const std::string& pose_type);
 
     // Sends a Trigger request and waits up to timeout_s; false (with `message` set)

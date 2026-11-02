@@ -38,7 +38,7 @@ ManipulationExecutive::ManipulationExecutive()
 
     act_.name            = "ACT inference";
     act_.node            = "act_inference_node";
-    act_.start_service   = param("act_start_service",   rclcpp::ParameterValue("/act_inference/start")).as_string();
+    act_start_prefix_    = param("act_start_service_prefix", rclcpp::ParameterValue("/act_inference/start")).as_string();
     act_.stop_service    = param("act_stop_service",    rclcpp::ParameterValue("/act_inference/stop")).as_string();
     act_.status_topic    = param("act_status_topic",    rclcpp::ParameterValue("/act_inference/status")).as_string();
     act_.success_results = param("act_success_results",
@@ -57,24 +57,20 @@ ManipulationExecutive::ManipulationExecutive()
     }
 
     // BT conditions
-    pick_up_condition_       = new bt::Condition("Pick Up Commanded",        this);
     place_condition_         = new bt::Condition("Place Commanded",          this);
     pick_base_condition_     = new bt::Condition("Pick Base Commanded",      this);
     pick_condition_          = new bt::Condition("Pick Commanded",           this);
     place_base_condition_    = new bt::Condition("Place Base Commanded",     this);
-    conditions_.push_back(pick_up_condition_);
     conditions_.push_back(place_condition_);
     conditions_.push_back(pick_base_condition_);
     conditions_.push_back(pick_condition_);
     conditions_.push_back(place_base_condition_);
 
     // BT actions
-    pick_up_action_        = new bt::Action("Pick Up Object",    this);
     place_action_          = new bt::Action("Place Object",      this);
     pick_base_action_      = new bt::Action("Pick Base Object",  this);
     pick_action_           = new bt::Action("Pick Object",       this);
     place_base_action_     = new bt::Action("Place Base Object", this);
-    actions_.push_back(pick_up_action_);
     actions_.push_back(place_action_);
     actions_.push_back(pick_base_action_);
     actions_.push_back(pick_action_);
@@ -107,11 +103,18 @@ ManipulationExecutive::ManipulationExecutive()
         camera_select_service_, rmw_qos_profile_services_default, io_group_);
     setup_remote(servo_);
     setup_remote(act_);
+    // <prefix>/<target>: base for place_base, a lab machine for place
+    std::vector<std::string> act_targets{"base"};
+    for (const auto& [machine, id] : april_tags_) act_targets.push_back(machine);
+    for (const auto& target : act_targets) {
+        act_starts_[target] = this->create_client<Trigger>(
+            act_start_prefix_ + "/" + target, rmw_qos_profile_services_default, io_group_);
+    }
 
-    RCLCPP_INFO(this->get_logger(), "Camera select: %s | servo: %s, %s, %s | ACT: %s, %s, %s",
+    RCLCPP_INFO(this->get_logger(), "Camera select: %s | servo: %s, %s, %s | ACT: %s/<target>, %s, %s",
                 camera_select_service_.c_str(), servo_.start_service.c_str(),
                 servo_.stop_service.c_str(), servo_.status_topic.c_str(),
-                act_.start_service.c_str(), act_.stop_service.c_str(), act_.status_topic.c_str());
+                act_start_prefix_.c_str(), act_.stop_service.c_str(), act_.status_topic.c_str());
 
     // 20 Hz timer
     timer_ = rclcpp::create_timer(
@@ -136,7 +139,6 @@ void ManipulationExecutive::command_callback(
     target_machine_ = msg->target_machine;
 
     const std::map<std::string, bt::Condition*> by_type{
-        {"pick_up",    pick_up_condition_},
         {"place",      place_condition_},
         {"pick_base",  pick_base_condition_},
         {"pick",       pick_condition_},
@@ -159,8 +161,10 @@ void ManipulationExecutive::command_callback(
 
 void ManipulationExecutive::setup_remote(RemoteRun& run)
 {
-    run.start = this->create_client<Trigger>(
-        run.start_service, rmw_qos_profile_services_default, io_group_);
+    if (!run.start_service.empty()) {  // ACT has one start client per target (act_starts_)
+        run.start = this->create_client<Trigger>(
+            run.start_service, rmw_qos_profile_services_default, io_group_);
+    }
     run.stop = this->create_client<Trigger>(
         run.stop_service, rmw_qos_profile_services_default, io_group_);
 
@@ -206,7 +210,6 @@ static const char* phase_name(ManipulationExecutive::ManipPhase p)
 
 void ManipulationExecutive::timer_callback()
 {
-    tick_manip(pick_up_action_,        ManipType::PICK_UP);
     tick_manip(place_action_,          ManipType::PLACE);
     tick_manip(pick_base_action_,      ManipType::PICK_BASE);
     tick_manip(pick_action_,           ManipType::PICK);
@@ -235,13 +238,12 @@ void ManipulationExecutive::start_select_camera()
 bt::Condition* ManipulationExecutive::condition_for(ManipType type)
 {
     switch (type) {
-        case ManipType::PICK_UP:    return pick_up_condition_;
         case ManipType::PLACE:      return place_condition_;
         case ManipType::PICK_BASE:  return pick_base_condition_;
         case ManipType::PICK:       return pick_condition_;
         case ManipType::PLACE_BASE: return place_base_condition_;
     }
-    return pick_up_condition_;  // unreachable
+    return pick_condition_;  // unreachable
 }
 
 void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
@@ -261,7 +263,6 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
         if (pending_.valid()) pending_.wait();
         abort_.store(false);
         const char* type_name =
-            (type == ManipType::PICK_UP)    ? "pick_up"    :
             (type == ManipType::PLACE)      ? "place"      :
             (type == ManipType::PICK_BASE)  ? "pick_base"  :
             (type == ManipType::PICK)       ? "pick"       :
@@ -295,14 +296,10 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             RCLCPP_INFO(this->get_logger(), "Base camera streaming — triggering planning");
             manip_phase_ = ManipPhase::PLANNING;
             in_flight_   = true;
-            // pick_up → inspection pose; place → placement pose; pick → machine's tag
-            std::string pose_type =
-                (manip_type_ == ManipType::PICK_UP) ? "inspection"          :
-                (manip_type_ == ManipType::PLACE)   ? "placement"           :
-                                                      "wellplate_placement";
+            // place and pick both go to target_machine's AprilTag
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::run_planning,
-                                  this, pose_type);
+                                  this, "machine_tag");
         }
         action->set_running();
         return;
@@ -318,17 +315,28 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 return;
             }
             if (manip_type_ == ManipType::PLACE || manip_type_ == ManipType::PLACE_BASE) {
-                RCLCPP_INFO(this->get_logger(), "Planning complete — starting ACT inference");
+                const std::string target =
+                    (manip_type_ == ManipType::PLACE_BASE) ? "base" : target_machine_;
+                auto start = act_starts_.find(target);
+                if (start == act_starts_.end()) {
+                    RCLCPP_ERROR(this->get_logger(), "No ACT start service for target '%s' — FAILURE",
+                                 target.c_str());
+                    fail_manip(action);
+                    return;
+                }
+                RCLCPP_INFO(this->get_logger(), "Planning complete — starting ACT inference (%s)",
+                            target.c_str());
                 manip_phase_ = ManipPhase::RUNNING_ACT;
                 in_flight_   = true;
                 pending_ = std::async(std::launch::async,
-                                      &ManipulationExecutive::run_remote, this, std::ref(act_));
+                                      &ManipulationExecutive::run_remote, this, std::ref(act_),
+                                      start->second);
             } else {
                 RCLCPP_INFO(this->get_logger(), "Planning complete — starting visual servo");
                 manip_phase_ = ManipPhase::SERVOING;
                 in_flight_   = true;
                 pending_ = std::async(std::launch::async,
-                                      &ManipulationExecutive::run_remote, this, std::ref(servo_));
+                                      &ManipulationExecutive::run_remote, this, std::ref(servo_), servo_.start);
             }
         }
         action->set_running();
@@ -500,7 +508,7 @@ bool ManipulationExecutive::select_camera()
 // ─────────────────────────────────────────────────────────────────────────────
 // run_remote — runs in std::async thread
 //
-// Calls the run's start service (visual servo, ACT inference), then follows its
+// Calls `start` (visual servo, ACT inference for its target), then follows the run's
 // status topic until that run ends. Both nodes switch the camera hub to the
 // wrist camera themselves. Success only for results in the run's
 // success_results (servo: grasped, aligned, stopped; ACT: done by default).
@@ -517,7 +525,7 @@ void ManipulationExecutive::send_stop(RemoteRun& run)
     }
 }
 
-bool ManipulationExecutive::run_remote(RemoteRun& run)
+bool ManipulationExecutive::run_remote(RemoteRun& run, rclcpp::Client<Trigger>::SharedPtr start)
 {
     {
         std::lock_guard<std::mutex> lock(run.mutex);
@@ -526,7 +534,7 @@ bool ManipulationExecutive::run_remote(RemoteRun& run)
     }
 
     std::string message;
-    if (!call_trigger(run.start, 5.0, message)) {
+    if (!call_trigger(start, 5.0, message)) {
         // deactivated while the start request was in flight: reset_manip()'s stop may
         // have reached the node before the start did, so stop again
         if (abort_.load()) {
@@ -582,7 +590,7 @@ bool ManipulationExecutive::run_remote(RemoteRun& run)
 // The planner publishes PLANNING then EXECUTING as intermediate states, and either
 // SUCCESS or ERROR as terminal states. No timeout is applied — the planner is
 // expected to always emit a terminal state.
-// pose_type: "inspection" | "placement" | "wellplate_placement" | "safe" | "home_offset"
+// pose_type: "machine_tag" | "safe" | "home_offset"
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_planning(const std::string& pose_type)
@@ -593,16 +601,7 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
 
     // ── Map pose_type + object_type → planning command ───────────────────────
     std::string cmd;
-    if (pose_type == "inspection") {
-        if (object_type == "well_plate") {
-            cmd = "plan_wellplate";
-        } else {
-            RCLCPP_ERROR(this->get_logger(),
-                         "run_planning: unsupported object_type '%s' for inspection — aborting",
-                         object_type.c_str());
-            return false;
-        }
-    } else if (pose_type == "placement" || pose_type == "wellplate_placement") {
+    if (pose_type == "machine_tag") {
         // target_machine → AprilTag id, from the april_tags.* parameters
         auto april_cmd = manipulation_logic::april_command(april_tags_, target_machine);
         if (!april_cmd) {

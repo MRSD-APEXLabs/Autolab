@@ -34,7 +34,8 @@ Placing runs the ACT placing policy where it used to wait at the placement pose:
 | `place` (`target_machine`) | select base ZED X → `plan_april_<id>` → ACT run → `plan_home_offset` |
 | `place_base` | `plan_home_offset` → ACT run → `plan_home_offset` |
 
-The ACT step succeeds only for the results in the executive's `act_success_results` (`done` by default).
+The executive starts the ACT step with `/act_inference/start/<target>`: `target_machine` (`ot2`, `shaker`) for `place`,
+`base` for `place_base`. It succeeds only for the results in the executive's `act_success_results` (`done` by default).
 
 `manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
 counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,

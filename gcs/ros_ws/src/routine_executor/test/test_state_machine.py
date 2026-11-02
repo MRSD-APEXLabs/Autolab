@@ -22,7 +22,7 @@ def test_start_sets_state_to_running():
 
 
 def test_start_sets_current_step_to_zero():
-    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick_up'}])
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick', 'target_machine': 'ot2'}])
     sm.start()
     assert sm.current_step_idx == 0
 

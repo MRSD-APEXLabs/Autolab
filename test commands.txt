@@ -4,4 +4,4 @@ ros2 topic pub --once /behavior/lab_machine_command behavior_tree_msgs/msg/LabMa
 ros2 topic pub --once /behavior/lab_machine_command behavior_tree_msgs/msg/LabMachineCommand  "{device: 'shaker', action: 'protocol', parameters_json: '{\"pwm\": 100}'}"
 
 
-ros2 topic pub --once /behavior/manipulation_lab_command behavior_tree_msgs/msg/ManipulationCommand "{'type': 'pick_up', 'object_type': 'well_plate', 'target_machine': ''}"
+ros2 topic pub --once /behavior/manipulation_lab_command behavior_tree_msgs/msg/ManipulationCommand "{'type': 'pick', 'object_type': 'well_plate', 'target_machine': 'ot2'}"

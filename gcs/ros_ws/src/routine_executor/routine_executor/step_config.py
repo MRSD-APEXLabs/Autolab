@@ -28,17 +28,6 @@ STEPS = {
         ),
         'watch_topic': 'behavior/pick_base_object_status',
     },
-    'pick_up': {
-        'msg_type': 'manipulation',
-        'publish_topic': 'behavior/manipulation_command',
-        'required_params': [],
-        'make_msg': lambda params: ManipulationCommand(
-            type='pick_up',
-            object_type='well_plate',
-            target_machine='',
-        ),
-        'watch_topic': 'behavior/pick_up_object_status',
-    },
     'place': {
         'msg_type': 'manipulation',
         'publish_topic': 'behavior/manipulation_command',
