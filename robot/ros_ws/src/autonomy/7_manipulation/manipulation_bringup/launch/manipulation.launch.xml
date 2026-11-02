@@ -1,6 +1,7 @@
 <!-- Brings up the manipulation stack: visual_servo_node (visual_servoing) and act_inference_node (act_inference,
      plain Python, not a colcon package), which manipulation_executive drives through /visual_servo/{start,stop,status}
-     and /act_inference/{start,stop,status}. Needs the camera stack (perception_bringup): the servo reads /zedx_nano/* and
+     and /act_inference/start/{ot2,shaker,base}, with shared /act_inference/{stop,status}.
+     Needs the camera stack (perception_bringup): the servo reads /zedx_nano/* and
      switches the hub with /camera_hub/select_zedx_nano.
 
      servo_execute:=true (default) commands the arm when a run is started; servo_execute:=false is a read-only dry run
@@ -21,6 +22,9 @@
        description="act_inference source folder (not built; run from there)"/>
   <arg name="act_execute" default="true" description="true: command the arm; false: prediction only"/>
   <arg name="act_duration_sec" default="60.0" description="length of one ACT placing rollout"/>
+  <arg name="act_base_speed_mm_s" default="15.0" description="base placement translation speed in mm/s"/>
+  <arg name="act_base_rotation_speed_deg_s" default="6.0" description="base placement rotation speed in degrees/s"/>
+  <arg name="act_base_timeout_sec" default="180.0" description="base placement timeout, separate from ACT duration"/>
 
   <!-- group: keep visual_servoing's args (params_file, ...) from leaking to whatever includes this file next -->
   <group>
@@ -39,5 +43,5 @@
   </group>
 
   <executable if="$(var with_act)" cwd="$(var act_dir)" output="screen"
-              cmd="python3 $(var act_dir)/run_act_node.py --ros-args -p execute:=$(var act_execute) -p duration_sec:=$(var act_duration_sec) -p robot_ip:=$(var robot_ip)"/>
+              cmd="python3 $(var act_dir)/run_act_node.py --ros-args -p execute:=$(var act_execute) -p duration_sec:=$(var act_duration_sec) -p robot_ip:=$(var robot_ip) -p base_speed_mm_s:=$(var act_base_speed_mm_s) -p base_rotation_speed_deg_s:=$(var act_base_rotation_speed_deg_s) -p base_timeout_sec:=$(var act_base_timeout_sec)"/>
 </launch>

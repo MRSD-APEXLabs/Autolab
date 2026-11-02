@@ -1,4 +1,6 @@
 import pickle
+import io
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +11,23 @@ torch = pytest.importorskip('torch')
 from act_inference.act.image_inputs import encode_image  # noqa: E402
 from act_inference.rollout import load_policy, predict_chunk  # noqa: E402
 from inference_fakes import write_tiny_checkpoint  # noqa: E402
+
+
+def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
+    from act_inference.rollout import _CheckpointUnpickler
+    path = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_20261029/dataset_stats.pkl'
+    data = path.read_bytes()
+    assert b'numpy._core' in data
+    expected = pickle.loads(data)
+    # NumPy 1.26.4 provides an alias; simulate deployments without that alias.
+    monkeypatch.setitem(sys.modules, 'numpy._core', None)
+    monkeypatch.setitem(sys.modules, 'numpy._core.multiarray', None)
+    with pytest.raises(ModuleNotFoundError):
+        pickle.loads(data)
+    actual = _CheckpointUnpickler(io.BytesIO(data)).load()
+    assert actual.keys() == expected.keys()
+    for key in expected:
+        np.testing.assert_array_equal(actual[key], expected[key])
 
 
 def test_bundled_ft_placing_checkpoint_without_hardware():

@@ -28,6 +28,15 @@ from .act.action_frames import (ABSOLUTE_TCP, RELATIVE_TCP_TOOL, ACTION_REPRESEN
                                 checkpoint_state_inputs, from_relative_tcp, interpolate_pose, normalize_state)
 
 
+class _CheckpointUnpickler(pickle.Unpickler):
+    """Read NumPy 2 array pickles with the NumPy 1.26 runtime used by Autolab."""
+
+    def find_class(self, module, name):
+        if module == 'numpy._core' or module.startswith('numpy._core.'):
+            module = 'numpy.core' + module[len('numpy._core'):]
+        return super().find_class(module, name)
+
+
 class SettleMonitor:
     """Holds the arm and ends the rollout once the policy reports that it has arrived.
 
@@ -147,7 +156,7 @@ def load_policy(directory):
     import torch
     directory = Path(directory)
     with open(directory / 'config.pkl', 'rb') as f:
-        config = pickle.load(f)
+        config = _CheckpointUnpickler(f).load()
     if (config.get('task_name') != 'xarm6_demo' or config.get('robot') != 'xarm6'
             or config.get('policy_class') not in ('ACT', 'Diffusion')
             or config.get('state_dim') != 6 or config.get('camera_names') != ['wrist_rgb']):
@@ -157,7 +166,7 @@ def load_policy(directory):
     if action_representation not in ACTION_REPRESENTATIONS or (config['policy_class'] == 'Diffusion' and action_representation != RELATIVE_TCP_TOOL):
         raise ValueError(f'Unsupported checkpoint action representation: {action_representation}')
     with open(directory / 'dataset_stats.pkl', 'rb') as f:
-        stats = pickle.load(f)
+        stats = _CheckpointUnpickler(f).load()
     use_ft = checkpoint_force_torque(config, stats)
     for key in ('qpos_mean', 'qpos_std', 'action_mean', 'action_std'):
         value = np.asarray(stats[key])

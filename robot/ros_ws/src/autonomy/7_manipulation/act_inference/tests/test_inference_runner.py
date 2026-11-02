@@ -96,3 +96,17 @@ def test_on_done_gets_final_status():
     runner.start()
     wait_idle(runner)
     assert got and got[0]['result'] == 'done' and got[0]['running'] is False
+
+
+def test_base_target_skips_policy_prepare_and_does_not_change_next_run():
+    prepared, ran = [], []
+    runner = ActRunner(lambda stop: ran.append('policy') or 'done',
+                        prepare=lambda check: prepared.append('camera'))
+    runner.start(target='base', run=lambda stop: ran.append('base') or 'done', prepare=lambda check: check())
+    wait_idle(runner)
+    assert runner.status()['target'] == 'base' and runner.status()['result'] == 'done'
+    assert not prepared and ran == ['base']
+    runner.start(target='shaker')
+    wait_idle(runner)
+    assert runner.status()['target'] == 'shaker' and runner.status()['result'] == 'done'
+    assert prepared == ['camera'] and ran == ['base', 'policy']

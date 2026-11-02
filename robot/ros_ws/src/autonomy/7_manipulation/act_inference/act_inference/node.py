@@ -2,15 +2,18 @@
 
 Interface (same contract as visual_servoing's visual_servo/*):
 
-  act_inference/start     std_srvs/Trigger: start a rollout (returns at once; follow act_inference/status)
+  act_inference/start/{ot2,shaker,base} std_srvs/Trigger: start one placement (returns at once)
+  act_inference/start     std_srvs/Trigger: legacy alias for start/ot2
   act_inference/stop      std_srvs/Trigger: end the rollout; the arm stops where it is
   act_inference/status    std_msgs/String JSON, 2 Hz and at the end of a run (transient local):
-                          running, result (done | stopped | failed), message, phase, started
+                          running, result (done | stopped | failed), message, phase, started, target
 
-The checkpoint is loaded and warmed up once, at startup. Each run switches the camera hub to the
+The checkpoint is loaded and warmed up once, at startup. Each OT-2/shaker run switches the camera hub to the
 Nano (`select_service`), reads its rectified image and depth from the zedx_nano_depth topics
 (camera_source ros), connects to the arm, runs `duration_sec` and closes the arm again.
-With execute:=false the arm is only read (prediction only); the run still ends `done`.
+OT-2/shaker first align yaw to 90 degrees. Base placement approaches 10 mm above its fixed
+XYZ/RPY pose before descending, without camera or policy inference. All targets share
+one runner, stop service, and status topic. With execute:=false the arm is only read.
 """
 from pathlib import Path
 import json
@@ -28,6 +31,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
+from .base_placement import BasePlacementConfig, align_policy_yaw, run_base_placement
 from .rollout import load_policy, run_act_rollout, warm_up
 from .runner import ActRunner
 
@@ -36,7 +40,8 @@ DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_a
 
 
 class ActInferenceNode(Node):
-    def __init__(self, policy=None, rollout_fn=run_act_rollout, **kwargs):
+    def __init__(self, policy=None, rollout_fn=run_act_rollout, base_move_fn=run_base_placement,
+                 yaw_align_fn=align_policy_yaw, **kwargs):
         """`policy` (a load_policy() result) and `rollout_fn` replace the checkpoint and the arm (tests)."""
         super().__init__('act_inference', **kwargs)
         param = lambda name, default: self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
@@ -76,6 +81,13 @@ class ActInferenceNode(Node):
         self.select_service = param('select_service', '/camera_hub/select_zedx_nano')
         self.select_timeout = float(param('select_timeout', 20.0))
         self._rollout_fn = rollout_fn
+        self.base_placement = BasePlacementConfig(
+            pose_mm_deg=tuple(param('base_pose_mm_deg', list(BasePlacementConfig().pose_mm_deg))),
+            speed_mm_s=float(param('base_speed_mm_s', 15.0)),
+            rotation_speed_deg_s=float(param('base_rotation_speed_deg_s', 6.0)),
+            timeout_sec=float(param('base_timeout_sec', 180.0)))
+        self._base_move_fn = base_move_fn
+        self._yaw_align_fn = yaw_align_fn
 
         if policy is None:
             t0 = time.monotonic()
@@ -88,6 +100,10 @@ class ActInferenceNode(Node):
         services = ReentrantCallbackGroup()
         self.pub_status = self.create_publisher(String, 'act_inference/status', STATUS_QOS)
         self.create_service(Trigger, 'act_inference/start', self._on_start, callback_group=services)
+        for target in ('ot2', 'shaker', 'base'):
+            self.create_service(Trigger, f'act_inference/start/{target}',
+                                lambda request, response, target=target: self._on_start(request, response, target),
+                                callback_group=services)
         self.create_service(Trigger, 'act_inference/stop', self._on_stop, callback_group=services)
         self._select_client = (self.create_client(Trigger, self.select_service, callback_group=services)
                                if self.select_service else None)
@@ -98,19 +114,28 @@ class ActInferenceNode(Node):
 
     # -- runs ----------------------------------------------------------------------------------------
     def _run(self, stop):
+        if self._yaw_align_fn(self.config, execute=self.rollout.execute, stop=stop) == 'stopped' or stop.is_set():
+            return 'stopped'
         return self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
 
     def _run_done(self, status):
         # one call site per severity: rclpy refuses a severity change at the same call site
-        text = f'ACT run ended: {status["result"]} {status["message"]}'
+        text = f'Placement {status["target"]} ended: {status["result"]} {status["message"]}'
         if status['result'] == 'done':
             self.get_logger().info(text)
         else:
             self.get_logger().warn(text)
         self._publish_status()
 
-    def _on_start(self, request, response):
-        response.success, response.message = self.runner.start()
+    def _on_start(self, request, response, target='ot2'):
+        if target == 'base':
+            response.success, response.message = self.runner.start(
+                target=target,
+                run=lambda stop: self._base_move_fn(self.config, self.base_placement,
+                                                    execute=self.rollout.execute, stop=stop),
+                prepare=lambda check_abort: check_abort())
+        else:
+            response.success, response.message = self.runner.start(target=target)
         if response.success:
             self._publish_status()   # a run that fails within one timer period still shows running first
         return response

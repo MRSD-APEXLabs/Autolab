@@ -1,6 +1,6 @@
 # Live ACT inference (python run_act_inference.py). PyTorch with CUDA for the target machine is
 # best installed from its own index (see pytorch.org); the versions below are the tested ones.
-numpy>=1.26,<2
+numpy==1.26.4
 opencv-python>=4.8
 scipy>=1.11
 torch>=2.1
