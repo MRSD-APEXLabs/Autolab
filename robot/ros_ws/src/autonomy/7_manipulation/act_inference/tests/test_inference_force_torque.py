@@ -1,6 +1,7 @@
 """Hardware-free regressions for F/T acquisition and policy conditioning."""
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 
 import numpy as np
 import pytest
@@ -100,6 +101,7 @@ def test_live_runner_passes_current_sensor_readings_to_every_query(monkeypatch, 
             prepared.append(enable)
 
         def force_torque(self):
+            assert threading.current_thread() is not threading.main_thread()
             reads.append(len(reads) + 1)
             return np.full(6, reads[-1])
 

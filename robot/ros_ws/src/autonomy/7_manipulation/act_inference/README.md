@@ -13,6 +13,13 @@ capture-time anchoring are respected.
 
 ## ROS services
 
+**Execution is currently blocked with active/inactive Autolab ROS hardware**, following
+the yaw-stage C31 incident. The hardware can send joint targets concurrently with SDK
+Cartesian commands. The new ownership guard refuses to enable the arm until exclusive
+control can be established; unavailable ownership services also block execution.
+Prediction-only mode remains available. See [the proposed driver handoff](patches/README.md).
+Do not bypass this guard or clear the fault and retry the same unpatched stack.
+
 With the ROS workspace sourced and dependencies installed in the Python environment:
 
 ```bash
@@ -32,6 +39,8 @@ for `/act_inference/start/ot2`. Before either policy executes, the arm's base-fr
 is aligned to **90 degrees** at **3 degrees/s**, holding its current XYZ, roll, and pitch.
 Alignment is skipped when yaw is already within 0.5 degrees. Measured arrival is confirmed
 before starting ACT; a stopped or failed alignment prevents the policy from starting.
+During yaw, measured XYZ drift beyond 2 mm stops the run. Initial report feedback is
+cross-checked against a direct axis-angle query before enabling any motion.
 Prediction-only mode reads/logs the yaw adjustment without commanding it.
 Start returns immediately; any start while another target
 is running returns `already running`. `/act_inference/stop` cancels whichever target is
@@ -40,8 +49,9 @@ Status is JSON at 2 Hz and on
 completion, transient local: `running`, `result` (`done`, `stopped`, `failed`), `message`,
 `phase` (`idle`, `preparing`, `running`), `started` (monotonic time), and `target`
 (`ot2`, `shaker`, `base`; null before the first run, retained after completion).
-For OT-2/shaker, `done` means the policy settled or the configured duration elapsed; it is not an
-independent placement measurement. Contact detection or cancellation returns `stopped`;
+For OT-2/shaker, a successful policy result (settled or configured duration elapsed) is followed
+by gripper release and a 70 mm vertical retreat. `done` is published only after that sequence
+finishes; it is not an independent placement measurement. Contact detection or cancellation returns `stopped`;
 sensor, inference, camera, workspace, and robot errors return `failed`.
 
 The node defaults now match the F/T placing script: the bundled F/T checkpoint,
@@ -72,6 +82,20 @@ Arrival holds the target after a chunk predicts under 2 mm of travel and ends af
 three consecutive arrived chunks. Near the goal, translation slows to 3 mm/s and
 averages up to five recent chunks. Execution stops if downward target lag indicates
 sustained contact. `/stop` also interrupts initial inference and any final-offset move.
+
+## OT-2/shaker release and retreat
+
+After the ACT rollout returns `done`, the node opens the custom gripper (Modbus device
+0x08, setpoint 0 at 57600 baud), waits **4 seconds** for jaw travel, then moves **70 mm up
+along robot base-frame +Z**, holding XY and orientation. The lift uses the ACT translation
+speed (`translation_speed`, default **10 mm/s**), independently of base-placement speed.
+The gripper acknowledgement confirms command acceptance; this gripper has no measured
+jaw-position feedback. A rejected command fails the run before lifting.
+
+The shared status remains running and the start services stay locked through opening and
+retreat. `/act_inference/stop` cancels the opening wait or lift. A stopped/failed policy
+skips release and retreat. Prediction-only runs only log the sequence and read the TCP;
+they send no gripper or motion commands. Base placement keeps its existing behavior.
 
 ## Base placement
 
@@ -130,3 +154,24 @@ Hardware-free checks:
 ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST OMP_NUM_THREADS=2 \
   python3 -m pytest tests -q
 ```
+
+## Servo timing and diagnostics
+
+Active motion uses the SDK's report socket for measured pose, joints, controller state,
+and errors. It converts reported Euler RPY radians to rotation vectors before using
+the pose. Reports older than 250 ms, paused/stopped states, or controller faults stop
+execution. Startup still checks the controller synchronously and waits for fresh,
+ready feedback after enabling. These checks apply to yaw alignment, base placement,
+ACT execution, and the post-placement lift.
+
+Previously each 20 ms tick made six synchronous state/pose getter requests before the
+servo command. Even 5 ms per request takes about 35 ms including the servo write, so
+network jitter caused missed ticks. The active tick now needs only the servo command;
+F/T polling runs in the policy worker under the inference deadline. Control pacing uses
+monotonic deadlines and skips missed slots rather than sending catch-up bursts. The
+existing speed, tracking, workspace, contact, and inference limits still apply.
+
+If any command interval exceeds 30 ms at the default 50 Hz rate, the node logs
+`Servo command gap ... (expected 20.0 ms)` (at most once every two seconds). Save these
+warnings and the policy/camera timing lines if physical motion still pulses. The timing
+fix has hardware-free regression coverage; smoothness still needs confirmation on the arm.

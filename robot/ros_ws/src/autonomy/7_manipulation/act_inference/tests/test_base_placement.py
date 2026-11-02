@@ -155,6 +155,23 @@ def test_yaw_alignment_cancellation(monkeypatch):
     assert bp.align_policy_yaw(InferenceConfig(), execute=True, stop=stop) == 'stopped'
 
 
+def test_yaw_stops_on_unexpected_vertical_motion(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    base_robot = bp.XArm6Robot
+
+    class DriftingRobot(base_robot):
+        def observation(self):
+            pose, joints = super().observation()
+            pose[2] -= .003
+            return pose, joints
+
+    monkeypatch.setattr(bp, 'XArm6Robot', DriftingRobot)
+    with pytest.raises(RuntimeError, match='unexpected XYZ drift'):
+        bp.align_policy_yaw(InferenceConfig(), execute=True, stop=stop)
+    assert not commands and calls[-1] == 'close'
+
+
 def test_timeout_requires_measured_arrival_and_closes(monkeypatch):
     stop = ClockStop()
     placement, calls, commands = setup_robot(monkeypatch, stop, tracks=False)
