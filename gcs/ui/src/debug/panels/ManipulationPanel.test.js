@@ -44,6 +44,6 @@ test('target_machine is an empty string for non-place types', () => {
 
   expect(publish).toHaveBeenCalledWith(
     'cmd/manipulation/command',
-    JSON.stringify({ type: 'pick_up', object_type: 'well_plate', target_machine: '' }),
+    JSON.stringify({ type: 'pick_base', object_type: 'well_plate', target_machine: '' }),
   );
 });

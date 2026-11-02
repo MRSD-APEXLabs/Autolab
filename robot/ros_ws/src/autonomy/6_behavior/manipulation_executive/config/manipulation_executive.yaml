@@ -21,8 +21,9 @@
     servo_success_results: [grasped, aligned, stopped]
 
     # ACT inference (7_manipulation act_inference, act_inference_node — started by manipulation_bringup).
-    # place and place_base run it after reaching the placement / home_offset pose, then plan to safe
-    act_start_service: /act_inference/start
+    # place and place_base run it after reaching the placement / home_offset pose, then plan to safe.
+    # Started with <prefix>/<target>: place → target_machine (ot2, shaker), place_base → base
+    act_start_service_prefix: /act_inference/start
     act_stop_service: /act_inference/stop
     act_status_topic: /act_inference/status
     # status "result" values that count as SUCCESS. done = the rollout ran its full duration

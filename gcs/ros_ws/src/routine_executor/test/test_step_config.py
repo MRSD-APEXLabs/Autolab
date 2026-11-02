@@ -95,10 +95,6 @@ def test_place_watch_topic():
     assert STEPS['place']['watch_topic'] == 'behavior/place_object_status'
 
 
-def test_pick_up_watch_topic():
-    assert STEPS['pick_up']['watch_topic'] == 'behavior/pick_up_object_status'
-
-
 def test_ot2_watch_topic():
     assert STEPS['ot2']['watch_topic'] == 'behavior/execute_ot2_protocol_status'
 
@@ -213,6 +209,10 @@ def test_go_to_pose_publish_topic():
 
 def test_pick_wellplate_removed():
     assert 'pick_wellplate' not in STEPS
+
+
+def test_pick_up_removed():
+    assert 'pick_up' not in STEPS
 
 
 def test_make_msg_place_base():
