@@ -1,0 +1,7 @@
+<launch>
+    <!-- port: empty = /dev/serial/by-id CH340 path, else scan sysfs for 1a86:7523 -->
+    <arg name="port" default="" />
+    <node pkg="led_status" exec="led_status" output="screen">
+        <param name="port" value="$(var port)" />
+    </node>
+</launch>
