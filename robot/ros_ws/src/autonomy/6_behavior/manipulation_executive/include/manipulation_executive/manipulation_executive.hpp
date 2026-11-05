@@ -120,7 +120,7 @@ private:
     void send_stop(RemoteRun& run);
 
     // Publishes to /planning_command and waits for /planning_state → SUCCESS or ERROR.
-    // pose_type: "machine_tag" | "safe" | "home_offset"
+    // pose_type: "machine_tag" | "wellplate" | "safe" | "home_offset"
     bool run_planning(const std::string& pose_type);
 
     // Sends a Trigger request and waits up to timeout_s; false (with `message` set)

@@ -2,7 +2,8 @@
 /**:
   ros__parameters:
     # Lab machine (ManipulationCommand.target_machine) → AprilTag id on that machine.
-    # place / pick send /planning_command plan_april_<id>. Add a machine here, no rebuild.
+    # place sends /planning_command plan_april_<id>; pick sends plan_wellplate and doesn't use this
+    # map. Add a machine here, no rebuild.
     april_tags:
       ot2: 21
       shaker: 22

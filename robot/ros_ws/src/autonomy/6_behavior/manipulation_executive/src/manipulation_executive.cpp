@@ -296,10 +296,10 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             RCLCPP_INFO(this->get_logger(), "Base camera streaming — triggering planning");
             manip_phase_ = ManipPhase::PLANNING;
             in_flight_   = true;
-            // place and pick both go to target_machine's AprilTag
+            // place goes to target_machine's AprilTag, pick to the detected well plate
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::run_planning,
-                                  this, "machine_tag");
+                                  this, (manip_type_ == ManipType::PICK) ? "wellplate" : "machine_tag");
         }
         action->set_running();
         return;
@@ -590,7 +590,7 @@ bool ManipulationExecutive::run_remote(RemoteRun& run, rclcpp::Client<Trigger>::
 // The planner publishes PLANNING then EXECUTING as intermediate states, and either
 // SUCCESS or ERROR as terminal states. No timeout is applied — the planner is
 // expected to always emit a terminal state.
-// pose_type: "machine_tag" | "safe" | "home_offset"
+// pose_type: "machine_tag" | "wellplate" | "safe" | "home_offset"
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool ManipulationExecutive::run_planning(const std::string& pose_type)
@@ -612,6 +612,8 @@ bool ManipulationExecutive::run_planning(const std::string& pose_type)
             return false;
         }
         cmd = *april_cmd;
+    } else if (pose_type == "wellplate") {
+        cmd = "plan_wellplate";
     } else if (pose_type == "safe") {
         cmd = "plan_home_offset";
     } else if (pose_type == "home_offset") {
