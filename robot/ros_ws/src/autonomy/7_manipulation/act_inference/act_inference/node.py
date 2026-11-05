@@ -30,14 +30,15 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from controller_manager_msgs.srv import ListHardwareComponents
+from controller_manager_msgs.srv import ListControllers, SwitchController
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
 from .base_placement import BasePlacementConfig, align_policy_yaw, run_base_placement
 from .post_placement import release_and_lift
 from .rollout import load_policy, run_act_rollout, warm_up
 from .runner import ActRunner
-from .ownership import verify_hardware_quiet
+from .ownership import DriverHandoff
+from .robot import XArm6Robot
 
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_20261029'
@@ -84,6 +85,8 @@ class ActInferenceNode(Node):
                                      final_offset=tuple(float(v) / 1000 for v in param('final_offset_mm', [0.0, 0.0, 0.0])))
         self.select_service = param('select_service', '/camera_hub/select_zedx_nano')
         self.select_timeout = float(param('select_timeout', 20.0))
+        driver_prefix = str(param('driver_control_prefix', '/xarm/sdk_control')).rstrip('/')
+        arm_controllers = list(param('arm_controllers', ['xarm6_traj_controller']))
         self._rollout_fn = rollout_fn
         self.base_placement = BasePlacementConfig(
             pose_mm_deg=tuple(param('base_pose_mm_deg', list(BasePlacementConfig().pose_mm_deg))),
@@ -93,6 +96,7 @@ class ActInferenceNode(Node):
         self._base_move_fn = base_move_fn
         self._yaw_align_fn = yaw_align_fn
         self._post_placement_fn = post_placement_fn
+        self._handoff_robot = None
 
         if policy is None:
             t0 = time.monotonic()
@@ -112,8 +116,19 @@ class ActInferenceNode(Node):
         self.create_service(Trigger, 'act_inference/stop', self._on_stop, callback_group=services)
         self._select_client = (self.create_client(Trigger, self.select_service, callback_group=services)
                                if self.select_service else None)
-        self._hardware_client = self.create_client(
-            ListHardwareComponents, '/controller_manager/list_hardware_components', callback_group=services)
+        self._driver_clients = {name: self.create_client(Trigger, f'{driver_prefix}/{name}', callback_group=services)
+                                for name in ('status', 'acquire', 'release')}
+        self._list_controllers = self.create_client(
+            ListControllers, '/controller_manager/list_controllers', callback_group=services)
+        self._switch_controllers = self.create_client(
+            SwitchController, '/controller_manager/switch_controller', callback_group=services)
+        self.handoff = DriverHandoff(
+            status=self._driver_status,
+            list_controllers=lambda check: self._call(self._list_controllers, ListControllers.Request(), check).controller,
+            switch=self._switch_arm_controllers,
+            acquire=lambda check: self._call(self._driver_clients['acquire'], Trigger.Request(), check, mutation=True).success,
+            release=lambda check: self._call(self._driver_clients['release'], Trigger.Request(), check, mutation=True).success,
+            ready=self._ready_for_ros, controllers=arm_controllers, robot_ip=self.config.robot_ip)
         self.create_timer(0.5, self._publish_status)
         self.get_logger().info(
             f'ACT inference: {"EXECUTE (the arm moves)" if self.rollout.execute else "prediction only (arm read-only)"}, '
@@ -121,6 +136,13 @@ class ActInferenceNode(Node):
 
     # -- runs ----------------------------------------------------------------------------------------
     def _run(self, stop):
+        result = (self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
+                  if self.runner.status()['target'] == 'base' else self._run_policy(stop))
+        if result == 'done' and not stop.is_set() and self.rollout.execute:
+            self.handoff.finish(self.runner._check_abort)
+        return 'stopped' if stop.is_set() else result
+
+    def _run_policy(self, stop):
         if self._yaw_align_fn(self.config, execute=self.rollout.execute, stop=stop) == 'stopped' or stop.is_set():
             return 'stopped'
         result = self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
@@ -140,14 +162,7 @@ class ActInferenceNode(Node):
         self._publish_status()
 
     def _on_start(self, request, response, target='ot2'):
-        if target == 'base':
-            response.success, response.message = self.runner.start(
-                target=target,
-                run=lambda stop: self._base_move_fn(self.config, self.base_placement,
-                                                    execute=self.rollout.execute, stop=stop),
-                prepare=self._verify_motion_ownership)
-        else:
-            response.success, response.message = self.runner.start(target=target)
+        response.success, response.message = self.runner.start(target=target)
         if response.success:
             self._publish_status()   # a run that fails within one timer period still shows running first
         return response
@@ -159,7 +174,8 @@ class ActInferenceNode(Node):
 
     def _prepare_run(self, check_abort):
         self._verify_motion_ownership(check_abort)
-        self._prepare_camera(check_abort)
+        if self.runner.status()['target'] != 'base':
+            self._prepare_camera(check_abort)
 
     def _verify_motion_ownership(self, check_abort):
         check_abort()
@@ -167,18 +183,59 @@ class ActInferenceNode(Node):
             return
         if self.get_node_names().count('act_inference') > 1:
             raise RuntimeError('Multiple act_inference nodes are running; stop duplicate nodes before execution')
-        if not self._hardware_client.wait_for_service(timeout_sec=2.0):
-            raise RuntimeError('Cannot verify exclusive xArm control: '
-                               '/controller_manager/list_hardware_components is unavailable')
-        future = self._hardware_client.call_async(ListHardwareComponents.Request())
-        deadline = time.monotonic() + 3.0
-        while not future.done():
-            check_abort()
-            if time.monotonic() >= deadline:
-                raise RuntimeError('Timed out checking xArm command ownership')
-            time.sleep(.02)
+        self.handoff.acquire(check_abort)
+
+    def _call(self, client, request, check_abort, mutation=False):
         check_abort()
-        verify_hardware_quiet(future.result().component)
+        if not client.wait_for_service(timeout_sec=2.0):
+            raise RuntimeError(f'{client.srv_name} unavailable; rebuild/restart the patched xarm_controller')
+        check_abort()
+        future = client.call_async(request)
+        deadline = time.monotonic() + 5.0
+        while not future.done():
+            # Once a switch/acquire/release request is sent, retain its outcome even
+            # if stop arrives: never lose track of an acquired driver lease.
+            if not mutation:
+                check_abort()
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f'{client.srv_name} timed out; ownership requires inspection')
+            time.sleep(.02)
+        return future.result()
+
+    def _driver_status(self, check_abort):
+        response = self._call(self._driver_clients['status'], Trigger.Request(), check_abort)
+        if not response.success:
+            raise RuntimeError(f'Driver ownership status failed: {response.message}')
+        return json.loads(response.message)
+
+    def _switch_arm_controllers(self, stopped, started, check_abort):
+        request = SwitchController.Request()
+        request.deactivate_controllers = list(stopped)
+        request.activate_controllers = list(started)
+        request.strictness = SwitchController.Request.STRICT
+        request.timeout.sec = 3
+        return self._call(self._switch_controllers, request, check_abort, mutation=True).ok
+
+    def _ready_for_ros(self, check_abort):
+        # This runs only after successful SDK motion. Never clear errors or enable
+        # the robot after a failed/stopped run.
+        if self._handoff_robot is None:
+            self._handoff_robot = XArm6Robot(self.config.robot_ip, self.config.motion)
+        robot = self._handoff_robot
+        try:
+            check_abort()
+            robot.connect()
+            robot.initialize_target_pose()
+            check_abort()
+            robot.enable()
+            check_abort()
+            robot.hand_back()
+            # Match visual_servoing: keep the SDK connection alive in ready mode 1
+            # through ROS handback, rather than disconnecting at the mode boundary.
+        except Exception:
+            robot.close()
+            self._handoff_robot = None
+            raise
 
     def _prepare_camera(self, check_abort):
         """Runs on the run's thread: switch the hub to the Nano and wait until it streams."""
@@ -200,10 +257,15 @@ class ActInferenceNode(Node):
 
     # -- outputs -------------------------------------------------------------------------------------
     def _publish_status(self):
-        self.pub_status.publish(String(data=json.dumps(self.runner.status())))
+        status = self.runner.status()
+        status['sdk_control_held'] = self.handoff.held
+        self.pub_status.publish(String(data=json.dumps(status)))
 
     def destroy_node(self):
         self.runner.abort(wait=15.0)
+        if self._handoff_robot is not None:
+            self._handoff_robot.close()
+            self._handoff_robot = None
         super().destroy_node()
 
 

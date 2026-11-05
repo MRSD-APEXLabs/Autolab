@@ -78,6 +78,9 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         config, rollout = configs_from_args(args)
+        if rollout.execute:
+            raise RuntimeError('Standalone --execute cannot establish exclusive ROS driver ownership. '
+                               'Use run_act_node.py and /act_inference/start/{ot2,shaker,base}.')
         from .rollout import run_act_rollout
         return run_act_rollout(config, rollout)
     except (RuntimeError, ValueError, OSError) as exc:

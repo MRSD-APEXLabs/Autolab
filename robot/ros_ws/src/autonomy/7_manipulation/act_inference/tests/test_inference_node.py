@@ -13,7 +13,7 @@ def test_cancelled_yaw_does_not_start_policy():
     node = SimpleNamespace(_yaw_align_fn=lambda *args, **kwargs: 'stopped',
                            config=None, rollout=SimpleNamespace(execute=True))
     # No rollout callback is provided: cancellation must return before accessing it.
-    assert ActInferenceNode._run(node, threading.Event()) == 'stopped'
+    assert ActInferenceNode._run_policy(node, threading.Event()) == 'stopped'
 
 
 @pytest.mark.parametrize('outcome', ['done', 'stopped', 'error'])
@@ -34,9 +34,9 @@ def test_policy_then_release_only_on_success(outcome):
                            _post_placement_fn=lambda *a, **kw: stages.append('release/lift') or 'done')
     if outcome == 'error':
         with pytest.raises(RuntimeError, match='policy failed'):
-            ActInferenceNode._run(node, threading.Event())
+            ActInferenceNode._run_policy(node, threading.Event())
     else:
-        assert ActInferenceNode._run(node, threading.Event()) == outcome
+        assert ActInferenceNode._run_policy(node, threading.Event()) == outcome
     assert stages == (['yaw', 'policy', 'release/lift'] if outcome == 'done' else ['yaw', 'policy'])
 
 

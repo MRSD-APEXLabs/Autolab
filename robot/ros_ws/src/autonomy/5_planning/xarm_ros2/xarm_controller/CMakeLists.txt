@@ -25,6 +25,11 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 if(BUILD_TESTING)
+  find_package(Threads REQUIRED)
+  add_executable(test_sdk_command_gate test/test_sdk_command_gate.cpp)
+  target_include_directories(test_sdk_command_gate PRIVATE include)
+  target_link_libraries(test_sdk_command_gate Threads::Threads)
+  add_test(NAME sdk_command_gate COMMAND test_sdk_command_gate)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # uncomment the line when a copyright and license is not present in all source files
@@ -42,6 +47,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
 find_package(xarm_msgs REQUIRED)
 find_package(xarm_api REQUIRED)
@@ -71,6 +77,7 @@ ament_target_dependencies(
   rclcpp_lifecycle
   std_msgs
   sensor_msgs
+  std_srvs
   controller_manager_msgs
   xarm_msgs
 )

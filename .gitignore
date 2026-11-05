@@ -9,3 +9,4 @@ venv/
 build.log
 output.txt
 robot/ros_ws_nav/
+robot/ros_ws/src/autonomy/7_manipulation/act_inference/**/*.jpg
