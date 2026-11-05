@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from act_inference.ros_camera import RosDepthCamera, frame_from_messages, image_to_array
+from act_inference.ros_camera import ImageDepthPairs, RosDepthCamera, frame_from_messages, image_to_array
 
 
 def fake_image(array, encoding, stamp=(5, 0), pad=0, big_endian=False):
@@ -48,7 +48,7 @@ def test_frame_from_messages():
         frame_from_messages(fake_image(bgr, 'bgr8'), fake_image(depth[:2], '16UC1'), now_ns, mono, 0)
 
 
-def test_messages_are_paired_by_stamp_and_must_move_forward():
+def test_old_messages_are_dropped_without_replacing_current_frame():
     cam = RosDepthCamera()
     bgr, depth = np.zeros((3, 4, 3), np.uint8), np.ones((3, 4), np.uint16)
     now = time.time_ns()
@@ -57,11 +57,66 @@ def test_messages_are_paired_by_stamp_and_must_move_forward():
     assert cam._latest is None
     cam._on_message(0, fake_image(bgr, 'bgr8', stamp))
     assert cam._latest is not None and cam.frames_received == 1 and cam._error is None
+    newest = cam._latest
     older = (stamp[0] - 1, stamp[1])
     cam._on_message(0, fake_image(bgr, 'bgr8', older))
     cam._on_message(1, fake_image(depth, '16UC1', older))
-    with pytest.raises(RuntimeError, match='backwards'):
-        cam.check_mode()
+    cam.check_mode()
+    assert cam._latest is newest and cam.frames_received == 1 and cam.frames_dropped == 2
+
+
+def test_duplicate_messages_do_not_poison_stream():
+    cam = RosDepthCamera()
+    stamp = time.time_ns()
+    stamp = (stamp // 10**9, stamp % 10**9)
+    rgb = fake_image(np.zeros((3, 4, 3), np.uint8), 'bgr8', stamp)
+    depth = fake_image(np.ones((3, 4), np.uint16), '16UC1', stamp)
+    for _ in range(2):
+        cam._on_message(0, rgb)
+        cam._on_message(1, depth)
+    cam.check_mode()
+    assert cam.frames_received == 1 and cam.frames_dropped == 2
+
+
+def test_pairing_keeps_newer_incomplete_halves():
+    pairs = ImageDepthPairs()
+    assert pairs.add(0, 30, 'rgb30') is None
+    assert pairs.add(0, 20, 'rgb20') is None
+    assert pairs.add(1, 20, 'depth20') == ('rgb20', 'depth20')
+    assert pairs.add(1, 30, 'depth30') == ('rgb30', 'depth30')
+    assert pairs.add(0, 20, 'late20') is None
+
+
+def test_pairing_memory_is_bounded_and_retains_newest_stamps():
+    pairs = ImageDepthPairs(keep=2)
+    for stamp in (50, 30, 40, 20):
+        pairs.add(0, stamp, stamp)
+    assert set(pairs.pending) == {40, 50}
+
+
+def test_sustained_timestamp_reset_still_expires_last_valid_frame(monkeypatch):
+    import act_inference.ros_camera as module
+    cam = RosDepthCamera()
+    push_pair(cam, .01)
+    original = cam._latest
+    reset_stamp = (time.time_ns() // 10**9 - 1000, 0)
+    cam._on_message(0, fake_image(np.zeros((3, 4, 3), np.uint8), 'bgr8', reset_stamp))
+    cam._on_message(1, fake_image(np.ones((3, 4), np.uint16), '16UC1', reset_stamp))
+    assert cam._latest is original
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: original.captured_monotonic + .4))
+    with pytest.raises(RuntimeError, match='stale'):
+        cam.latest()
+
+
+@pytest.mark.parametrize('count', [1, 2])
+def test_multiple_publishers_are_rejected(count):
+    cam = RosDepthCamera()
+    cam._node = SimpleNamespace(count_publishers=lambda topic: count)
+    if count == 2:
+        with pytest.raises(RuntimeError, match='Multiple publishers'):
+            cam._check_publishers()
+    else:
+        cam._check_publishers()
 
 
 def test_stale_frames_are_refused():
@@ -126,3 +181,61 @@ def test_live_topics_from_a_publisher_node():
         node.destroy_node()
         rclpy.try_shutdown()
     assert not cam._thread.is_alive()
+
+
+def push_pair(cam, age_s):
+    captured = time.time_ns() - int(age_s * 1e9)
+    stamp = (captured // 10**9, captured % 10**9)
+    cam._on_message(0, fake_image(np.zeros((3, 4, 3), np.uint8), 'bgr8', stamp))
+    cam._on_message(1, fake_image(np.ones((3, 4), np.uint16), '16UC1', stamp))
+
+
+def test_startup_waits_for_second_pair_instead_of_failing_on_351ms_first_frame():
+    cam = RosDepthCamera(max_age=.25, start_timeout=1.)
+    cam.calibration = {'rectified': True}
+    push_pair(cam, .351)
+    assert cam.frames_received == 1 and cam.interval_s == 0
+    timer = threading.Timer(.05, lambda: push_pair(cam, .1))
+    timer.start()
+    started = time.monotonic()
+    try:
+        cam._wait_until_ready()
+        assert time.monotonic() - started >= .04
+        assert cam.frames_received == 2
+        assert time.monotonic() - cam.latest().captured_monotonic < .3
+    finally:
+        timer.join()
+
+
+def test_back_to_back_receipts_use_capture_cadence():
+    cam = RosDepthCamera(max_age=.25)
+    push_pair(cam, .55)
+    push_pair(cam, .35)
+    assert cam.interval_s == pytest.approx(.2, abs=.005)
+    assert time.monotonic() - cam.latest().captured_monotonic == pytest.approx(.35, abs=.02)
+
+
+def test_startup_still_times_out_for_permanently_stale_pairs():
+    cam = RosDepthCamera(max_age=.25, start_timeout=.04)
+    cam.calibration = {'rectified': True}
+    push_pair(cam, 1.4)
+    push_pair(cam, 1.2)
+    with pytest.raises(TimeoutError, match='Last stale frame: Camera frame stale'):
+        cam._wait_until_ready()
+
+
+def test_startup_does_not_mask_future_clock_mismatch():
+    cam = RosDepthCamera(max_age=.25, start_timeout=1.)
+    cam.calibration = {'rectified': True}
+    push_pair(cam, -1.)
+    push_pair(cam, -1.1)
+    with pytest.raises(RuntimeError, match='clock mismatch'):
+        cam._wait_until_ready()
+
+
+def test_startup_requires_stream_to_advance_even_if_first_pair_is_fresh():
+    cam = RosDepthCamera(max_age=.25, start_timeout=.04)
+    cam.calibration = {'rectified': True}
+    push_pair(cam, 0.)
+    with pytest.raises(TimeoutError, match='1 matched pairs; need at least 2'):
+        cam._wait_until_ready()

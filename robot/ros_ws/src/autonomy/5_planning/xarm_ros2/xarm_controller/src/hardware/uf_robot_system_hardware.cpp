@@ -215,6 +215,38 @@ namespace uf_robot_hardware
             }
         }
 
+        // These services never enable motion or clear faults. The acquisition reply is
+        // the acknowledgement that controller-manager writes are now excluded.
+        const std::string sdk_prefix = node_->get_parameter("hw_ns").as_string() + "/sdk_control/";
+        sdk_acquire_service_ = node_->create_service<std_srvs::srv::Trigger>(sdk_prefix + "acquire",
+            [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+                   std_srvs::srv::Trigger::Response::SharedPtr response) {
+                response->success = command_gate_.acquire();
+                response->message = response->success ? "SDK owns arm; ROS writes blocked" :
+                    "Cannot acquire SDK control: ROS interfaces claimed, SDK already owned, or resync pending";
+            });
+        sdk_release_service_ = node_->create_service<std_srvs::srv::Trigger>(sdk_prefix + "release",
+            [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+                   std_srvs::srv::Trigger::Response::SharedPtr response) {
+                if (xarm_driver_.curr_err != 0 || xarm_driver_.curr_state > 2 ||
+                    xarm_driver_.curr_mode != XARM_MODE::SERVO) {
+                    response->success = false;
+                    response->message = "Arm must be fault-free in servo mode and ready before handback";
+                    return;
+                }
+                response->success = command_gate_.release();
+                response->message = response->success ? "SDK released; waiting for measured joint resync" :
+                    "SDK control was not held exclusively";
+            });
+        sdk_status_service_ = node_->create_service<std_srvs::srv::Trigger>(sdk_prefix + "status",
+            [this](const std_srvs::srv::Trigger::Request::SharedPtr,
+                   std_srvs::srv::Trigger::Response::SharedPtr response) {
+                response->success = true;
+                response->message = std::string("{\"protocol\":1,\"robot_ip\":\"") + robot_ip_ + "\",\"sdk_owned\":" +
+                    (command_gate_.sdk_owned() ? "true" : "false") + ",\"claimed\":" +
+                    std::to_string(command_gate_.claimed()) + ",\"resync_pending\":" +
+                    (command_gate_.resync_pending() ? "true" : "false") + "}";
+            });
         RCLCPP_INFO(LOGGER, "[%s] System Sucessfully configured!", robot_ip_.c_str());
         return CallbackReturn::SUCCESS;
     }
@@ -247,6 +279,10 @@ namespace uf_robot_hardware
 
     CallbackReturn UFRobotSystemHardware::on_activate(const rclcpp_lifecycle::State& previous_state)
     {
+        if (command_gate_.sdk_owned()) {
+            RCLCPP_ERROR(LOGGER, "Cannot activate ROS hardware while SDK owns the arm");
+            return CallbackReturn::ERROR;
+        }
         xarm_driver_.arm->clean_error();
         xarm_driver_.arm->clean_warn();
         xarm_driver_.arm->motion_enable(true);
@@ -294,6 +330,8 @@ namespace uf_robot_hardware
 
     hardware_interface::return_type UFRobotSystemHardware::read(const rclcpp::Time & time, const rclcpp::Duration &period)
     {
+        const bool resync = command_gate_.resync_pending();
+        if (command_gate_.sdk_owned() || resync) initialized_ = false;
         read_cnts_ += 1;
         read_ready_ = _xarm_is_ready_read();
         rclcpp::Time start = node_->get_clock()->now();
@@ -319,6 +357,7 @@ namespace uf_robot_hardware
                     velocity_cmds_[i] = 0.0;
                 }
             }
+            if (resync) command_gate_.synchronized();
         }
         else {
             // initialized_ = read_ready_ && _xarm_is_ready_write();
@@ -336,8 +375,32 @@ namespace uf_robot_hardware
         return hardware_interface::return_type::OK;
     }
 
+    hardware_interface::return_type UFRobotSystemHardware::perform_command_mode_switch(
+        const std::vector<std::string>& start_interfaces,
+        const std::vector<std::string>& stop_interfaces)
+    {
+        unsigned int stopped = 0, started = 0;
+        for (size_t i = 0; i < info_.joints.size(); ++i) {
+            for (size_t kind = 0; kind < 2; ++kind) {
+                const std::string command = info_.joints[i].name + (kind ? "/velocity" : "/position");
+                const unsigned int bit = 1u << (i + 7 * kind);
+                for (const auto& name : stop_interfaces) if (name == command) stopped |= bit;
+                for (const auto& name : start_interfaces) if (name == command) started |= bit;
+            }
+        }
+        return command_gate_.switch_claims(stopped, started) ?
+            hardware_interface::return_type::OK : hardware_interface::return_type::ERROR;
+    }
+
     hardware_interface::return_type UFRobotSystemHardware::write(const rclcpp::Time & time, const rclcpp::Duration &period)
     {
+        // Do not transmit stale joint holds while an SDK client streams Cartesian targets.
+        // This must precede _need_reset(), which otherwise reactivates stopped controllers.
+        if (!command_gate_.may_write()) {
+            initialized_ = false;  // read() keeps the held commands aligned with measured joints.
+            reactivate_controller_later_ = false;
+            return hardware_interface::return_type::OK;
+        }
         if (_need_reset()) {
             initialized_ = false;
             _deactivate_controller();

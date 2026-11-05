@@ -26,7 +26,11 @@
 #include "controller_manager_msgs/srv/list_controllers.hpp"
 #include "controller_manager_msgs/srv/switch_controller.hpp"
 #include "xarm_api/xarm_driver.h"
+#include "std_srvs/srv/trigger.hpp"
+#include "xarm_controller/hardware/sdk_command_gate.h"
 
+
+#include <atomic>
 
 namespace uf_robot_hardware
 {
@@ -51,8 +55,9 @@ namespace uf_robot_hardware
         // hardware_interface::return_type prepare_command_mode_switch(const std::vector<std::string>& start_interfaces,
         //                                                             const std::vector<std::string>& stop_interfaces) final;
 
-        // hardware_interface::return_type perform_command_mode_switch(const std::vector<std::string>& start_interfaces,
-        //                                                             const std::vector<std::string>& stop_interfaces) final;
+        hardware_interface::return_type perform_command_mode_switch(
+            const std::vector<std::string>& start_interfaces,
+            const std::vector<std::string>& stop_interfaces) final;
 
     protected:
         hardware_interface::HardwareInfo info_;
@@ -70,6 +75,11 @@ namespace uf_robot_hardware
         std::vector<double> position_states_;
         std::vector<double> velocity_states_;
 
+        // No claimed arm command interface means an SDK client may own the arm.
+        SdkCommandGate command_gate_;
+        rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr sdk_acquire_service_;
+        rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr sdk_release_service_;
+        rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr sdk_status_service_;
         bool velocity_control_;
         bool initialized_;
         bool read_ready_;

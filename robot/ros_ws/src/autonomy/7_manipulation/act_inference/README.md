@@ -13,12 +13,10 @@ capture-time anchoring are respected.
 
 ## ROS services
 
-**Execution is currently blocked with active/inactive Autolab ROS hardware**, following
-the yaw-stage C31 incident. The hardware can send joint targets concurrently with SDK
-Cartesian commands. The new ownership guard refuses to enable the arm until exclusive
-control can be established; unavailable ownership services also block execution.
-Prediction-only mode remains available. See [the proposed driver handoff](patches/README.md).
-Do not bypass this guard or clear the fault and retry the same unpatched stack.
+Execution requires the patched `xarm_controller` driver to acknowledge exclusive SDK
+ownership before motion. ACT stops the ROS arm controller for the complete run and
+restores it from measured joints after successful completion. Old/unavailable drivers
+block execution. See [the mode 1 handoff and build instructions](patches/README.md).
 
 With the ROS workspace sourced and dependencies installed in the Python environment:
 
@@ -49,6 +47,8 @@ Status is JSON at 2 Hz and on
 completion, transient local: `running`, `result` (`done`, `stopped`, `failed`), `message`,
 `phase` (`idle`, `preparing`, `running`), `started` (monotonic time), and `target`
 (`ot2`, `shaker`, `base`; null before the first run, retained after completion).
+`sdk_control_held` shows whether this node still holds the driver's exclusive lease.
+After a stopped/failed run, ROS remains paused; faults are never automatically cleared.
 For OT-2/shaker, a successful policy result (settled or configured duration elapsed) is followed
 by gripper release and a 70 mm vertical retreat. `done` is published only after that sequence
 finishes; it is not an independent placement measurement. Contact detection or cancellation returns `stopped`;
@@ -134,12 +134,14 @@ ros2 launch manipulation_bringup manipulation.launch.xml \
 
 ```bash
 ./place_on_opentrons_ft.sh                          # prediction only, direct Nano stream
-./place_on_opentrons_ft.sh --execute                # commands the arm
+# Execution uses run_act_node.py and the target services above.
 ./place_on_opentrons_ft.sh --camera-source ros      # use running camera/depth nodes
 python3 run_act_inference.py --help
 ```
 
-The wrapper uses the current `python3` environment, sets `OMP_NUM_THREADS=2`, and accepts
+Standalone `--execute` is blocked because it cannot acquire the ROS driver lease.
+Use the target services for physical execution. The wrapper uses the current `python3`
+environment, sets `OMP_NUM_THREADS=2`, and accepts
 the same placing overrides as the original script. Generic `run_act_inference.py`
 keeps its existing CLI defaults; use the wrapper for the F/T placing settings.
 
@@ -156,6 +158,25 @@ ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST OMP_NUM_THREADS=2 \
 ```
 
 ## Servo timing and diagnostics
+
+The ROS camera now waits for at least two matched RGB/depth pairs, calibration, and a
+usable latest frame before starting policy inference. This avoids applying a zero-cadence
+startup threshold to the first delayed depth frame. Cadence uses capture stamps as well
+as receipt spacing, so queued pairs arriving back-to-back do not look like an unrealistically
+fast stream. The cadence allowance stays capped by `max_frame_age`; permanently old data,
+stalled streams, and future timestamps still fail. Startup is bounded by 10 seconds and
+logs the pair count, capture-to-receipt latency, and bounded frame interval when ready.
+
+Only one publisher is permitted on each Nano RGB/depth input topic. Duplicate bringups
+or orphaned depth nodes interleave timestamps and compete for GPU time; ACT now rejects
+that condition explicitly. Stop an old launch cleanly and wait for its camera processes
+to exit before starting another. Pairing preserves newer incomplete frames when messages
+arrive out of order and drops duplicate/older messages without replacing the latest
+accepted image. A sustained timestamp reset or stalled source still makes that image
+expire through the age watchdog; old timestamps are never rebased to appear fresh.
+
+If a run fails while holding SDK control, restart ACT and the controller manager together
+when loading these changes; restarting only ACT loses the local record of the retained lease.
 
 Active motion uses the SDK's report socket for measured pose, joints, controller state,
 and errors. It converts reported Euler RPY radians to rotation vectors before using
@@ -175,3 +196,12 @@ If any command interval exceeds 30 ms at the default 50 Hz rate, the node logs
 `Servo command gap ... (expected 20.0 ms)` (at most once every two seconds). Save these
 warnings and the policy/camera timing lines if physical motion still pulses. The timing
 fix has hardware-free regression coverage; smoothness still needs confirmation on the arm.
+
+## Driver validation
+
+The mode remains **1** for ACT. The compiled driver now suppresses joint writes when
+unclaimed or SDK-owned. ACT checks `/xarm/sdk_control/status`, strictly stops configured
+arm controllers, acquires exclusive SDK control, and retains it across yaw/policy/release
+and retreat. Successful runs resynchronize measured joint state before restoring ROS.
+Stopped/failed runs retain the SDK lease. Read [the handoff details](patches/README.md)
+before rebuilding and restarting the stack.

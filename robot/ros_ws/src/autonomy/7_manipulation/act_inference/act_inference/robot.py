@@ -48,6 +48,8 @@ class XArm6Robot:
     def connect(self):
         if self.dry_run:
             return
+        if self._arm is not None and self._arm.connected:
+            return
         if self._factory is None:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
@@ -297,6 +299,13 @@ class XArm6Robot:
         self._check(code, 'open_gripper')
         if reply is None or list(reply)[:6] != request[:6]:
             raise RuntimeError(f'Gripper open command was not acknowledged: {reply}')
+
+    def hand_back(self):
+        """Release a healthy, ready arm to ROS without clearing faults or issuing a pose."""
+        if self.read_only:
+            raise RuntimeError('Read-only robot cannot hand back motion control')
+        self.check_health()
+        self._enabled = False  # close() must leave mode 1/state 0 for the ROS controller.
 
     def close(self):
         if self._arm is not None:
