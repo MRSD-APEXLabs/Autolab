@@ -11,7 +11,8 @@ Interface (same contract as visual_servoing's visual_servo/*):
 The checkpoint is loaded and warmed up once, at startup. Each OT-2/shaker run switches the camera hub to the
 Nano (`select_service`), reads its rectified image and depth from the zedx_nano_depth topics
 (camera_source ros), connects to the arm, runs `duration_sec` and closes the arm again.
-OT-2/shaker first align yaw to 90 degrees. Base placement approaches 10 mm above its fixed
+OT-2/shaker first align yaw to 90 degrees, then open the gripper and lift 70 mm after a
+successful policy run. Base placement approaches 10 mm above its fixed
 XYZ/RPY pose before descending, without camera or policy inference. All targets share
 one runner, stop service, and status topic. With execute:=false the arm is only read.
 """
@@ -29,11 +30,14 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from controller_manager_msgs.srv import ListHardwareComponents
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
 from .base_placement import BasePlacementConfig, align_policy_yaw, run_base_placement
+from .post_placement import release_and_lift
 from .rollout import load_policy, run_act_rollout, warm_up
 from .runner import ActRunner
+from .ownership import verify_hardware_quiet
 
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_20261029'
@@ -41,7 +45,7 @@ DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_a
 
 class ActInferenceNode(Node):
     def __init__(self, policy=None, rollout_fn=run_act_rollout, base_move_fn=run_base_placement,
-                 yaw_align_fn=align_policy_yaw, **kwargs):
+                 yaw_align_fn=align_policy_yaw, post_placement_fn=release_and_lift, **kwargs):
         """`policy` (a load_policy() result) and `rollout_fn` replace the checkpoint and the arm (tests)."""
         super().__init__('act_inference', **kwargs)
         param = lambda name, default: self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
@@ -88,6 +92,7 @@ class ActInferenceNode(Node):
             timeout_sec=float(param('base_timeout_sec', 180.0)))
         self._base_move_fn = base_move_fn
         self._yaw_align_fn = yaw_align_fn
+        self._post_placement_fn = post_placement_fn
 
         if policy is None:
             t0 = time.monotonic()
@@ -96,7 +101,7 @@ class ActInferenceNode(Node):
             self.get_logger().info(f'ACT checkpoint {self.ckpt_dir.name} ready in {time.monotonic() - t0:.1f} s')
         self._policy = policy
 
-        self.runner = ActRunner(self._run, prepare=self._prepare_camera, on_done=self._run_done)
+        self.runner = ActRunner(self._run, prepare=self._prepare_run, on_done=self._run_done)
         services = ReentrantCallbackGroup()
         self.pub_status = self.create_publisher(String, 'act_inference/status', STATUS_QOS)
         self.create_service(Trigger, 'act_inference/start', self._on_start, callback_group=services)
@@ -107,6 +112,8 @@ class ActInferenceNode(Node):
         self.create_service(Trigger, 'act_inference/stop', self._on_stop, callback_group=services)
         self._select_client = (self.create_client(Trigger, self.select_service, callback_group=services)
                                if self.select_service else None)
+        self._hardware_client = self.create_client(
+            ListHardwareComponents, '/controller_manager/list_hardware_components', callback_group=services)
         self.create_timer(0.5, self._publish_status)
         self.get_logger().info(
             f'ACT inference: {"EXECUTE (the arm moves)" if self.rollout.execute else "prediction only (arm read-only)"}, '
@@ -116,7 +123,12 @@ class ActInferenceNode(Node):
     def _run(self, stop):
         if self._yaw_align_fn(self.config, execute=self.rollout.execute, stop=stop) == 'stopped' or stop.is_set():
             return 'stopped'
-        return self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
+        result = self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
+        if result != 'done':
+            return result
+        if stop.is_set():
+            return 'stopped'
+        return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop)
 
     def _run_done(self, status):
         # one call site per severity: rclpy refuses a severity change at the same call site
@@ -133,7 +145,7 @@ class ActInferenceNode(Node):
                 target=target,
                 run=lambda stop: self._base_move_fn(self.config, self.base_placement,
                                                     execute=self.rollout.execute, stop=stop),
-                prepare=lambda check_abort: check_abort())
+                prepare=self._verify_motion_ownership)
         else:
             response.success, response.message = self.runner.start(target=target)
         if response.success:
@@ -144,6 +156,29 @@ class ActInferenceNode(Node):
         self.runner.abort()
         response.success, response.message = True, 'stopping'
         return response
+
+    def _prepare_run(self, check_abort):
+        self._verify_motion_ownership(check_abort)
+        self._prepare_camera(check_abort)
+
+    def _verify_motion_ownership(self, check_abort):
+        check_abort()
+        if not self.rollout.execute:
+            return
+        if self.get_node_names().count('act_inference') > 1:
+            raise RuntimeError('Multiple act_inference nodes are running; stop duplicate nodes before execution')
+        if not self._hardware_client.wait_for_service(timeout_sec=2.0):
+            raise RuntimeError('Cannot verify exclusive xArm control: '
+                               '/controller_manager/list_hardware_components is unavailable')
+        future = self._hardware_client.call_async(ListHardwareComponents.Request())
+        deadline = time.monotonic() + 3.0
+        while not future.done():
+            check_abort()
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Timed out checking xArm command ownership')
+            time.sleep(.02)
+        check_abort()
+        verify_hardware_quiet(future.result().component)
 
     def _prepare_camera(self, check_abort):
         """Runs on the run's thread: switch the hub to the Nano and wait until it streams."""

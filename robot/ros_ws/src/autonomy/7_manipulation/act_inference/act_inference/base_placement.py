@@ -9,6 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from .robot import XArm6Robot, continuous_rotvec
 from .rollout import limit_action
+from .control_rate import ControlRate
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,13 @@ def run_base_placement(config, placement, execute=False, stop=None):
         robot.close()
 
 
-def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label):
+def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xyz_tolerance=None):
     """Follow ordered waypoints, requiring measured arrival before advancing."""
     target = initial.copy()
     period = 1 / motion.loop_hz
     radius = max(float(np.linalg.norm(goal[:3] - initial[:3])) for goal in goals) + 1e-6
     deadline = time.monotonic() + timeout_sec
+    rate = ControlRate(period, time.monotonic, stop.wait)
     for goal in goals:
         arrived_since = None
         while True:
@@ -82,6 +84,11 @@ def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label):
             if tick >= deadline:
                 raise RuntimeError(f'{label} timed out before reaching the measured goal')
             measured, _ = robot.observation()
+            if hold_xyz_tolerance is not None:
+                drift = float(np.linalg.norm(measured[:3] - initial[:3]))
+                if drift > hold_xyz_tolerance:
+                    raise RuntimeError(f'{label}: unexpected XYZ drift {drift * 1000:.2f} mm '
+                                       '(limit 2 mm); possible competing arm commands')
             position_error = np.linalg.norm(goal[:3] - measured[:3])
             rotation_error = (Rotation.from_rotvec(goal[3:]) *
                               Rotation.from_rotvec(measured[3:]).inv()).magnitude()
@@ -98,7 +105,7 @@ def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label):
             if stop.is_set():
                 return 'stopped'
             robot.servo(target, period, measured=measured)
-            stop.wait(max(0, period - (time.monotonic() - tick)))
+            rate.wait()
     return 'done'
 
 
@@ -119,13 +126,16 @@ def align_policy_yaw(config, execute=False, stop=None):
         if abs(yaw_error) <= .5:
             return 'done'
         print(f'Policy yaw alignment {"EXECUTE" if execute else "PREDICTION ONLY"}: '
-              f'{rpy[2]:.3f} -> 90 degrees at 3 deg/s', flush=True)
+              f'{rpy[2]:.3f} -> 90 degrees at 3 deg/s; '
+              f'holding XYZ mm={(initial[:3] * 1000).round(3).tolist()}, '
+              f'roll/pitch deg={rpy[:2].round(3).tolist()}', flush=True)
         if not execute:
             return 'done'
         rpy[2] = 90.0
         goal = initial.copy()
         goal[3:] = continuous_rotvec(Rotation.from_euler('xyz', rpy, degrees=True).as_rotvec(), initial[3:])
         robot.enable()
-        return _move_goals(robot, initial, (goal,), motion, stop, 180.0, 'Policy yaw alignment')
+        return _move_goals(robot, initial, (goal,), motion, stop, 180.0, 'Policy yaw alignment',
+                           hold_xyz_tolerance=.002)
     finally:
         robot.close()

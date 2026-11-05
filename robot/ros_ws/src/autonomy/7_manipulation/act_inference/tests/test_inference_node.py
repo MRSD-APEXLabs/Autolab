@@ -16,6 +16,30 @@ def test_cancelled_yaw_does_not_start_policy():
     assert ActInferenceNode._run(node, threading.Event()) == 'stopped'
 
 
+@pytest.mark.parametrize('outcome', ['done', 'stopped', 'error'])
+def test_policy_then_release_only_on_success(outcome):
+    pytest.importorskip('rclpy')
+    from act_inference.node import ActInferenceNode
+    stages = []
+
+    def rollout(*args, **kwargs):
+        stages.append('policy')
+        if outcome == 'error':
+            raise RuntimeError('policy failed')
+        return outcome
+
+    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True), _policy=None,
+                           _yaw_align_fn=lambda *a, **kw: stages.append('yaw') or 'done',
+                           _rollout_fn=rollout,
+                           _post_placement_fn=lambda *a, **kw: stages.append('release/lift') or 'done')
+    if outcome == 'error':
+        with pytest.raises(RuntimeError, match='policy failed'):
+            ActInferenceNode._run(node, threading.Event())
+    else:
+        assert ActInferenceNode._run(node, threading.Event()) == outcome
+    assert stages == (['yaw', 'policy', 'release/lift'] if outcome == 'done' else ['yaw', 'policy'])
+
+
 @pytest.mark.parametrize('target', ['ot2', 'shaker', 'base', None])
 def test_start_stop_and_status_over_ros(target):
     rclpy = pytest.importorskip('rclpy')

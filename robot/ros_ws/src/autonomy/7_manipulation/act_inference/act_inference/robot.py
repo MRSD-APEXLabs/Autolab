@@ -4,6 +4,10 @@ Copied from teleop/robot.py. With read_only=True (every run without --execute) o
 state is read; enable() and servo() refuse to run.
 """
 
+import logging
+import threading
+import time
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -29,6 +33,12 @@ class XArm6Robot:
         self._enabled = False
         self._ft_started_by_us = False
         self.force_torque_config = None
+        self._report_lock = threading.Lock()
+        self._report_event = threading.Event()
+        self._report = None
+        self._reporting = False
+        self._last_servo_time = None
+        self._last_timing_warning = float('-inf')
 
     @staticmethod
     def _check(code, operation):
@@ -42,25 +52,55 @@ class XArm6Robot:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
         try:
-            self._arm = self._factory(self.robot_ip, is_radian=True)
+            self._arm = self._factory(self.robot_ip, is_radian=True, enable_report=True, report_type='rich')
         except Exception as exc:   # the SDK raises a bare Exception when the socket does not connect
             raise RuntimeError(f'xArm connection to {self.robot_ip} failed: {exc}') from exc
         if not self._arm.connected:
             raise RuntimeError('xArm connection failed')
         if self._arm.axis != 6:
             raise RuntimeError('Expected a six-axis xArm')
+        self._report_event.clear()
+        with self._report_lock:
+            self._report = None
         self.check_health()
+        # The SDK already receives pose, joints and health on its report socket. Polling
+        # six getters per 20 ms tick starves the servo command socket with round trips.
+        if not self._arm.register_report_callback(self._on_report, report_mtable=False,
+                                                  report_mtbrake=False, report_cmd_num=False):
+            raise RuntimeError('Could not register xArm feedback reports')
+        self._reporting = True
+        if not self._report_event.wait(2.0):
+            raise RuntimeError('No xArm feedback report received')
 
-    def check_health(self):
+    def _on_report(self, data):
+        snapshot = dict(data)
+        for key in ('cartesian', 'joints'):
+            snapshot[key] = tuple(data[key])
+        with self._report_lock:
+            self._report = (time.monotonic(), snapshot)
+        self._report_event.set()
+
+    def _feedback(self):
+        with self._report_lock:
+            report = self._report
+        if report is None or time.monotonic() - report[0] > .25:
+            raise RuntimeError('xArm feedback reports stale (>250 ms); stopping')
+        return report
+
+    def check_health(self, poll=False):
         if self.dry_run:
             return
         arm = self._arm
         if not arm.connected:
             raise RuntimeError('xArm disconnected')
-        code, errors = arm.get_err_warn_code()
-        self._check(code, 'get_err_warn_code')
-        code, state = arm.get_state()
-        self._check(code, 'get_state')
+        if self._enabled and self._reporting and not poll:
+            _, report = self._feedback()
+            errors, state = (report['error_code'], report['warn_code']), report['state']
+        else:
+            code, errors = arm.get_err_warn_code()
+            self._check(code, 'get_err_warn_code')
+            code, state = arm.get_state()
+            self._check(code, 'get_state')
         # Controller states (the SDK's wait_move logic): 0 motion state (just after set_state(0)),
         # 1 in motion, 2 standby ("sleeping"), 3 paused, 4 stopped, 5 mode/configuration changed, 6 deceleration stop.
         if errors[0]:
@@ -133,10 +173,20 @@ class XArm6Robot:
         if self.dry_run:
             return self._target.copy(), np.zeros(6)
         self.check_health()
-        code, pose = self._arm.get_position_aa(is_radian=True)
-        self._check(code, 'get_position_aa')
-        code, joints = self._arm.get_servo_angle(is_radian=True)
-        self._check(code, 'get_servo_angle')
+        if self._reporting:
+            _, report = self._feedback()
+            # Report cartesian coordinates are XYZ mm + Euler RPY radians because
+            # this connection was created with is_radian=True, not axis-angle.
+            rpy_pose = np.asarray(report['cartesian'], dtype=float)
+            if rpy_pose.shape != (6,) or not np.isfinite(rpy_pose).all():
+                raise RuntimeError('Invalid TCP feedback from xArm')
+            pose = np.r_[rpy_pose[:3], Rotation.from_euler('xyz', rpy_pose[3:]).as_rotvec()]
+            joints = report['joints']
+        else:
+            code, pose = self._arm.get_position_aa(is_radian=True)
+            self._check(code, 'get_position_aa')
+            code, joints = self._arm.get_servo_angle(is_radian=True)
+            self._check(code, 'get_servo_angle')
         pose = np.asarray(pose, dtype=float)
         if pose.shape != (6,) or not np.isfinite(pose).all():
             raise RuntimeError('Invalid TCP feedback from xArm')
@@ -150,6 +200,23 @@ class XArm6Robot:
 
     def initialize_target_pose(self):
         self._target = self.observation()[0].copy()
+        if self._reporting and not self._enabled:
+            # Validate the new report-based path against the controller's direct
+            # axis-angle query before any enable/motion command, not on every tick.
+            code, queried = self._arm.get_position_aa(is_radian=True)
+            self._check(code, 'initial get_position_aa')
+            queried = np.asarray(queried, dtype=float)
+            if queried.shape != (6,) or not np.isfinite(queried).all():
+                raise RuntimeError('Invalid initial TCP query from xArm')
+            queried[:3] /= 1000
+            distance = float(np.linalg.norm(queried[:3] - self._target[:3]))
+            angle = (Rotation.from_rotvec(queried[3:]) *
+                     Rotation.from_rotvec(self._target[3:]).inv()).magnitude()
+            if distance > .001 or angle > np.deg2rad(.5):
+                raise RuntimeError(f'xArm report/query pose mismatch before motion: '
+                                   f'{distance * 1000:.3f} mm, {np.rad2deg(angle):.3f} deg')
+            queried[3:] = continuous_rotvec(queried[3:], self._target[3:])
+            self._target = queried
         return self._target.copy()
 
     def enable(self):
@@ -162,7 +229,21 @@ class XArm6Robot:
         self._enabled = True
         for operation, args in [('motion_enable', (True,)), ('set_mode', (1,)), ('set_state', (0,))]:
             self._check(getattr(self._arm, operation)(*args), operation)
-        self.check_health()
+        self.check_health(poll=True)
+        if self._reporting:
+            # Do not mistake the pre-enable stopped/configuration report for a stop
+            # during motion. Wait for a new, healthy report before starting the loop.
+            enabled_at = time.monotonic()
+            deadline = enabled_at + 2.0
+            while True:
+                stamp, report = self._feedback()
+                if stamp >= enabled_at and report['state'] in (0, 1, 2):
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('No ready xArm feedback after enabling')
+                time.sleep(.005)
+            self.check_health()
+        self._last_servo_time = None
 
     def servo(self, target, period, measured=None):
         if self.read_only:
@@ -184,9 +265,38 @@ class XArm6Robot:
                 raise RuntimeError('Robot is not enabled for teleop')
             sdk_pose = target.copy()
             sdk_pose[:3] *= 1000
+            now = time.monotonic()
+            if (self._last_servo_time is not None and now - self._last_servo_time > 1.5 * period
+                    and now - self._last_timing_warning > 2.):
+                logging.getLogger(__name__).warning(
+                    'Servo command gap %.1f ms (expected %.1f ms); control loop missed its deadline',
+                    (now - self._last_servo_time) * 1000, period * 1000)
+                self._last_timing_warning = now
             self._check(self._arm.set_servo_cartesian_aa(sdk_pose.tolist(), is_radian=True,
                                                        is_tool_coord=False, relative=False), 'servo')
+            self._last_servo_time = now
         self._target = target.copy()
+
+    def open_gripper(self):
+        """Open the custom RS485 gripper with the same frame as visual_servoing/teleop.
+
+        The reply confirms command acceptance, not measured jaw position.
+        """
+        if self.read_only:
+            raise RuntimeError('Read-only robot cannot command the gripper')
+        if self.dry_run:
+            return
+        self.check_health()
+        code, baudrate = self._arm.get_tgpio_modbus_baudrate()
+        self._check(code, 'get_tgpio_modbus_baudrate')
+        if baudrate != 57600:
+            self._check(self._arm.set_tgpio_modbus_baudrate(57600), 'set_tgpio_modbus_baudrate')
+        self._check(self._arm.set_tgpio_modbus_timeout(100), 'set_tgpio_modbus_timeout')
+        request = [0x08, 0x10, 0x07, 0x00, 0x00, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00]
+        code, reply = self._arm.getset_tgpio_modbus_data(request, is_transparent_transmission=False)
+        self._check(code, 'open_gripper')
+        if reply is None or list(reply)[:6] != request[:6]:
+            raise RuntimeError(f'Gripper open command was not acknowledged: {reply}')
 
     def close(self):
         if self._arm is not None:
@@ -199,5 +309,13 @@ class XArm6Robot:
                         self._check(self._arm.set_ft_sensor_enable(0), 'restore_ft_sensor_sampling')
                 finally:
                     self._ft_started_by_us = False
-                    self._arm.disconnect()
-                    self._arm = None
+                    try:
+                        if self._reporting:
+                            self._arm.release_report_callback(self._on_report)
+                    finally:
+                        self._reporting = False
+                        try:
+                            self._arm.disconnect()
+                        finally:
+                            self._arm = None
+                            self._enabled = False

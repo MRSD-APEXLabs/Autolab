@@ -1,0 +1,69 @@
+--- a/robot/ros_ws/src/autonomy/5_planning/xarm_ros2/xarm_controller/include/xarm_controller/hardware/uf_robot_system_hardware.h
++++ b/robot/ros_ws/src/autonomy/5_planning/xarm_ros2/xarm_controller/include/xarm_controller/hardware/uf_robot_system_hardware.h
+@@ -28,6 +28,8 @@
+ #include "xarm_api/xarm_driver.h"
+ 
+ 
++#include <atomic>
++
+ namespace uf_robot_hardware
+ {
+     using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+@@ -51,8 +53,9 @@
+         // hardware_interface::return_type prepare_command_mode_switch(const std::vector<std::string>& start_interfaces,
+         //                                                             const std::vector<std::string>& stop_interfaces) final;
+ 
+-        // hardware_interface::return_type perform_command_mode_switch(const std::vector<std::string>& start_interfaces,
+-        //                                                             const std::vector<std::string>& stop_interfaces) final;
++        hardware_interface::return_type perform_command_mode_switch(
++            const std::vector<std::string>& start_interfaces,
++            const std::vector<std::string>& stop_interfaces) final;
+ 
+     protected:
+         hardware_interface::HardwareInfo info_;
+@@ -70,6 +73,8 @@
+         std::vector<double> position_states_;
+         std::vector<double> velocity_states_;
+ 
++        // No claimed arm command interface means an SDK client may own the arm.
++        std::atomic<unsigned int> claimed_arm_interfaces_{0};
+         bool velocity_control_;
+         bool initialized_;
+         bool read_ready_;
+--- a/robot/ros_ws/src/autonomy/5_planning/xarm_ros2/xarm_controller/src/hardware/uf_robot_system_hardware.cpp
++++ b/robot/ros_ws/src/autonomy/5_planning/xarm_ros2/xarm_controller/src/hardware/uf_robot_system_hardware.cpp
+@@ -336,8 +336,34 @@
+         return hardware_interface::return_type::OK;
+     }
+ 
++    hardware_interface::return_type UFRobotSystemHardware::perform_command_mode_switch(
++        const std::vector<std::string>& start_interfaces,
++        const std::vector<std::string>& stop_interfaces)
++    {
++        unsigned int claimed = claimed_arm_interfaces_.load();
++        for (size_t i = 0; i < info_.joints.size(); ++i) {
++            const std::string command = info_.joints[i].name +
++                (velocity_control_ ? "/velocity" : "/position");
++            for (const auto& stopped : stop_interfaces) {
++                if (stopped == command) claimed &= ~(1u << i);
++            }
++            for (const auto& started : start_interfaces) {
++                if (started == command) claimed |= (1u << i);
++            }
++        }
++        claimed_arm_interfaces_.store(claimed);
++        return hardware_interface::return_type::OK;
++    }
++
+     hardware_interface::return_type UFRobotSystemHardware::write(const rclcpp::Time & time, const rclcpp::Duration &period)
+     {
++        // Do not transmit stale joint holds while an SDK client streams Cartesian targets.
++        // This must precede _need_reset(), which otherwise reactivates stopped controllers.
++        if (claimed_arm_interfaces_.load() == 0) {
++            initialized_ = false;  // read() keeps the held commands aligned with measured joints.
++            reactivate_controller_later_ = false;
++            return hardware_interface::return_type::OK;
++        }
+         if (_need_reset()) {
+             initialized_ = false;
+             _deactivate_controller();

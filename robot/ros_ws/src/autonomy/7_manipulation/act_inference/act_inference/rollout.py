@@ -24,6 +24,7 @@ from zedx_nano_depth.stereo import colorize_depth
 from .cameras import make_camera
 from .config import STATE_SPACE, RolloutConfig  # noqa: F401  (RolloutConfig re-exported)
 from .robot import XArm6Robot, continuous_rotvec
+from .control_rate import ControlRate
 from .act.action_frames import (ABSOLUTE_TCP, RELATIVE_TCP_TOOL, ACTION_REPRESENTATIONS,
                                 checkpoint_state_inputs, from_relative_tcp, interpolate_pose, normalize_state)
 
@@ -263,6 +264,14 @@ def warm_up(policy, record_width=480):
                   np.full((600, 960), 500, np.uint16), **kwargs)
 
 
+def _predict_live_chunk(policy, stats, device, pose, frame, width, ft_robot=None):
+    # F/T polling is synchronous SDK I/O. Run it with inference, never on the
+    # 50 Hz servo thread (the inference deadline covers both sampling and prediction).
+    kwargs = {'force_torque': ft_robot.force_torque()} if ft_robot is not None else {}
+    return predict_chunk(policy, stats, device, pose, frame.image, width,
+                         getattr(frame, 'depth', None), **kwargs)
+
+
 def run_act_rollout(config, rollout, policy=None, stop=None):
     """Return done on arrival or elapsed duration, stopped on cancellation or contact.
 
@@ -292,7 +301,8 @@ def run_act_rollout(config, rollout, policy=None, stop=None):
         initial = target = robot.initialize_target_pose()
         frame = camera.latest()
         # Warm-up and initial inference before enabling the arm; CUDA initialization can be slow.
-        future = pool.submit(predict_chunk, policy, stats, device, initial.copy(), frame.image, config.record_image_width, getattr(frame, 'depth', None), **({'force_torque': robot.force_torque()} if use_ft else {}))
+        future = pool.submit(_predict_live_chunk, policy, stats, device, initial.copy(), frame,
+                             config.record_image_width, robot if use_ft else None)
         deadline = time.monotonic() + 60
         while not future.done():
             if stop is not None and stop.is_set():
@@ -324,6 +334,7 @@ def run_act_rollout(config, rollout, policy=None, stop=None):
         start = chunk_submitted = last_submit = time.monotonic()
         last_print = 0.0
         period = 1 / config.motion.loop_hz
+        rate = ControlRate(period, time.monotonic, stop.wait if stop is not None else time.sleep)
         # Only an executed rollout can press on anything: without --execute the arm never follows the target.
         contact = ContactMonitor(rollout.contact_gap if rollout.execute else 0.0, rollout.contact_hold, rollout.contact_max_lag)
         follower = ChunkFollower(config.motion, initial, rollout)
@@ -370,7 +381,8 @@ def run_act_rollout(config, rollout, policy=None, stop=None):
                     submitted_anchor[3:] = continuous_rotvec(submitted_anchor[3:], pose[3:])
                 else:
                     submitted_time, submitted_anchor = submitted_at, pose.copy()
-                future = pool.submit(predict_chunk, policy, stats, device, submitted_anchor.copy(), frame.image, config.record_image_width, getattr(frame, 'depth', None), **({'force_torque': robot.force_torque()} if use_ft else {}))
+                future = pool.submit(_predict_live_chunk, policy, stats, device, submitted_anchor.copy(), frame,
+                                     config.record_image_width, robot if use_ft else None)
             now = time.monotonic()
             if now - chunk_submitted > rollout.prediction_timeout:
                 raise RuntimeError('No fresh policy action chunk; stopping')
@@ -390,7 +402,7 @@ def run_act_rollout(config, rollout, policy=None, stop=None):
                 if cv2.waitKey(1) in (27, ord('q')):
                     result = 'stopped'
                     break
-            time.sleep(max(0, period - (time.monotonic() - tick)))
+            rate.wait()
         if any(rollout.final_offset):
             offset = np.asarray(rollout.final_offset, dtype=float)
             where = f'{np.round(offset * 1000, 2).tolist()} mm (robot base frame)'
