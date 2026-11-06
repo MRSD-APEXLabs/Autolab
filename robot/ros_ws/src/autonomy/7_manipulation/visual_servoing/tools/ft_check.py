@@ -10,15 +10,20 @@ The grasp hold check expects Fz to change by the plate's weight (0.60-0.69 N, ab
           after-lift change should be ~0; a shift here (cable pull, arm configuration) adds to or cancels the
           plate's weight in the real hold check. With a plate held (`--grip`), it is that hold check by itself.
   drift   Arm still. Zero, then one reading per second: how far the sensor wanders over a grasp's duration.
+  gripper Interactive gripper control: o = open, a number = close to it (0..1000), r = read position + FSRs.
+
+`--grip N` on static/lift opens the gripper, prompts you to place the plate, closes to N, and (static, or lift
+with --open-after) prompts you before opening again, so you can hold the plate while it releases.
 
 Both ft_ext_force (what the servo uses: the controller's tool-load compensation subtracted) and ft_raw_force are
 shown, so a payload-compensation change shows up as a difference between the two.
 
-  python3 tools/ft_check.py static [--ip 192.168.1.236]
+  python3 tools/ft_check.py static [--ip 192.168.1.236] [--execute --grip 295]
   python3 tools/ft_check.py drift --seconds 30
-  python3 tools/ft_check.py lift --execute [--grip 295] [--lift 0.10] [--repeats 4]
+  python3 tools/ft_check.py lift --execute [--grip 295 [--open-after]] [--lift 0.10] [--repeats 4]
+  python3 tools/ft_check.py gripper --execute
 
-`lift` and `--grip` move the arm or the gripper: they need --execute, and nothing else may command the arm
+`lift`, `gripper` and `--grip` move the arm or the gripper: they need --execute, and nothing else may command the arm
 meanwhile (xarm_ros2 trajectories, teleop, a visual servo run). The arm is handed back in mode 1 at the end.
 Needs the xArm SDK (xarm-python-sdk) and numpy, as the node does.
 """
@@ -84,15 +89,69 @@ def zero(arm):
     time.sleep(0.3)
 
 
+def gripper_report(arm):
+    print(f'gripper position {arm.gripper_position()}, fsr {arm.gripper_fsr()}')
+
+
+def gripper_close(arm, args, prompt):
+    """Close to --grip after `prompt` (None: no gripper control)."""
+    if args.grip is None:
+        return
+    input(prompt)
+    arm.gripper_set(args.grip, settle=args.grip_settle)
+    gripper_report(arm)
+
+
+def gripper_open(arm, args, prompt):
+    if args.grip is None:
+        return
+    input(prompt)
+    arm.gripper_open()
+    time.sleep(args.grip_settle)
+    gripper_report(arm)
+
+
+def cmd_gripper(arm, args):
+    """Interactive: o = open, a number = close to it (0..1000), r = read position and FSRs, q = quit."""
+    arm.gripper_setup()
+    gripper_report(arm)
+    while True:
+        cmd = input('gripper [o | 0..1000 | r | q]: ').strip().lower()
+        if cmd in ('q', 'quit', 'exit'):
+            return
+        if cmd in ('o', 'open'):
+            arm.gripper_open()
+            time.sleep(args.grip_settle)
+        elif cmd.isdigit():
+            arm.gripper_set(int(cmd), settle=args.grip_settle)
+        elif cmd not in ('r', ''):
+            print('o to open, a number to close to, r to read, q to quit')
+            continue
+        gripper_report(arm)
+
+
 def cmd_static(arm, args):
+    if args.grip is not None:
+        arm.gripper_setup()
+        arm.gripper_open()
+        time.sleep(args.grip_settle)
     zero(arm)
     unloaded = sample(arm, args.window, args.interval)
     show('unloaded', unloaded)
-    input('Load the gripper (plate or known weight, hanging free, nothing else touching), then Enter... ')
+    if args.grip is None:
+        input('Load the gripper (plate or known weight, hanging free, nothing else touching), then Enter... ')
+    else:
+        gripper_close(arm, args, f'Hold the plate between the open fingers, Enter to close to {args.grip}, '
+                                 'then let go once it holds... ')
+        input('Plate hanging free, nothing else touching? Enter to measure... ')
     time.sleep(args.settle)
     loaded = sample(arm, args.window, args.interval)
     show('loaded', loaded, unloaded)
-    input('Remove the load, then Enter... ')
+    if args.grip is None:
+        input('Remove the load, then Enter... ')
+    else:
+        gripper_open(arm, args, 'Hold the plate, Enter to open the gripper... ')
+        input('Plate removed? Enter to measure... ')
     time.sleep(args.settle)
     after = sample(arm, args.window, args.interval)
     show('unloaded again', after, unloaded)
@@ -116,8 +175,10 @@ def cmd_lift(arm, args):
     arm.position_mode()
     if args.grip is not None:
         arm.gripper_setup()
-        arm.gripper_set(args.grip, settle=args.grip_settle)
-        print(f'gripper at {args.grip}')
+        arm.gripper_open()
+        time.sleep(args.grip_settle)
+        gripper_close(arm, args, f'Place the plate between the fingers (or leave empty), Enter to close to '
+                                 f'{args.grip}... ')
     start = arm.flange_pose()
     zero(arm)
     print(f'zeroed at the start pose; lifting {args.lift * 1000:.0f} mm at {args.speed:.0f} mm/s, '
@@ -142,6 +203,8 @@ def cmd_lift(arm, args):
             returns.append(back['ext'][2] - before['ext'][2])
     finally:
         arm.hand_back()
+    if args.open_after:
+        gripper_open(arm, args, 'Hold the plate, Enter to open the gripper... ')
     changes, returns = np.asarray(changes), np.asarray(returns)
     print(f'lift dFz: mean {changes.mean():+.3f} N (std {changes.std():.3f}) = {changes.mean() / G * 1000:+.1f} g; '
           f'back-down dFz: mean {returns.mean():+.3f} N (std {returns.std():.3f})')
@@ -149,7 +212,7 @@ def cmd_lift(arm, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('check', choices=('static', 'lift', 'drift'))
+    parser.add_argument('check', choices=('static', 'lift', 'drift', 'gripper'))
     parser.add_argument('--ip', default='192.168.1.236')
     parser.add_argument('--execute', action='store_true', help='allow arm and gripper motion')
     parser.add_argument('--window', type=float, default=2.0, help='s of reads per measurement')
@@ -159,16 +222,20 @@ def main():
     parser.add_argument('--lift', type=float, default=0.10, help='lift: m (the servo lifts 0.10)')
     parser.add_argument('--speed', type=float, default=50.0, help='lift: mm/s (the servo lifts at 50)')
     parser.add_argument('--repeats', type=int, default=4)
-    parser.add_argument('--grip', type=int, default=None, help='lift: close the gripper to this first (0..1000)')
-    parser.add_argument('--grip-settle', type=float, default=4.0)
+    parser.add_argument('--grip', type=int, default=None,
+                        help='static/lift: open, then close the gripper on the plate to this (0..1000)')
+    parser.add_argument('--grip-settle', type=float, default=4.0, help='s after a gripper command')
+    parser.add_argument('--open-after', action='store_true', help='lift: open the gripper at the end (prompts)')
     args = parser.parse_args()
-    if args.grip is not None and not args.execute:
-        sys.exit('--grip moves the gripper: add --execute')
+    if (args.grip is not None or args.check == 'gripper') and not args.execute:
+        sys.exit('the gripper moves: add --execute')
+    if args.open_after and args.grip is None:
+        sys.exit('--open-after needs --grip')
 
     arm = XArm(args.ip, read_only=not args.execute)
     arm.connect()
     try:
-        {'static': cmd_static, 'lift': cmd_lift, 'drift': cmd_drift}[args.check](arm, args)
+        {'static': cmd_static, 'lift': cmd_lift, 'drift': cmd_drift, 'gripper': cmd_gripper}[args.check](arm, args)
     finally:
         arm.disconnect()
 
