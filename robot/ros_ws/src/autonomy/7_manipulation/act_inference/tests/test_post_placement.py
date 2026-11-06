@@ -28,18 +28,20 @@ def setup_release(monkeypatch, stop, open_error=False):
     return calls, commands
 
 
-def test_open_then_lift_70_mm_without_changing_xy_orientation(monkeypatch):
+@pytest.mark.parametrize('lift_mm', [60., 100.])
+def test_open_then_lift_without_changing_xy_orientation(monkeypatch, lift_mm):
     stop = ClockStop()
     calls, commands = setup_release(monkeypatch, stop)
     initial = bp.BasePlacementConfig().target_pose()
     initial[:3] -= [.002, .001, 0]
     config = InferenceConfig(motion=MotionConfig(translation_speed=.01))
-    assert pp.release_and_lift(config, execute=True, stop=stop) == 'done'
+    lift_args = {'lift_mm': lift_mm} if lift_mm == 60. else {}  # Policy uses the default 100 mm.
+    assert pp.release_and_lift(config, execute=True, stop=stop, **lift_args) == 'done'
     assert calls == ['connect', 'open', 'enable', 'close']
-    assert commands[-1][2] == pytest.approx(initial[2] + .070)
+    assert commands[-1][2] == pytest.approx(initial[2] + lift_mm / 1000)
     np.testing.assert_allclose(np.asarray(commands)[:, :2], np.tile(initial[:2], (len(commands), 1)))
     np.testing.assert_allclose(np.asarray(commands)[:, 3:], np.tile(commands[0][3:], (len(commands), 1)))
-    assert stop.now >= 4. + .070 / .01 + .3
+    assert stop.now >= 4. + lift_mm / 1000 / .01 + .3
 
 
 @pytest.mark.parametrize('cancel_at', [1., 4.1])

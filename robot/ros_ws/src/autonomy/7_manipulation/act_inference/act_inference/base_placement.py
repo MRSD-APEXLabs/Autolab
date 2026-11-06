@@ -114,7 +114,7 @@ def align_policy_yaw(config, execute=False, stop=None):
     stop = stop if stop is not None else threading.Event()
     if stop.is_set():
         return 'stopped'
-    motion = replace(config.motion, rotation_speed=math.radians(3.0))
+    motion = replace(config.motion, rotation_speed=math.radians(9.0))
     robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
     try:
         robot.connect()
@@ -126,7 +126,7 @@ def align_policy_yaw(config, execute=False, stop=None):
         if abs(yaw_error) <= .5:
             return 'done'
         print(f'Policy yaw alignment {"EXECUTE" if execute else "PREDICTION ONLY"}: '
-              f'{rpy[2]:.3f} -> 90 degrees at 3 deg/s; '
+              f'{rpy[2]:.3f} -> 90 degrees at 9 deg/s; '
               f'holding XYZ mm={(initial[:3] * 1000).round(3).tolist()}, '
               f'roll/pitch deg={rpy[:2].round(3).tolist()}', flush=True)
         if not execute:

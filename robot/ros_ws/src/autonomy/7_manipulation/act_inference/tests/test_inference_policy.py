@@ -15,7 +15,7 @@ from inference_fakes import write_tiny_checkpoint  # noqa: E402
 
 def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
     from act_inference.rollout import _CheckpointUnpickler
-    path = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_20261029/dataset_stats.pkl'
+    path = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_all_20261105b/dataset_stats.pkl'
     data = path.read_bytes()
     assert b'numpy._core' in data
     expected = pickle.loads(data)
@@ -32,7 +32,7 @@ def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
 
 def test_bundled_ft_placing_checkpoint_without_hardware():
     from act_inference.rollout import warm_up
-    directory = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_20261029'
+    directory = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_all_20261105b'
     loaded = load_policy(directory)
     policy, stats, device = loaded
     assert policy.use_depth and policy.use_force_torque and policy.state_inputs == 'none'

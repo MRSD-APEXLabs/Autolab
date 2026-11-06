@@ -56,9 +56,24 @@ class DriverHandoff:
         if not self.held:
             raise RuntimeError('Cannot hand back arm without SDK ownership')
         self.ready(check_abort)  # No fault clearing; prepare mode 1/state 0 with no pose command.
-        check_abort()
-        if not self.release_driver(check_abort):
-            raise RuntimeError('Driver refused handback; SDK ownership retained')
+        # The driver's independent report socket may still show the stopped state
+        # from the completed move after our SDK connection confirms readiness.
+        # Retry only that explicit rejection: no re-enabling or motion commands.
+        deadline = time.monotonic() + 2.0
+        while True:
+            check_abort()
+            response = self.release_driver(check_abort)
+            if getattr(response, 'success', response):
+                break
+            reason = getattr(response, 'message', '')
+            if (not reason.startswith('Arm must be fault-free in servo mode and ready before handback')
+                    or time.monotonic() >= deadline):
+                detail = f': {reason}' if reason else ''
+                raise RuntimeError(f'Driver refused handback; SDK ownership retained{detail}')
+            state = self._status(check_abort)
+            if not state['sdk_owned'] or state['claimed']:
+                raise RuntimeError('Exclusive SDK ownership lost while waiting for driver readiness')
+            time.sleep(.05)
         self.held = False
         deadline = time.monotonic() + 3.0
         while True:

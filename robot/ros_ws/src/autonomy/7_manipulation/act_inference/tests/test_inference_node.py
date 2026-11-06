@@ -7,6 +7,35 @@ from types import SimpleNamespace
 import pytest
 
 
+@pytest.mark.parametrize('move_result', ['done', 'stopped', 'error'])
+@pytest.mark.parametrize('retreat_result', ['done', 'stopped', 'error'])
+def test_base_release_and_60_mm_retreat_before_handback(move_result, retreat_result):
+    pytest.importorskip('rclpy')
+    from act_inference.node import ActInferenceNode
+    events = []
+    def move(*args, **kwargs):
+        events.append('place')
+        if move_result == 'error': raise RuntimeError('move failed')
+        return move_result
+    def retreat(*args, **kwargs):
+        assert kwargs['lift_mm'] == 60.
+        events.append('release_and_lift')
+        if retreat_result == 'error': raise RuntimeError('retreat failed')
+        return retreat_result
+    node = SimpleNamespace(config=None, base_placement=None, rollout=SimpleNamespace(execute=True),
+                           runner=SimpleNamespace(status=lambda: dict(target='base'), _check_abort=lambda: None),
+                           _base_move_fn=move, _post_placement_fn=retreat,
+                           handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
+    if move_result == 'error' or (move_result == 'done' and retreat_result == 'error'):
+        with pytest.raises(RuntimeError):
+            ActInferenceNode._run(node, threading.Event())
+    else:
+        expected = retreat_result if move_result == 'done' else move_result
+        assert ActInferenceNode._run(node, threading.Event()) == expected
+    assert events == (['place'] + (['release_and_lift'] if move_result == 'done' else [])
+                      + (['handback'] if move_result == retreat_result == 'done' else []))
+
+
 def test_cancelled_yaw_does_not_start_policy():
     pytest.importorskip('rclpy')
     from act_inference.node import ActInferenceNode
@@ -77,7 +106,7 @@ def test_start_stop_and_status_over_ros(target):
                             parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_client', namespace=namespace)
-    assert node.ckpt_dir.name == 'xarm6_placing_act_ft_20261029'
+    assert node.ckpt_dir.name == 'xarm6_placing_act_ft_all_20261105b'
     assert node.rollout.duration_sec == 60 and node.rollout.enable_rotation
     assert node.rollout.workspace_radius == .15 and node.rollout.final_offset == (0., 0., 0.)
     assert node.config.motion.translation_speed == .01 and node.config.motion.rotation_speed == .15

@@ -28,6 +28,12 @@ release/lift, prepares mode 1/state 0 without issuing a pose or clearing errors,
 the SDK lease, waits for measured-joint resync, then restores only previously active
 controllers. It reports `done` after this handback completes.
 
+The driver's feedback arrives independently of ACT's SDK feedback. After preparing
+the arm, ACT retries an explicit driver readiness rejection for up to two seconds
+to allow that feedback to catch up. It does not re-enable the arm or send motion
+during this wait. Other release refusals fail immediately; the driver reason is
+included in the failure, and controllers remain stopped on failure or cancellation.
+
 On cancellation, exceptions, or arm faults, no handback/ROS activation is attempted.
 The driver lease remains held (`sdk_control_held: true` in ACT status) to prevent stale
 ROS targets from being sent. The same ACT node can reuse its lease on a later explicitly

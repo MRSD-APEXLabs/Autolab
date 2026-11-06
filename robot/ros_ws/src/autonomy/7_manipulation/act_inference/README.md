@@ -2,14 +2,19 @@
 
 This folder includes the runtime and checkpoint used by
 `apple_server_manip/scripts/place_on_opentrons_ft.sh`. No teleop checkout is needed.
-`models/xarm6_placing_act_ft_20261029/` contains `config.pkl`, `dataset_stats.pkl`, and
-`policy_best.ckpt` (step 2000, 67 demonstrations). The older
-`models/xarm_final_ckpt_placing/` checkpoint remains available by explicit path.
+`models/xarm6_placing_act_ft_all_20261105b/` contains `config.pkl`, `dataset_stats.pkl`, and
+`policy_best.ckpt` (11000 steps, all 103 finished demonstrations, no held-out split;
+near-seat frames weighted x4). Both the launcher and ROS node default to this checkpoint.
+The previous `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
+`models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
+`models/xarm_final_ckpt_placing/` checkpoints remain available by explicit path.
 
 The new policy uses wrist RGB, metric depth and validity, and the compensated external
 F/T wrench (N, Nm, SDK sensor coordinates). TCP pose is hidden from the model; measured
 TCP pose anchors its tool-relative action chunks. The model's recorded image size and
 capture-time anchoring are respected.
+The new checkpoint's bundled normalization statistics scale F/T in 1 N / 0.05 Nm
+units; keep those statistics together with its config and weights.
 
 ## ROS services
 
@@ -34,7 +39,7 @@ ros2 service call /act_inference/stop std_srvs/srv/Trigger
 
 OT-2 and shaker run the same ACT placing policy. `/act_inference/start` remains an alias
 for `/act_inference/start/ot2`. Before either policy executes, the arm's base-frame Euler yaw
-is aligned to **90 degrees** at **3 degrees/s**, holding its current XYZ, roll, and pitch.
+is aligned to **90 degrees** at **9 degrees/s**, holding its current XYZ, roll, and pitch.
 Alignment is skipped when yaw is already within 0.5 degrees. Measured arrival is confirmed
 before starting ACT; a stopped or failed alignment prevents the policy from starting.
 During yaw, measured XYZ drift beyond 2 mm stops the run. Initial report feedback is
@@ -50,7 +55,7 @@ completion, transient local: `running`, `result` (`done`, `stopped`, `failed`), 
 `sdk_control_held` shows whether this node still holds the driver's exclusive lease.
 After a stopped/failed run, ROS remains paused; faults are never automatically cleared.
 For OT-2/shaker, a successful policy result (settled or configured duration elapsed) is followed
-by gripper release and a 70 mm vertical retreat. `done` is published only after that sequence
+by gripper release and a 100 mm vertical retreat. `done` is published only after that sequence
 finishes; it is not an independent placement measurement. Contact detection or cancellation returns `stopped`;
 sensor, inference, camera, workspace, and robot errors return `failed`.
 
@@ -86,7 +91,7 @@ sustained contact. `/stop` also interrupts initial inference and any final-offse
 ## OT-2/shaker release and retreat
 
 After the ACT rollout returns `done`, the node opens the custom gripper (Modbus device
-0x08, setpoint 0 at 57600 baud), waits **4 seconds** for jaw travel, then moves **70 mm up
+0x08, setpoint 0 at 57600 baud), waits **4 seconds** for jaw travel, then moves **100 mm up
 along robot base-frame +Z**, holding XY and orientation. The lift uses the ACT translation
 speed (`translation_speed`, default **10 mm/s**), independently of base-placement speed.
 The gripper acknowledgement confirms command acceptance; this gripper has no measured
@@ -95,7 +100,8 @@ jaw-position feedback. A rejected command fails the run before lifting.
 The shared status remains running and the start services stay locked through opening and
 retreat. `/act_inference/stop` cancels the opening wait or lift. A stopped/failed policy
 skips release and retreat. Prediction-only runs only log the sequence and read the TCP;
-they send no gripper or motion commands. Base placement keeps its existing behavior.
+they send no gripper or motion commands. Base placement uses the same release sequence
+with a **60 mm** lift.
 
 ## Base placement
 
@@ -111,12 +117,15 @@ are converted to the rotation-vector representation used by the servo interface.
 Translation is limited to **15 mm/s**, rotation to **6 degrees/s**, with 50 Hz updates.
 It first moves to the target XY/orientation at **10 mm above the target Z** (50.484722 mm),
 confirms measured arrival, then descends vertically to the target Z (40.484722 mm).
-Both stages use the same slow motion limits and share the timeout. It does not open the
-gripper. It skips camera switching, camera reads, F/T setup, and
+Both stages use the same slow motion limits and share the timeout. After successful
+arrival, the node opens the gripper, waits **4 seconds**, and lifts **60 mm along base +Z**,
+holding XY and orientation. The lift uses `translation_speed` (default **10 mm/s**).
+It skips camera switching, camera reads, F/T setup, and
 policy inference. The shared node still preloads its ACT checkpoint at startup.
 
-Execution reports `done` after the target has reached the destination and measured feedback
-stays within 1 mm and 0.5 degrees for 0.3 s. Cancellation reports `stopped`; robot errors
+Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s.
+Execution reports `done` after placing, releasing, lifting, and driver handback succeed.
+Cancellation reports `stopped`; robot errors
 or the 180 s timeout report `failed`. The timeout is independent of ACT's `duration_sec`.
 With `execute:=false`, base placement reads the TCP, logs the destination, and returns
 `done` without enabling or commanding the arm.

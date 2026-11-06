@@ -11,7 +11,7 @@ Interface (same contract as visual_servoing's visual_servo/*):
 The checkpoint is loaded and warmed up once, at startup. Each OT-2/shaker run switches the camera hub to the
 Nano (`select_service`), reads its rectified image and depth from the zedx_nano_depth topics
 (camera_source ros), connects to the arm, runs `duration_sec` and closes the arm again.
-OT-2/shaker first align yaw to 90 degrees, then open the gripper and lift 70 mm after a
+OT-2/shaker first align yaw to 90 degrees, then open the gripper and lift 100 mm after a
 successful policy run. Base placement approaches 10 mm above its fixed
 XYZ/RPY pose before descending, without camera or policy inference. All targets share
 one runner, stop service, and status topic. With execute:=false the arm is only read.
@@ -41,7 +41,7 @@ from .ownership import DriverHandoff
 from .robot import XArm6Robot
 
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_20261029'
+DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_all_20261105b'
 
 
 class ActInferenceNode(Node):
@@ -127,7 +127,7 @@ class ActInferenceNode(Node):
             list_controllers=lambda check: self._call(self._list_controllers, ListControllers.Request(), check).controller,
             switch=self._switch_arm_controllers,
             acquire=lambda check: self._call(self._driver_clients['acquire'], Trigger.Request(), check, mutation=True).success,
-            release=lambda check: self._call(self._driver_clients['release'], Trigger.Request(), check, mutation=True).success,
+            release=lambda check: self._call(self._driver_clients['release'], Trigger.Request(), check, mutation=True),
             ready=self._ready_for_ros, controllers=arm_controllers, robot_ip=self.config.robot_ip)
         self.create_timer(0.5, self._publish_status)
         self.get_logger().info(
@@ -136,8 +136,12 @@ class ActInferenceNode(Node):
 
     # -- runs ----------------------------------------------------------------------------------------
     def _run(self, stop):
-        result = (self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
-                  if self.runner.status()['target'] == 'base' else self._run_policy(stop))
+        if self.runner.status()['target'] == 'base':
+            result = self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
+            if result == 'done' and not stop.is_set():
+                result = self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, lift_mm=60.0)
+        else:
+            result = self._run_policy(stop)
         if result == 'done' and not stop.is_set() and self.rollout.execute:
             self.handoff.finish(self.runner._check_abort)
         return 'stopped' if stop.is_set() else result

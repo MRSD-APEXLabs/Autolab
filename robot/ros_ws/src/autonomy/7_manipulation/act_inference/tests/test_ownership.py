@@ -105,6 +105,71 @@ def test_failed_or_stopped_handback_keeps_ros_blocked(failure):
     assert h.held and d.state['sdk_owned'] and not d.state['claimed']
 
 
+READINESS_REFUSAL = 'Arm must be fault-free in servo mode and ready before handback'
+
+
+def handback_clock(monkeypatch):
+    import act_inference.ownership as ownership
+    clock = [0.]
+    monkeypatch.setattr(ownership, 'time', SimpleNamespace(
+        monotonic=lambda: clock[0], sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds)))
+
+
+def test_delayed_driver_readiness_retries_release_without_reenabling(monkeypatch):
+    handback_clock(monkeypatch)
+    d = Driver()
+    h = d.handoff()
+    h.acquire(check)
+    attempts = []
+    def release(check):
+        attempts.append(True)
+        if len(attempts) < 4:
+            return SimpleNamespace(success=False, message=READINESS_REFUSAL)
+        return SimpleNamespace(success=d.release(check), message='released')
+    h.release_driver = release
+    h.finish(check)
+    assert len(attempts) == 4
+    assert d.calls.count('ready') == 1
+    assert not h.held and d.state['claimed']
+
+
+@pytest.mark.parametrize('reason', [READINESS_REFUSAL, 'SDK control was not held exclusively'])
+def test_driver_rejection_is_bounded_and_preserves_reason(monkeypatch, reason):
+    handback_clock(monkeypatch)
+    d = Driver()
+    h = d.handoff()
+    h.acquire(check)
+    attempts = []
+    def release(check):
+        attempts.append(True)
+        return SimpleNamespace(success=False, message=reason)
+    h.release_driver = release
+    with pytest.raises(RuntimeError, match=reason):
+        h.finish(check)
+    assert 1 <= len(attempts) <= 42
+    if reason != READINESS_REFUSAL:
+        assert len(attempts) == 1
+    assert h.held and d.state['sdk_owned'] and not d.state['claimed']
+    assert d.calls.count('ready') == 1
+
+
+def test_stop_during_driver_readiness_wait_does_not_restore_ros(monkeypatch):
+    handback_clock(monkeypatch)
+    d = Driver()
+    h = d.handoff()
+    h.acquire(check)
+    stopped = threading.Event()
+    def release(check):
+        stopped.set()
+        return SimpleNamespace(success=False, message=READINESS_REFUSAL)
+    def abort():
+        if stopped.is_set(): raise RunAborted()
+    h.release_driver = release
+    with pytest.raises(RunAborted):
+        h.finish(abort)
+    assert h.held and d.state['sdk_owned'] and not d.state['claimed']
+
+
 def test_initially_inactive_controller_is_not_activated():
     d = Driver()
     d.state['claimed'] = 0
@@ -149,7 +214,7 @@ def test_restore_only_after_all_motion_succeeds(result, target):
         return result
     node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None, base_placement=None,
                            runner=SimpleNamespace(status=lambda: dict(target=target), _check_abort=check),
-                           _run_policy=run, _base_move_fn=run,
+                           _run_policy=run, _base_move_fn=run, _post_placement_fn=run,
                            handoff=SimpleNamespace(finish=lambda check: calls.append('finish')))
     if result == 'error':
         with pytest.raises(RuntimeError): ActInferenceNode._run(node, threading.Event())
@@ -216,6 +281,8 @@ def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target)
     def motion(name):
         def run(*args, **kwargs):
             assert state['owned'] and not state['active']
+            if name == 'open_lift':
+                assert kwargs.get('lift_mm', 100.) == (60. if target == 'base' else 100.)
             events.append(name)
             return 'done'
         return run
@@ -251,7 +318,7 @@ def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target)
             assert time.monotonic() < deadline
             time.sleep(.01)
         assert node.runner.status()['result'] == 'done', node.runner.status()
-        expected_motion = ['base'] if target == 'base' else ['yaw', 'policy', 'open_lift']
+        expected_motion = ['base', 'open_lift'] if target == 'base' else ['yaw', 'policy', 'open_lift']
         assert events == ['stop_ros', 'acquire'] + expected_motion + ['ready', 'release', 'start_ros']
     finally:
         executor.shutdown()

@@ -136,6 +136,8 @@ def test_yaw_alignment_holds_position_roll_and_pitch(monkeypatch, yaw):
     assert calls == ['connect', 'enable', 'close']
     np.testing.assert_allclose(np.asarray(commands)[:, :3], np.tile(initial[:3], (len(commands), 1)), atol=1e-10)
     rpy = Rotation.from_rotvec(np.asarray(commands)[:, 3:]).as_euler('xyz', degrees=True)
+    first_step_deg = abs((rpy[0, 2] - yaw + 180.) % 360. - 180.)
+    assert first_step_deg == pytest.approx(9. / InferenceConfig().motion.loop_hz)
     np.testing.assert_allclose(rpy[:, :2], np.tile([-179., -1.5], (len(commands), 1)), atol=1e-8)
     assert rpy[-1, 2] == pytest.approx(90.)
 
