@@ -38,5 +38,8 @@
         <!-- Manipulation Executive -->
         <include file="$(find-pkg-share manipulation_executive)/launch/manipulation_executive.launch.xml" />
 
+        <!-- Underglow LEDs: reflects BT action state; idles quietly when no LED Nano is attached -->
+        <include file="$(find-pkg-share led_status)/launch/led_status.launch.xml" />
+
     </group>
 </launch>

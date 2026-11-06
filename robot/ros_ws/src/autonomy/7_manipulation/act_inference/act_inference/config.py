@@ -64,8 +64,27 @@ class RolloutConfig:
     query_interval: float = 0.2
     prediction_timeout: float = 0.75
     workspace_radius: float = 0.1
+    contact_gap: float = 0.001       # m the target may sit below the TCP before it counts as pressing; 0 disables
+    contact_hold: float = 0.3        # s of continuous pressing before the rollout stops
+    contact_max_lag: float = 0.1     # s; a target this far ahead of the TCP's own descent is still free motion
+    settle_motion: float = 0.002     # m of predicted travel over a whole chunk below which the policy has arrived; 0 disables
+    settle_queries: int = 3          # consecutive arrived chunks before the rollout ends
+    approach_speed: float = 0.003    # m/s once the policy predicts under approach_distance of travel; 0 keeps full speed
+    approach_distance: float = 0.012 # m
+    ensemble: int = 5                # near the goal, average the current waypoint of this many recent chunks; 1 disables
+    final_offset: tuple = (0.0, 0.0, 0.0)  # m, robot base frame: one straight move after the policy reports arrival
 
     def __post_init__(self):
-        for name in ('duration_sec', 'query_interval', 'prediction_timeout', 'workspace_radius'):
+        for name in ('duration_sec', 'query_interval', 'prediction_timeout', 'workspace_radius', 'contact_hold'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be finite and positive')
+        for name in ('contact_gap', 'contact_max_lag', 'settle_motion', 'approach_speed', 'approach_distance'):
+            if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
+                raise ValueError(f'{name} must be finite and non-negative')
+        if int(self.settle_queries) != self.settle_queries or self.settle_queries < 1:
+            raise ValueError('settle_queries must be a positive integer')
+        if int(self.ensemble) != self.ensemble or self.ensemble < 1:
+            raise ValueError('ensemble must be a positive integer')
+        offset = tuple(float(v) for v in self.final_offset)
+        if len(offset) != 3 or not all(math.isfinite(v) for v in offset) or math.hypot(*offset) > 0.01:
+            raise ValueError('final_offset must be three finite values within 10 mm')

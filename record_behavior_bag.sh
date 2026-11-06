@@ -22,20 +22,20 @@ ros2 bag record -o "${OUTPUT}" \
     "/${ROBOT}/behavior/lab_machine_command" \
     \
     "/${ROBOT}/behavior/pick_base_commanded_success" \
-    "/${ROBOT}/behavior/pick_up_commanded_success" \
+    "/${ROBOT}/behavior/pick_commanded_success" \
     "/${ROBOT}/behavior/place_commanded_success" \
     "/${ROBOT}/behavior/command_lab_machine_success" \
     "/${ROBOT}/behavior/ot2_liquid_handler_success" \
     "/${ROBOT}/behavior/custom_shaker_module_success" \
     \
     "/${ROBOT}/behavior/pick_base_object_active" \
-    "/${ROBOT}/behavior/pick_up_object_active" \
+    "/${ROBOT}/behavior/pick_object_active" \
     "/${ROBOT}/behavior/place_object_active" \
     "/${ROBOT}/behavior/execute_ot2_protocol_active" \
     "/${ROBOT}/behavior/execute_shaker_protocol_active" \
     \
     "/${ROBOT}/behavior/pick_base_object_status" \
-    "/${ROBOT}/behavior/pick_up_object_status" \
+    "/${ROBOT}/behavior/pick_object_status" \
     "/${ROBOT}/behavior/place_object_status" \
     "/${ROBOT}/behavior/execute_ot2_protocol_status" \
     "/${ROBOT}/behavior/execute_shaker_protocol_status" \

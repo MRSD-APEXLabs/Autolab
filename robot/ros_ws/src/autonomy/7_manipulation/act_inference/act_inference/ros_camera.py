@@ -11,15 +11,42 @@ the same machine as the camera node, or keep both clocks synchronized (chrony/PT
 """
 import threading
 import time
+import logging
 
 import cv2
 import numpy as np
 
-from zedx_nano_depth.sync import PairBuffer
-
 from .cameras import CameraFrame
 
 ENCODINGS = {'bgr8': (np.uint8, 3), 'rgb8': (np.uint8, 3), '16UC1': (np.uint16, 1), 'mono16': (np.uint16, 1)}
+
+
+class StaleCameraFrame(RuntimeError):
+    """A valid image/depth pair is too old to use; startup may wait for its replacement."""
+
+
+class ImageDepthPairs:
+    """Exact-stamp matching that preserves newer halves when messages arrive out of order."""
+
+    def __init__(self, keep=8):
+        self.keep = keep
+        self.pending = {}
+        self.last_stamp = -1
+        self.lock = threading.Lock()
+
+    def add(self, index, stamp, message):
+        with self.lock:
+            if stamp <= self.last_stamp:
+                return None
+            pair = self.pending.setdefault(stamp, [None, None])
+            pair[index] = message
+            while len(self.pending) > self.keep:
+                del self.pending[min(self.pending)]
+            if pair[0] is None or pair[1] is None:
+                return None
+            self.last_stamp = stamp
+            self.pending = {key: value for key, value in self.pending.items() if key > stamp}
+            return tuple(pair)
 
 
 def image_to_array(msg):
@@ -71,7 +98,10 @@ class RosDepthCamera:
         self.latency_s = self.interval_s = 0.0
         self.frames_received = 0
         self._last_received = None
-        self._pairs = PairBuffer()
+        self._pairs = ImageDepthPairs()
+        self.frames_dropped = 0
+        self._last_drop_warning = float('-inf')
+        self._last_publisher_check = float('-inf')
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._latest = None
@@ -100,23 +130,56 @@ class RosDepthCamera:
         self._node.create_subscription(CameraInfo, self._topic('depth/camera_info'), self._on_info, qos)
         self._thread = threading.Thread(target=self._spin, name='ros-camera', daemon=True)
         self._thread.start()
+        self._wait_until_ready()
+
+    def _wait_until_ready(self):
+        """Learn a bounded frame cadence before accepting startup data from a busy ROS pipeline."""
         deadline = time.monotonic() + self.start_timeout
-        while self._latest is None or self.calibration is None:
-            if self._error is not None:
-                raise RuntimeError(f'Camera receive failed: {self._error}') from self._error
+        last_stale = None
+        while not self._stop.is_set():
+            self.check_mode()
+            # A first frame can arrive >300 ms after capture while inference/camera
+            # workers start. With no second frame, interval_s is still zero and the
+            # normal cadence allowance cannot yet be estimated.
+            if self.frames_received >= 2 and self.calibration is not None:
+                try:
+                    self.latest()
+                except StaleCameraFrame as exc:
+                    last_stale = exc
+                else:
+                    logging.getLogger(__name__).info(
+                        'ROS camera ready: %d pairs, capture-to-receipt %.0f ms, bounded cadence %.0f ms',
+                        self.frames_received, self.latency_s * 1000, self.interval_s * 1000)
+                    self._check_publishers()
+                    return
             if time.monotonic() > deadline:
-                raise TimeoutError(f'No frames on {self._topic("depth/image_rect")} and {self._topic("left/image_rect_color")} '
-                                   f'within {self.start_timeout:.0f} s; is zedx_nano_depth running (same ROS_DOMAIN_ID)?')
-            time.sleep(0.01)
-        self.latest()
+                raise TimeoutError(f'No usable camera stream on {self._topic("depth/image_rect")} and '
+                                   f'{self._topic("left/image_rect_color")} within {self.start_timeout:g} s '
+                                   f'({self.frames_received} matched pairs; need at least 2 and calibration). '
+                                   f'Last stale frame: {last_stale}; check depth rate and ROS_DOMAIN_ID')
+            self._stop.wait(0.01)
+        raise RuntimeError('Camera stopped while waiting for startup frames')
 
     def _spin(self):
         try:
             while not self._stop.is_set() and self._context.ok():
                 self._executor.spin_once(timeout_sec=0.1)
+                if time.monotonic() - self._last_publisher_check >= .25:
+                    self._check_publishers()
+                    self._last_publisher_check = time.monotonic()
         except Exception as exc:
             if not self._stop.is_set():
                 self._error = exc
+
+    def _check_publishers(self):
+        if self._node is None:
+            return
+        for name in ('left/image_rect_color', 'depth/image_rect'):
+            topic = self._topic(name)
+            count = self._node.count_publishers(topic)
+            if count > 1:
+                raise RuntimeError(f'Multiple publishers ({count}) on {topic}; duplicate camera/depth '
+                                   'nodes can mix frames. Stop orphaned/duplicate camera launches.')
 
     def _on_info(self, msg):
         if self.calibration is None or self.calibration['resolution'] != [msg.width, msg.height]:
@@ -133,19 +196,35 @@ class RosDepthCamera:
         if self._error is not None:
             return
         try:
-            pair = self._pairs.add(index, stamp_ns(msg.header.stamp), msg)
+            stamp = stamp_ns(msg.header.stamp)
+            if stamp <= self._last_stamp:
+                # DDS queues/pair completion can deliver a duplicate or old half
+                # after newer data. Never replace the accepted frame or rebase its
+                # timestamp. A sustained reset still trips latest()'s age watchdog.
+                self.frames_dropped += 1
+                now = time.monotonic()
+                if now - self._last_drop_warning >= 5.:
+                    logging.getLogger(__name__).warning(
+                        'Dropping duplicate/out-of-order ROS camera message: lag %.3f s, dropped %d; '
+                        'newest accepted frame retained', (self._last_stamp - stamp) / 1e9, self.frames_dropped)
+                    self._last_drop_warning = now
+                return
+            pair = self._pairs.add(index, stamp, msg)
             if pair is None:
                 return
             received_ns, received_monotonic = time.time_ns(), time.monotonic()
             frame = frame_from_messages(pair[0], pair[1], received_ns, received_monotonic, self.frames_received)
-            if frame.header['t_image_ns'] <= self._last_stamp:
-                raise RuntimeError('Depth frames moved backwards in time')
+            previous_stamp = self._last_stamp
             self._last_stamp = frame.header['t_image_ns']
             with self._lock:
                 self._latest = frame
                 self.latency_s = received_monotonic - frame.captured_monotonic
                 if self._last_received is not None:   # capped, so one long gap does not relax the check for long
-                    self.interval_s = min(received_monotonic - self._last_received, self.max_age)
+                    # Queued ROS pairs can arrive back-to-back after slow startup.
+                    # Their capture stamps still describe the true camera cadence.
+                    capture_interval = (self._last_stamp - previous_stamp) / 1e9
+                    self.interval_s = min(max(received_monotonic - self._last_received, capture_interval),
+                                          self.max_age)
                 self._last_received = received_monotonic
                 self.frames_received += 1
         except Exception as exc:
@@ -168,8 +247,12 @@ class RosDepthCamera:
         # As in NanoStreamCamera: depth is computed after capture and a frame stays current until the
         # next one arrives, so allow two depth frame intervals on top of the transport budget.
         allowance = 2 * interval + 0.05
-        if age < -0.01 or age > self.max_age + allowance:
-            raise RuntimeError(f'Camera frame stale or clock mismatch: age={age:.3f}s (depth every {1000 * interval:.0f} ms)')
+        if age < -0.01:
+            raise RuntimeError(f'Camera frame clock mismatch: age={age:.3f}s')
+        if age > self.max_age + allowance:
+            raise StaleCameraFrame(f'Camera frame stale: age={age:.3f}s, limit={self.max_age + allowance:.3f}s '
+                                   f'(bounded depth interval {1000 * interval:.0f} ms, '
+                                   f'{self.frames_received} matched pairs)')
         return frame
 
     def stop(self):

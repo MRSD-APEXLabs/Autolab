@@ -3,13 +3,14 @@
 | folder | what it is | needs |
 |---|---|---|
 | `visual_servoing/` | ROS 2 package (`ament_python`). Wrist-camera (ZED X Nano) visual servo grasp of a well plate on the xArm6: YOLO oriented boxes located with the stereo depth, a position-based servo to a hover pose above the plate, then the descend / FSR close / lift sequence of the Xavier's Camera-Edge. Driven by `6_behavior/manipulation_executive` through `/visual_servo/{start,stop,status}` | `3_perception`'s `camera_perception` and `zedx_nano_depth` (as libraries), a running camera stack; pip: `xarm-python-sdk`, `websockets`, `ultralytics` (torch) |
-| `act_inference/` | **Not** a ROS package (`COLCON_IGNORE`): plain Python. Live ACT rollout on the xArm6 from the wrist camera, with a trimmed copy of the ACT/DETR model code | `3_perception`'s `zedx_nano_camera` and `zedx_nano_depth` (as libraries); torch, xArm SDK |
+| `act_inference/` | **Not** a colcon package (`COLCON_IGNORE`): plain Python. Live ACT rollout on the xArm6 from the wrist camera, with a trimmed copy of the ACT/DETR model code. `run_act_node.py` runs it as a ROS 2 node (`act_inference_node`), driven by `6_behavior/manipulation_executive` through `/act_inference/{start,stop,status}` for `place` and `place_base` | `3_perception`'s `zedx_nano_camera` and `zedx_nano_depth` (as libraries); torch, xArm SDK |
 
 Both folders are shared with the `apple_server_manip` repo (`2_manipulation/`), where they are developed and
 where the full documentation lives — `2_manipulation/README.md` has the mount model, the measurements behind it
-and what has and has not been verified on the arm. The copies are identical except that this one
-takes the YOLO weights from `camera_perception`'s package share, as the rest of this workspace does:
-`yolo_models_dir` defaults to `$(find-pkg-share camera_perception)/models/yolo`. Port changes both ways.
+and what has and has not been verified on the arm. This copy differs: it takes the YOLO weights from
+`camera_perception`'s package share, as the rest of this workspace does (`yolo_models_dir` defaults to
+`$(find-pkg-share camera_perception)/models/yolo`), and `act_inference` has the Autolab-only ROS node
+(`node.py`, `runner.py`, `run_act_node.py`) plus a stoppable `run_act_rollout`.
 
 ## Where this fits in the stack
 
@@ -19,10 +20,22 @@ takes the YOLO weights from `camera_perception`'s package share, as the rest of 
         ▼
 visual_servoing  ◄──/visual_servo/{start,stop,status}──  6_behavior/manipulation_executive
    /visual_servo/annotated_image                                   (behavior tree)
-        │
-        ▼  xArm SDK (mode 5 velocity), next to xarm_ros2
+        │                                                               │
+        │      act_inference_node  ◄──/act_inference/{start,stop,status}─┘
+        │             │
+        ▼             ▼  xArm SDK, next to xarm_ros2
       xArm6
 ```
+
+Placing runs the ACT placing policy where it used to wait at the placement pose:
+
+| command | sequence |
+|---|---|
+| `place` (`target_machine`) | select base ZED X → `plan_april_<id>` → ACT run → `plan_home_offset` |
+| `place_base` | `plan_home_offset` → ACT run → `plan_home_offset` |
+
+The executive starts the ACT step with `/act_inference/start/<target>`: `target_machine` (`ot2`, `shaker`) for `place`,
+`base` for `place_base`. It succeeds only for the results in the executive's `act_success_results` (`done` by default).
 
 `manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
 counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,
@@ -139,13 +152,38 @@ python run_act_inference.py --ckpt-dir models/xarm_final_ckpt_placing --camera-s
 reads the camera stack's topics and needs a sourced workspace. `--help` lists the rest (rate, speed limits,
 workspace radius, depth backend and model).
 
+## Run the ACT node
+
+`manipulation.launch.xml` starts it next to the servo (`with_act`, default true). Launch arguments: `act_execute`
+(true: the arm moves; false: prediction only, the run still ends `done`), `act_duration_sec` (10.0), `act_dir`
+(this folder inside the container, `/home/robot/AutoLab/robot/ros_ws/src/autonomy/7_manipulation/act_inference`).
+By hand:
+
+```bash
+cd src/autonomy/7_manipulation/act_inference
+python run_act_node.py --ros-args -p execute:=false                  # prediction only
+ros2 service call /act_inference/start std_srvs/srv/Trigger
+ros2 topic echo /act_inference/status
+```
+
+| name | type | |
+|---|---|---|
+| `/act_inference/start`, `/act_inference/stop` | `std_srvs/Trigger` | start a run (returns at once; `already running` while one is) / end it, the arm stops where it is |
+| `/act_inference/status` | `std_msgs/String` | JSON at 2 Hz and at the end of a run (transient local): `running`, `result` (`done` \| `stopped` \| `failed`), `message`, `phase` (`idle` \| `preparing` \| `running`), `started` |
+
+Parameters: `ckpt_dir` (`models/xarm_final_ckpt_placing`), `execute` (true), `duration_sec` (10.0),
+`enable_rotation` (false), `camera_source` (`ros`), `ros_namespace` (`/zedx_nano`), `robot_ip` (192.168.1.236),
+`select_service` (`/camera_hub/select_zedx_nano`, `''` skips the switch), `select_timeout` (20.0). The checkpoint
+is loaded and warmed up once at startup; each run switches the hub to the Nano, connects to the arm, runs
+`duration_sec` and closes the arm.
+
 ## Tests
 
 No hardware: a synthetic camera, a stub robot and a stand-in for `ros2 launch`.
 
 ```bash
 export ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # keep test traffic off the robot network
-python -m pytest visual_servoing/test act_inference/tests -q      # 85 tests
+python -m pytest visual_servoing/test act_inference/tests -q
 ```
 
 They need `rclpy`, `cv_bridge`, numpy, OpenCV, torch and the `3_perception` sources, which the tests find

@@ -33,10 +33,10 @@ TEST(MachineNames, JoinsConfiguredNames) {
   EXPECT_EQ(machine_names({}), "<none>");
 }
 
-// ── parse_servo_status ──────────────────────────────────────────────────────
+// ── parse_run_status ──────────────────────────────────────────────────────
 
-TEST(ParseServoStatus, ReadsRunningResultAndStart) {
-  auto s = parse_servo_status(
+TEST(ParseRunStatus, ReadsRunningResultAndStart) {
+  auto s = parse_run_status(
       R"({"phase": "aligning", "running": true, "result": null, "started": 12.5})");
   ASSERT_TRUE(s.has_value());
   EXPECT_TRUE(s->running);
@@ -45,8 +45,8 @@ TEST(ParseServoStatus, ReadsRunningResultAndStart) {
   EXPECT_EQ(s->phase, "aligning");
 }
 
-TEST(ParseServoStatus, FinishedRunCarriesResult) {
-  auto s = parse_servo_status(
+TEST(ParseRunStatus, FinishedRunCarriesResult) {
+  auto s = parse_run_status(
       R"({"phase": "idle", "running": false, "result": "grasped", "message": "ok", "started": 3.0})");
   ASSERT_TRUE(s.has_value());
   EXPECT_FALSE(s->running);
@@ -54,36 +54,45 @@ TEST(ParseServoStatus, FinishedRunCarriesResult) {
   EXPECT_EQ(s->message, "ok");
 }
 
-TEST(ParseServoStatus, MissingStartedIsMinusOne) {
-  auto s = parse_servo_status(R"({"phase": "idle", "running": false, "result": null})");
+TEST(ParseRunStatus, MissingStartedIsMinusOne) {
+  auto s = parse_run_status(R"({"phase": "idle", "running": false, "result": null})");
   ASSERT_TRUE(s.has_value());
   EXPECT_DOUBLE_EQ(s->started, -1.0);
 }
 
-TEST(ParseServoStatus, InvalidJsonIsNullopt) {
-  EXPECT_FALSE(parse_servo_status("not json").has_value());
-  EXPECT_FALSE(parse_servo_status("[1, 2]").has_value());
+TEST(ParseRunStatus, ReadsActDoneStatus) {
+  auto s = parse_run_status(
+      R"({"running": false, "result": "done", "message": "", "phase": "idle", "started": 3.0})");
+  ASSERT_TRUE(s.has_value());
+  EXPECT_FALSE(s->running);
+  EXPECT_EQ(s->result, "done");
+  EXPECT_DOUBLE_EQ(s->started, 3.0);
 }
 
-// ── ServoRunTracker ─────────────────────────────────────────────────────────
+TEST(ParseRunStatus, InvalidJsonIsNullopt) {
+  EXPECT_FALSE(parse_run_status("not json").has_value());
+  EXPECT_FALSE(parse_run_status("[1, 2]").has_value());
+}
 
-static ServoStatus st(bool running, const std::string& result, double started) {
-  ServoStatus s;
+// ── RunTracker ─────────────────────────────────────────────────────────
+
+static RunStatus st(bool running, const std::string& result, double started) {
+  RunStatus s;
   s.running = running;
   s.result  = result;
   s.started = started;
   return s;
 }
 
-TEST(ServoRunTracker, IgnoresStaleFinishedStatusBeforeRunStarts) {
+TEST(RunTracker, IgnoresStaleFinishedStatusBeforeRunStarts) {
   // transient-local status from the previous run arrives first
-  ServoRunTracker t;
+  RunTracker t;
   t.update(st(false, "grasped", 1.0));
   EXPECT_FALSE(t.finished());
 }
 
-TEST(ServoRunTracker, FinishesAfterRunningThenStopped) {
-  ServoRunTracker t;
+TEST(RunTracker, FinishesAfterRunningThenStopped) {
+  RunTracker t;
   t.update(st(false, "failed", 1.0));   // stale
   t.update(st(true, "", 5.0));
   EXPECT_FALSE(t.finished());
@@ -94,8 +103,8 @@ TEST(ServoRunTracker, FinishesAfterRunningThenStopped) {
   EXPECT_EQ(t.result(), "grasped");
 }
 
-TEST(ServoRunTracker, IgnoresFinishOfADifferentRun) {
-  ServoRunTracker t;
+TEST(RunTracker, IgnoresFinishOfADifferentRun) {
+  RunTracker t;
   t.update(st(true, "", 5.0));
   t.update(st(false, "failed", 4.0));   // older run's status, out of order
   EXPECT_FALSE(t.finished());
@@ -104,8 +113,8 @@ TEST(ServoRunTracker, IgnoresFinishOfADifferentRun) {
   EXPECT_EQ(t.result(), "aligned");
 }
 
-TEST(ServoRunTracker, StaysFinishedOnceFinished) {
-  ServoRunTracker t;
+TEST(RunTracker, StaysFinishedOnceFinished) {
+  RunTracker t;
   t.update(st(true, "", 5.0));
   t.update(st(false, "grasped", 5.0));
   t.update(st(true, "", 9.0));          // someone else started a new run
@@ -113,14 +122,44 @@ TEST(ServoRunTracker, StaysFinishedOnceFinished) {
   EXPECT_EQ(t.result(), "grasped");
 }
 
-// ── servo_succeeded ─────────────────────────────────────────────────────────
+// ── run_succeeded ─────────────────────────────────────────────────────────
 
-TEST(ServoSucceeded, OnlyConfiguredResultsSucceed) {
+TEST(RunSucceeded, OnlyConfiguredResultsSucceed) {
   const std::vector<std::string> ok{"grasped", "aligned", "stopped"};
-  EXPECT_TRUE(servo_succeeded("grasped", ok));
-  EXPECT_TRUE(servo_succeeded("aligned", ok));
-  EXPECT_TRUE(servo_succeeded("stopped", ok));
-  EXPECT_FALSE(servo_succeeded("failed", ok));
-  EXPECT_FALSE(servo_succeeded("aborted", ok));
-  EXPECT_FALSE(servo_succeeded("", ok));
+  EXPECT_TRUE(run_succeeded("grasped", ok));
+  EXPECT_TRUE(run_succeeded("aligned", ok));
+  EXPECT_TRUE(run_succeeded("stopped", ok));
+  EXPECT_FALSE(run_succeeded("failed", ok));
+  EXPECT_FALSE(run_succeeded("aborted", ok));
+  EXPECT_FALSE(run_succeeded("", ok));
+}
+
+TEST(RunSucceeded, ActDoneSucceedsOnlyWhenConfigured) {
+  EXPECT_TRUE(run_succeeded("done", {"done"}));
+  EXPECT_FALSE(run_succeeded("stopped", {"done"}));
+  EXPECT_FALSE(run_succeeded("failed", {"done"}));
+}
+
+// ── RunTracker with the previous run's start known ──────────────────────────
+
+TEST(RunTracker, NewRunThatEndsBeforeRunningIsSeenFinishes) {
+  // a run that fails within one status period never publishes running: true
+  RunTracker t(5.0);
+  t.update(st(false, "failed", 5.0));   // the previous run's final status
+  EXPECT_FALSE(t.finished());
+  t.update(st(false, "failed", 7.0));   // this run, already over
+  EXPECT_TRUE(t.finished());
+  EXPECT_EQ(t.result(), "failed");
+}
+
+TEST(RunTracker, KnownPreviousRunIsIgnoredEvenWhileRunning) {
+  RunTracker t(5.0);
+  t.update(st(true, "", 5.0));
+  t.update(st(false, "done", 5.0));
+  EXPECT_FALSE(t.finished());
+  t.update(st(true, "", 9.0));
+  EXPECT_FALSE(t.finished());
+  t.update(st(false, "done", 9.0));
+  EXPECT_TRUE(t.finished());
+  EXPECT_EQ(t.result(), "done");
 }

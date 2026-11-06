@@ -37,7 +37,7 @@
     servo:
       control_rate: 50.0              # Hz
       command_duration: 0.25          # s, the arm zeroes a velocity command it doesn't get renewed within this
-      level_at_start: true            # roll 180, pitch 0 first (Camera-Edge move_to_start_pose)
+      level_at_start: false            # roll 180, pitch 0 first (Camera-Edge move_to_start_pose)
       level_speed: 100.0              # mm/s
       hover_height: 0.08              # fingertips above the plate's top face when the servo ends
       grasp_offset: [0.0, 0.0]        # fingertip target shift: across the fingers, along the fingers
@@ -69,7 +69,7 @@
 
     grasp:
       enable: true                    # false: stop at the hover pose
-      depth: -0.0045                   # negative depth puts fingertips above the plate top: 3 mm above,
+      depth: -0.0045                  # negative depth puts fingertips above the plate top: 3 mm above,
                                       # 1 mm less descent than the previous -0.002 setting
       approach_speed: 30.0            # mm/s down to final_segment above the grasp height
       final_segment: 0.02
@@ -109,7 +109,7 @@
       # Wrist F/T sensor (README "F/T sensor"): zeroed at the hover, logged ("F/T ...") at every grasp decision.
       # use_ft lets it act: override the FSR nudge direction, stop the final descent on contact, decide the hold.
       # Measured 2026-10-26 from use_ft: false grasps (centred, and one pad first on each side).
-      use_ft: true
+      use_ft: false
       ft_samples: 5                   # median per decision, fsr_sample_interval apart
       ft_finger_axis: 1               # sensor force along the finger axis: 0 fx, 1 fy, 2 fz (FSR2 alone: Fy -2.7 N)
       ft_finger_sign: 1               # +1/-1 so that lateral > 0 when a + nudge (fsr_nudge_sign) unloads it

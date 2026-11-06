@@ -21,12 +21,12 @@ const DEFAULT_ROUTINE = JSON.stringify(
                   {action: 'return_tips'}
                   ]}
       },
-      { name: 'pick_up' },
+      { name: 'pick', target_machine: 'ot2' },
       { name: 'place', target_machine: 'shaker' },
       { name: 'shaker', pwm: 150 },
       { name: 'wait', 'time_s': 20 },
       { name: 'shaker', pwm: 0 },
-      { name: 'pick_up' },
+      { name: 'pick', target_machine: 'shaker' },
     ],
     max_retries: 3,
     robot: 'robot_1',

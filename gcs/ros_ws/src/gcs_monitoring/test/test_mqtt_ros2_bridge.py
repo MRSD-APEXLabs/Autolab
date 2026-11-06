@@ -60,7 +60,7 @@ def test_build_manipulation_command_maps_all_fields():
 
 
 def test_build_manipulation_command_defaults_target_machine_to_empty():
-    msg = _build_manipulation_command({'type': 'pick_up', 'object_type': 'well_plate'})
+    msg = _build_manipulation_command({'type': 'pick_base', 'object_type': 'well_plate'})
     assert msg.target_machine == ''
 
 

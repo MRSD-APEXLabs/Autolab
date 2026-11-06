@@ -46,17 +46,17 @@
 					(Armed)
 				[Disarm]
 		->
-			(Pick Up Commanded)
-			[Pick Up Object]
-		->
 			(Place Commanded)
 			[Place Object]
+		->
+			(Place Base Commanded)
+			[Place Base Object]
 		->
 			(Pick Base Commanded)
 			[Pick Base Object]
 		->
-			(Pick Wellplate Commanded)
-			[Pick Wellplate]
+			(Pick Commanded)
+			[Pick Object]
 		->
 			(Autonomously Explore Commanded)
 			->

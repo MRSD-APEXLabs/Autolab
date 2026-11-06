@@ -1,4 +1,7 @@
 import pickle
+import io
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -8,6 +11,45 @@ torch = pytest.importorskip('torch')
 from act_inference.act.image_inputs import encode_image  # noqa: E402
 from act_inference.rollout import load_policy, predict_chunk  # noqa: E402
 from inference_fakes import write_tiny_checkpoint  # noqa: E402
+
+
+def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
+    from act_inference.rollout import _CheckpointUnpickler
+    path = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_all_20261105b/dataset_stats.pkl'
+    data = path.read_bytes()
+    assert b'numpy._core' in data
+    expected = pickle.loads(data)
+    # NumPy 1.26.4 provides an alias; simulate deployments without that alias.
+    monkeypatch.setitem(sys.modules, 'numpy._core', None)
+    monkeypatch.setitem(sys.modules, 'numpy._core.multiarray', None)
+    with pytest.raises(ModuleNotFoundError):
+        pickle.loads(data)
+    actual = _CheckpointUnpickler(io.BytesIO(data)).load()
+    assert actual.keys() == expected.keys()
+    for key in expected:
+        np.testing.assert_array_equal(actual[key], expected[key])
+
+
+def test_bundled_ft_placing_checkpoint_without_hardware():
+    from act_inference.rollout import warm_up
+    directory = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_all_20261105b'
+    loaded = load_policy(directory)
+    policy, stats, device = loaded
+    assert policy.use_depth and policy.use_force_torque and policy.state_inputs == 'none'
+    assert policy.action_representation == 'relative_tcp_tool_v1'
+    warm_up(loaded)
+    rgb = np.zeros((600, 960, 3), np.uint8)
+    depth = np.full((600, 960), 500, np.uint16)
+    pose = np.array([.3, 0, .2, 3.1, 0, 0])
+    wrench = stats['force_torque_mean']
+    actions = predict_chunk(policy, stats, device, pose, rgb, 480, depth, wrench)
+    assert actions.shape[1] == 6 and np.isfinite(actions).all()
+    shifted_pose = pose.copy()
+    shifted_pose[:3] += [.1, .2, .3]
+    shifted = predict_chunk(policy, stats, device, shifted_pose, rgb, 480, depth, wrench)
+    np.testing.assert_allclose(shifted[:, :3], actions[:, :3] + [.1, .2, .3], atol=1e-7)
+    with pytest.raises(ValueError, match='requires a force/torque'):
+        predict_chunk(policy, stats, device, pose, rgb, 480, depth)
 
 
 @pytest.mark.parametrize('use_depth', [False, True])

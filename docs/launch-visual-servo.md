@@ -47,14 +47,16 @@ docker exec -it autolab-robot-l4t-1 bash -lc 'export ROS_LOCALHOST_ONLY=1 FASTRT
 docker exec -it autolab-robot-l4t-1 bash -lc "export ROS_LOCALHOST_ONLY=1 FASTRTPS_DEFAULT_PROFILES_FILE=/home/robot/AutoLab/common/ros_packages/fastdds_loopback.xml; ros2 topic echo /robot_1/behavior/manipulation_phase"
 docker exec autolab-robot-l4t-1 bash -lc "export ROS_LOCALHOST_ONLY=1 FASTRTPS_DEFAULT_PROFILES_FILE=/home/robot/AutoLab/common/ros_packages/fastdds_loopback.xml; ros2 topic pub --once /robot_1/behavior/manipulation_command behavior_tree_msgs/msg/ManipulationCommand '{type: pick_base, object_type: well_plate, target_machine: \"\"}'"
 # pick_base: PLANNING (plan_home_offset) → SERVOING → SUCCESS
-# pick_up / place / pick_wellplate: SELECTING_CAMERA (ZED X) → PLANNING → … → PLANNING_SAFE
+# pick: SELECTING_CAMERA (ZED X) → PLANNING → SERVOING → PLANNING_SAFE
+# place: SELECTING_CAMERA (ZED X) → PLANNING → RUNNING_ACT → PLANNING_SAFE
+# place_base: PLANNING (plan_home_offset) → RUNNING_ACT → PLANNING_SAFE
 ```
 
 The servo step succeeds only when `/visual_servo/status` ends with a result in the executive's
 `servo_success_results` (`grasped`, `aligned`, and `stopped` for a dry run). The executive and the servo node
 must share a ROS domain; with `ROS_LOCALHOST_ONLY=1` that means the same machine.
 
-Which AprilTag each lab machine uses (`place` / `pick_wellplate` → `plan_april_<id>`) is set in
+Which AprilTag each lab machine uses (`place` / `pick` → `plan_april_<id>`) is set in
 `robot/ros_ws/src/autonomy/6_behavior/manipulation_executive/config/manipulation_executive.yaml` (`april_tags`).
 
 ## 6. Afterwards

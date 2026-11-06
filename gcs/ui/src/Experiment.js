@@ -12,6 +12,7 @@ const RESUME_TOPIC = "cmd/routine_executor/resume";
 // MQTT topic = "ros2" + ros2_path  (e.g. /behavior/manipulation_phase → ros2/behavior/manipulation_phase)
 const STEP_DISPLAY_TOPICS = {
   pick_base: ["/behavior/manipulation_phase", "/planning_status"],
+  place_base: ["/behavior/manipulation_phase", "/planning_status"],
 };
 
 const ALL_DISPLAY_MQTT_TOPICS = [
