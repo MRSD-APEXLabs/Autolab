@@ -657,3 +657,25 @@ def test_probe_needs_the_ft_sensor():
     status, arm = probe_run(lambda arm: None)
     assert status['result'] == 'failed' and 'F/T' in status['message'], status
     assert arm.gripper_values == [0, 550]                             # never closed on the plate
+
+
+def test_probe_waits_for_the_gripper_before_moving_the_arm():
+    status, arm = probe_run(probe_ft())
+    assert status['result'] == 'grasped', status
+    events = arm.events
+    close = next(i for i, e in enumerate(events) if e[1:] == ('gripper', 550))
+    reopen = next(i for i, e in enumerate(events) if i > close and e[1:] == ('gripper', 0))
+    after_close = next(e for e in events[close + 1:] if e[1] == 'move')
+    after_open = next(e for e in events[reopen + 1:] if e[1] == 'move')
+    assert after_close[0] - events[close][0] >= 550 / 80.0 + 1.0 - 1e-6        # 0 -> 550 at 80 units/s + 1 s
+    assert after_open[0] - events[reopen][0] >= 550 / 80.0 + 1.0 - 1e-6
+    assert status['probe_gripper_wait_s'] == pytest.approx(550 / 80.0 + 1.0, abs=0.01)
+
+
+def test_probe_retry_waits_for_the_gripper_to_open():
+    touches = lambda arm: arm.gripper_values.count(550) >= 2
+    status, arm = probe_run(probe_ft(touches=touches), max_retries=1)
+    assert (status['result'], status['attempt']) == ('grasped', 2), status
+    closes = [i for i, e in enumerate(arm.events) if e[1:] == ('gripper', 550)]
+    retry_open = next(e for e in arm.events[closes[0] + 1:] if e[1:] == ('gripper', 0))
+    assert arm.events[closes[1]][0] - retry_open[0] >= 550 / 80.0 + 1.0 - 1e-6

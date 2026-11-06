@@ -81,6 +81,10 @@
       # Needs the F/T sensor (whatever gripper.use_ft says); replaces depth while on.
       probe_contact: false
       probe_close: 550                # gripper value of the closed-finger probe
+      # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin before the arm
+      # moves (550 units: 7.9 s). Time a 0 -> 550 close on the bench and set rate from it.
+      probe_gripper_rate: 80.0        # gripper units/s
+      probe_gripper_margin: 1.0       # s
       probe_lift: 0.005               # m above the touch while the gripper opens
       probe_depth: 0.010              # m below the expected plate top before giving up
       plate_height: 0.01435           # m, SBS plate height

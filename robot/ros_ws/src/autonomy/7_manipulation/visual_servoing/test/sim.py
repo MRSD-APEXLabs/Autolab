@@ -56,6 +56,7 @@ class FakeArm:
         self._moving = None       # (start pose, target, speed m/s, start time) of a wait=False move
         self.on_pose = None
         self.modes, self.moves, self.gripper_values, self.velocities = [], [], [], []
+        self.events = []          # (time, 'move' | 'gripper', speed | value) in command order
         self.connects = 0
         self._command = (np.zeros(3), 0.0, 0.0)   # v_tcp, wz, expiry
         self._last = clock.time()
@@ -141,6 +142,7 @@ class FakeArm:
         self._integrate()
         target = np.asarray(base_T_flange, dtype=float).copy()
         self.moves.append((target.copy(), float(speed_mm_s)))
+        self.events.append((self.clock.time(), 'move', float(speed_mm_s)))
         if wait:
             self._moving = None
             self.pose = target
@@ -175,6 +177,7 @@ class FakeArm:
     def gripper_set(self, value, settle=0.5):
         self._motion()
         self.gripper_values.append(int(np.clip(int(value), 0, 1000)))
+        self.events.append((self.clock.time(), 'gripper', self.gripper_values[-1]))
         return True
 
     def gripper_open(self):

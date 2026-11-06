@@ -41,6 +41,8 @@ def build_config(param):
         final_speed=float(param('grasp.final_speed', base.final_speed)),
         probe_contact=bool(param('grasp.probe_contact', base.probe_contact)),
         probe_close=int(param('grasp.probe_close', base.probe_close)),
+        probe_gripper_rate=float(param('grasp.probe_gripper_rate', base.probe_gripper_rate)),
+        probe_gripper_margin=float(param('grasp.probe_gripper_margin', base.probe_gripper_margin)),
         probe_lift=float(param('grasp.probe_lift', base.probe_lift)),
         probe_depth=float(param('grasp.probe_depth', base.probe_depth)),
         plate_height=float(param('grasp.plate_height', base.plate_height)),
@@ -123,6 +125,9 @@ def build_config(param):
         raise ValueError('grasp.probe_close must be a gripper value 0..1000')
     if not all(np.isfinite(v) and v > 0 for v in (config.probe_lift, config.probe_depth, config.plate_height)):
         raise ValueError('grasp.probe_lift, grasp.probe_depth and grasp.plate_height must be > 0')
+    if not (np.isfinite(config.probe_gripper_rate) and config.probe_gripper_rate > 0
+            and np.isfinite(config.probe_gripper_margin) and config.probe_gripper_margin >= 0):
+        raise ValueError('grasp.probe_gripper_rate must be > 0 and grasp.probe_gripper_margin >= 0')
     return config
 
 
