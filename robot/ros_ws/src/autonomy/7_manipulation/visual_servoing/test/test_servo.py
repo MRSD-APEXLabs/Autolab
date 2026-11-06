@@ -591,7 +591,7 @@ def test_tracking_stops_at_its_slide_limit():
 
 
 # -- probe contact: find the plate top by touch ------------------------------------------------------
-PLATE_H = 0.01435
+GRIP_DEPTH = 0.0075
 
 
 def probe_ft(top=CENTER[2], fz=-1.5, touches=lambda arm: True, spike=None):
@@ -622,7 +622,7 @@ def test_probe_touches_the_plate_top_then_opens_and_lowers_a_quarter_plate(top):
     assert status['probe_contact'] is True
     contact = status['probe_contact_tip_mm'][2]
     assert contact == pytest.approx(top * 1000, abs=0.5)
-    assert status['grasp_tip_mm'][2] == pytest.approx(contact - PLATE_H / 4 * 1000, abs=0.05)
+    assert status['grasp_tip_mm'][2] == pytest.approx(contact - GRIP_DEPTH * 1000, abs=0.05)
     level, above, probe, up, grasp = arm.moves[:5]
     assert tip(above[0])[2] == pytest.approx(CENTER[2] + 0.02) and above[1] == 30.0
     assert probe[1] == 8.0 and tip(probe[0])[2] == pytest.approx(CENTER[2] - 0.010)

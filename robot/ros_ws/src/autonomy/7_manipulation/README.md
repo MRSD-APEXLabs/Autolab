@@ -127,7 +127,7 @@ is then unused). After the F/T zero and FSR tare at the hover:
    pre-probe median by more than `gripper.ft_contact_n` for `gripper.ft_contact_count` reads in a row, and halt.
    The plate-top height is the fingertip height at the *first* of those reads (the halt lands slightly deeper);
 3. lift `grasp.probe_lift` (5 mm), open the gripper fully, wait `close_settle`, and re-zero the F/T sensor;
-4. lower to `grasp.plate_height / 4` below the touch and run the usual closing routine.
+4. lower to `grasp.probe_grip_depth` (7.5 mm, tuned on the bench) below the touch and run the usual closing routine.
 
 No touch within `grasp.probe_depth` below the camera's plate top (or `min_tip_z`) fails the attempt:
 `max_retries` lifts, opens, re-aligns and probes again. The probe needs the F/T sensor whatever

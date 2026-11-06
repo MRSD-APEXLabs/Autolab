@@ -96,7 +96,7 @@ class ServoConfig:
     final_speed: float = 8.0            # mm/s
     # probe_contact: find the plate top by touch instead of trusting the camera height. Close the gripper to
     # probe_close, descend from final_segment above the plate top until the wrist Fz rises (ft_contact_n for
-    # ft_contact_count reads), lift probe_lift, open, re-zero the F/T, lower to plate_height / 4 below the touch,
+    # ft_contact_count reads), lift probe_lift, open, re-zero the F/T, lower to probe_grip_depth below the touch,
     # then close as usual. No touch within probe_depth below the expected top: the attempt fails (retry).
     probe_contact: bool = False
     probe_close: int = 550              # gripper value for the closed-finger probe
@@ -104,7 +104,7 @@ class ServoConfig:
     probe_gripper_margin: float = 1.0   # waits travel / rate + margin s (350 units needed > 1.5 s, 4 s was enough)
     probe_lift: float = 0.005           # m above the touch while the gripper opens
     probe_depth: float = 0.010          # m below the expected plate top the probe may go (also min_tip_z)
-    plate_height: float = 0.01435       # m, SBS plate height; the fingertips close plate_height / 4 below its top
+    probe_grip_depth: float = 0.0075    # m below the touched plate top the fingertips close (bench: old plate_height 0.03 / 4)
     lift: float = 0.10                  # m after closing
     lift_speed: float = 50.0            # mm/s
     max_retries: int = 0                # one attempt per start command; retries explicitly opt in
@@ -799,7 +799,7 @@ class ServoRunner:
 
     def _probe(self, top, yaw):
         """probe_contact: touch the plate top (`top`, the fingertip point the camera expects) with the closed
-        fingers, then place the open fingertips plate_height / 4 below the touch. Returns that fingertip grasp
+        fingers, then place the open fingertips probe_grip_depth below the touch. Returns that fingertip grasp
         target, or None when nothing was touched within probe_depth (the attempt fails, the run may retry)."""
         cfg = self.config
         if not self._ft_ok:
@@ -836,7 +836,7 @@ class ServoRunner:
         except ArmError as exc:
             raise RunFailed(f'F/T re-zero after the probe failed: {exc}')
         grasp_tip = top.copy()
-        grasp_tip[2] = contact_z - cfg.plate_height / 4.0
+        grasp_tip[2] = contact_z - cfg.probe_grip_depth
         self._limit(grasp_tip)
         self._set(phase='descending', grasp_tip_mm=[round(v * 1000, 1) for v in grasp_tip])
         self._check_abort()
