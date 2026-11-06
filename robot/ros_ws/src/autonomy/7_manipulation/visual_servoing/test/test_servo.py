@@ -588,3 +588,72 @@ def test_tracking_stops_at_its_slide_limit():
     status, arm = run(fsr=fsr, ft=ft, gripper=GripperConfig(fsr_samples=1, ft_samples=1, nudge_speed=30.0,
                                                             use_ft=True, ft_lateral_deadband_n=0.5, max_close=500))
     assert status['result'] == 'failed' and 'ft_track_max_mm' in status['message'], status
+
+
+# -- probe contact: find the plate top by touch ------------------------------------------------------
+PLATE_H = 0.01435
+
+
+def probe_ft(top=CENTER[2], fz=-1.5, touches=lambda arm: True, spike=None):
+    """+8 N Fz while the closed (550) fingertips are below `top` and `touches(arm)`; `fz` once lifted.
+    `spike(arm)` True: a one-read noise spike."""
+    def ft(arm):
+        if arm.moves and arm.moves[-1][1] == 50.0:
+            return [0.0, 0.0, fz, 0.0, 0.0, 0.0]
+        closed = arm.gripper_values and arm.gripper_values[-1] == 550
+        if closed and spike is not None and spike(arm):
+            return [0.0, 0.0, 8.0, 0.0, 0.0, 0.0]
+        pressing = closed and touches(arm) and tip(arm.pose)[2] < top
+        return [0.0, 0.0, 8.0 if pressing else 0.0, 0.0, 0.0, 0.0]
+    return ft
+
+
+def probe_run(ft, **config):
+    gripper = config.pop('gripper', GripperConfig(**dict(TWO_FINGERS, ft_samples=1)))
+    return run(fsr=held_from(130), ft=ft, gripper=gripper, probe_contact=True, **config)
+
+
+@pytest.mark.parametrize('top', [CENTER[2], CENTER[2] - 0.004])
+def test_probe_touches_the_plate_top_then_opens_and_lowers_a_quarter_plate(top):
+    status, arm = probe_run(probe_ft(top=top))
+    assert (status['result'], status['attempt']) == ('grasped', 1), status
+    assert arm.gripper_values[:4] == [0, 550, 0, 50]                  # open, probe, reopen, close routine
+    assert arm.halts == 1 and arm.ft_zeroes == 2                      # zero at the hover, again after reopening
+    assert status['probe_contact'] is True
+    contact = status['probe_contact_tip_mm'][2]
+    assert contact == pytest.approx(top * 1000, abs=0.5)
+    assert status['grasp_tip_mm'][2] == pytest.approx(contact - PLATE_H / 4 * 1000, abs=0.05)
+    level, above, probe, up, grasp = arm.moves[:5]
+    assert tip(above[0])[2] == pytest.approx(CENTER[2] + 0.02) and above[1] == 30.0
+    assert probe[1] == 8.0 and tip(probe[0])[2] == pytest.approx(CENTER[2] - 0.010)
+    assert tip(up[0])[2] * 1000 == pytest.approx(contact + 5.0, abs=0.05)
+    assert np.allclose(tip(grasp[0])[:2], tip(above[0])[:2])           # straight down over the plate
+
+
+def test_probe_ignores_a_single_fz_spike():
+    reads = []
+    spike = lambda arm: (reads.append(1) or len(reads)) == 3          # third read during the probe only
+    status, arm = probe_run(probe_ft(spike=spike))
+    assert status['result'] == 'grasped', status
+    assert status['probe_contact_tip_mm'][2] == pytest.approx(CENTER[2] * 1000, abs=0.5)
+
+
+def test_probe_without_contact_lifts_reopens_and_probes_again():
+    touches = lambda arm: arm.gripper_values.count(550) >= 2          # nothing there on the first attempt
+    status, arm = probe_run(probe_ft(touches=touches), max_retries=1)
+    assert (status['result'], status['attempt']) == ('grasped', 2), status
+    assert arm.gripper_values[:5] == [0, 550, 0, 550, 0]               # probe, retry open, probe, reopen
+    assert arm.modes.count(5) == 2                                     # aligned twice
+
+
+def test_probe_without_contact_on_every_attempt_fails_without_closing():
+    status, arm = probe_run(probe_ft(touches=lambda arm: False), max_retries=1)
+    assert (status['result'], status['attempt']) == ('failed', 2), status
+    assert status['message'] == 'no grasp after 2 attempts' and status['probe_contact'] is False
+    assert set(arm.gripper_values) == {0, 550} and arm.halts == 0
+
+
+def test_probe_needs_the_ft_sensor():
+    status, arm = probe_run(lambda arm: None)
+    assert status['result'] == 'failed' and 'F/T' in status['message'], status
+    assert arm.gripper_values == [0, 550]                             # never closed on the plate

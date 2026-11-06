@@ -39,6 +39,11 @@ def build_config(param):
         approach_speed=float(param('grasp.approach_speed', base.approach_speed)),
         final_segment=float(param('grasp.final_segment', base.final_segment)),
         final_speed=float(param('grasp.final_speed', base.final_speed)),
+        probe_contact=bool(param('grasp.probe_contact', base.probe_contact)),
+        probe_close=int(param('grasp.probe_close', base.probe_close)),
+        probe_lift=float(param('grasp.probe_lift', base.probe_lift)),
+        probe_depth=float(param('grasp.probe_depth', base.probe_depth)),
+        plate_height=float(param('grasp.plate_height', base.plate_height)),
         lift=float(param('grasp.lift', base.lift)),
         lift_speed=float(param('grasp.lift_speed', base.lift_speed)),
         max_retries=int(param('grasp.max_retries', base.max_retries)),
@@ -81,6 +86,7 @@ def build_config(param):
             ft_track_gain_mm_per_n=float(param('gripper.ft_track_gain_mm_per_n', grip.ft_track_gain_mm_per_n)),
             ft_track_max_mm=float(param('gripper.ft_track_max_mm', grip.ft_track_max_mm)),
             ft_contact_n=float(param('gripper.ft_contact_n', grip.ft_contact_n)),
+            ft_contact_count=int(param('gripper.ft_contact_count', grip.ft_contact_count)),
             ft_contact_backoff=float(param('gripper.ft_contact_backoff', grip.ft_contact_backoff)),
             ft_hold_min_n=float(param('gripper.ft_hold_min_n', grip.ft_hold_min_n))),
     )
@@ -111,6 +117,12 @@ def build_config(param):
                  grip.ft_track_mm_per_step, grip.ft_track_force_n, grip.ft_track_gain_mm_per_n, grip.ft_track_max_mm)
     if not all(np.isfinite(v) and v >= 0 for v in ft_values):
         raise ValueError('gripper F/T values (ft_lateral_deadband_n .. ft_track_max_mm) must be >= 0')
+    if grip.ft_contact_count < 1:
+        raise ValueError('gripper.ft_contact_count must be >= 1')
+    if not 0 <= config.probe_close <= 1000:
+        raise ValueError('grasp.probe_close must be a gripper value 0..1000')
+    if not all(np.isfinite(v) and v > 0 for v in (config.probe_lift, config.probe_depth, config.plate_height)):
+        raise ValueError('grasp.probe_lift, grasp.probe_depth and grasp.plate_height must be > 0')
     return config
 
 

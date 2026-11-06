@@ -117,6 +117,24 @@ Roll it out in two stages:
    load and unload at every step until the 5 mm nudge limit failed the run. F/T also stops the final descent when `|Fz| > ft_contact_n` and backs off `ft_contact_backoff`, and the
    `after lift` Fz change decides whether the grasp held. A failed sensor read fails the run.
 
+### Probe contact
+
+`grasp.probe_contact: true` finds the plate top by touch instead of trusting the camera's height (`grasp.depth`
+is then unused). After the F/T zero and FSR tare at the hover:
+
+1. close the gripper to `grasp.probe_close` (550) so the closed fingers form a probe;
+2. move to `final_segment` above the camera's plate top, then descend at `final_speed` until Fz departs from its
+   pre-probe median by more than `gripper.ft_contact_n` for `gripper.ft_contact_count` reads in a row, and halt.
+   The plate-top height is the fingertip height at the *first* of those reads (the halt lands slightly deeper);
+3. lift `grasp.probe_lift` (5 mm), open the gripper fully, wait `close_settle`, and re-zero the F/T sensor;
+4. lower to `grasp.plate_height / 4` below the touch and run the usual closing routine.
+
+No touch within `grasp.probe_depth` below the camera's plate top (or `min_tip_z`) fails the attempt:
+`max_retries` lifts, opens, re-aligns and probes again. The probe needs the F/T sensor whatever
+`gripper.use_ft` says. Status fields: `probe_contact`, `probe_contact_tip_mm`, `probe_expected_top_mm`,
+`probe_dfz_n`. The halt latency (`set_state(4)` + 0.1 s) at 8 mm/s pushes the fingers ~1 mm past the first
+contact; slow `final_speed` if that shifts the plate.
+
 ### Safety
 
 - `execute:=false` is the default; the dry-run arm object refuses every motion call.
