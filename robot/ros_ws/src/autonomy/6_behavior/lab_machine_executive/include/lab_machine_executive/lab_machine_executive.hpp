@@ -48,6 +48,7 @@ class LabMachineExecutive : public rclcpp::Node {
     std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
+    std::string anomaly_base_url_; // clog-detection service; empty disables recording
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::LabMachineCommand>::SharedPtr cmd_sub_;
