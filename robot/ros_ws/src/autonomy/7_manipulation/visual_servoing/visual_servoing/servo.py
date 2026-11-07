@@ -64,6 +64,10 @@ class GripperConfig:
     ft_contact_count: int = 3         # probe_contact: consecutive reads above ft_contact_n that count as a touch
     ft_contact_backoff: float = 0.002  # m back up after a descent contact
     ft_hold_min_n: float = 0.4        # Fz change over the lift that counts as holding the plate
+    # probe_tilt: the wrist torque across the finger line says which closed fingertip touched alone
+    ft_tilt_torque_axis: int = 0      # sensor torque component (0 tx, 1 ty, 2 tz): tx for fingers along flange y
+    ft_tilt_torque_sign: int = 1      # t = sign * dT[axis] is < 0 while the fingertip on the + finger-axis side touches
+    ft_tilt_deadband_nm: float = 0.01 # |t| below this: both fingertips touch
 
 
 @dataclass
@@ -105,6 +109,19 @@ class ServoConfig:
     probe_lift: float = 0.005           # m above the touch while the gripper opens
     probe_depth: float = 0.010          # m below the expected plate top the probe may go (also min_tip_z)
     probe_grip_depth: float = 0.0075    # m below the touched plate top the fingertips close (bench: old plate_height 0.03 / 4)
+    # probe_tilt (with probe_contact): the table leans, so one closed fingertip lands first. Tilt and touch again until
+    # both touch: after each touch the wrist torque (gripper.ft_tilt_*) names the fingertip that touched alone; lift
+    # probe_tilt_lift above that touch, tilt probe_tilt_step_deg about the fingertip centre to lower the other one,
+    # re-read the in-air F/T baseline (the tilt moves the gripper's weight onto the torque) and touch again. A torque
+    # sign flip halves the step. Balanced, or a flip below probe_tilt_min_step_deg: the grasp keeps that tilt (the
+    # lift too). probe_tilt_max_deg, probe_tilt_max_touches or no touch: the level grasp from the first touch.
+    probe_tilt: bool = False
+    probe_tilt_step_deg: float = 2.0
+    probe_tilt_min_step_deg: float = 0.25
+    probe_tilt_max_deg: float = 15.0    # from straight down
+    probe_tilt_max_touches: int = 15
+    probe_tilt_lift: float = 0.002      # m above the last touch for each tilt step
+    probe_tilt_settle: float = 0.3      # s still before each F/T read of the tilt
     lift: float = 0.10                  # m after closing
     lift_speed: float = 50.0            # mm/s
     max_retries: int = 0                # one attempt per start command; retries explicitly opt in
@@ -139,6 +156,7 @@ class ServoRunner:
         self._thread = None
         self._on_done = None
         self._ft_ok = False         # the F/T sensor was zeroed for this grasp and still reads
+        self._grasp_tilt = 0.0      # rad about the axis across the fingers (probe_tilt) of the current grasp
         self._status = {'phase': 'idle', 'running': False, 'result': None, 'message': '', 'dry_run': config.dry_run}
 
     # -- API -----------------------------------------------------------------------------------------
@@ -424,6 +442,7 @@ class ServoRunner:
         """Descend onto the plate, close on the FSRs, lift. True if the FSRs (with use_ft, the wrist Fz) say the
         plate is held. The F/T sensor is logged at every decision; with use_ft it also steers the nudges."""
         cfg, gcfg = self.config, self.config.gripper
+        self._grasp_tilt = 0.0
         self._set(phase='descending')
         self.arm.stop()
         self.arm.position_mode()
@@ -477,7 +496,7 @@ class ServoRunner:
                 break
             finger, lateral = self._ft_balance(self._unbalanced_finger(rise), rise)
             if finger is not None and gcfg.use_ft and lateral is not None:
-                value, nudge_total = self._track_close(finger, lateral, value, yaw, base, nudge_total)
+                value, nudge_total = self._track_close(finger, lateral, value, base, nudge_total)
                 continue
             if finger is not None:
                 # A switch to the opposite pad means the previous nudge unloaded
@@ -503,7 +522,7 @@ class ServoRunner:
                 if abs(nudge_total) > gcfg.max_nudge_mm or nudges > gcfg.max_nudges:
                     raise RunFailed('FSR contact did not balance within the gripper nudge limits: '
                                     f'pressure={rise}, gripper={value}, nudges={nudges - 1}')
-                self._nudge(signed_mm, yaw)
+                self._nudge(signed_mm)
                 last_nudged_finger = finger
                 self._set(nudge_fsr=finger + 1, nudge_mm=signed_mm, nudge_total_mm=nudge_total, nudges=nudges)
                 self._wait(1.0 / gcfg.rate)
@@ -726,7 +745,7 @@ class ServoRunner:
         self._ft_log('balance', wrench, decision, pressure)
         return (ft_finger if cfg.use_ft else finger), lateral
 
-    def _track_close(self, finger, lateral, value, yaw, base, walked):
+    def _track_close(self, finger, lateral, value, base, walked):
         """One pad (`finger`) touches. Each step slides the arm towards the other pad and closes the gripper one
         step, so the touching pad stays on the plate while the other comes in at twice the jaw speed. The slide is
         one step's jaw travel, more while the touching pad pushes harder than ft_track_force_n, less once it lets
@@ -743,7 +762,7 @@ class ServoRunner:
                 raise RunFailed(f'F/T tracking would slide the arm more than ft_track_max_mm '
                                 f'{cfg.ft_track_max_mm:.1f} mm: walked {walked:+.1f} mm, gripper {value}')
             if slide > 0.0:
-                self._nudge(sign * slide, yaw)
+                self._nudge(sign * slide)
                 walked += sign * slide
             value = min(value + cfg.step, cfg.max_close)
             if not self.arm.gripper_set(value):
@@ -799,12 +818,13 @@ class ServoRunner:
 
     def _probe(self, top, yaw):
         """probe_contact: touch the plate top (`top`, the fingertip point the camera expects) with the closed
-        fingers, then place the open fingertips probe_grip_depth below the touch. Returns that fingertip grasp
+        fingers, then place the open fingertips probe_grip_depth below the touch. With probe_tilt, first tilt until
+        both fingertips touch and keep that tilt for the grasp (self._grasp_tilt). Returns the fingertip grasp
         target, or None when nothing was touched within probe_depth (the attempt fails, the run may retry)."""
         cfg = self.config
         if not self._ft_ok:
             raise RunFailed('probe_contact needs the wrist F/T sensor')
-        flange = lambda tip: flange_for_tip(tip, yaw, self.mount.flange_T_tip)
+        flange = self._probe_flange(yaw)
         self._set(phase='probing', probe_contact=None)
         self._probe_gripper(cfg.probe_close, 'close')
         self.arm.move_flange(flange(top + np.array([0.0, 0.0, cfg.final_segment])), cfg.approach_speed)
@@ -822,14 +842,23 @@ class ServoRunner:
             return None
         touch_pose, wrench = touch
         contact_z = float(self._tip(touch_pose)[2])
-        self._set(probe_contact=True, probe_contact_tip_mm=[round(v * 1000, 1) for v in self._tip(touch_pose)],
+        contact_mm = [round(v * 1000, 1) for v in self._tip(touch_pose)]
+        self._set(probe_contact=True, probe_contact_tip_mm=contact_mm, probe_first_contact_tip_mm=contact_mm,
                   probe_expected_top_mm=round(top[2] * 1000, 1),
                   probe_dfz_n=round(wrench[2] - baseline[2], 3))
         self._ft_log('probe contact', wrench, f'plate top at {contact_z * 1000:.1f} mm '
                      f'({(contact_z - top[2]) * 1000:+.1f} mm from the camera estimate)')
         up = top.copy()
-        up[2] = contact_z + cfg.probe_lift
-        self.arm.move_flange(flange(up), cfg.final_speed)
+        if cfg.probe_tilt:
+            self._grasp_tilt, contact_z = self._probe_tilt(top, floor[2], flange, baseline, contact_z)
+            up[2] = contact_z + cfg.probe_lift
+            # straight up off the plate first, then turn to the grasp tilt about the fingertip centre
+            pose = self.arm.flange_pose()
+            pose[2, 3] += max(0.0, up[2] - float(self._tip(pose)[2]))
+            self.arm.move_flange(pose, cfg.final_speed)
+        else:
+            up[2] = contact_z + cfg.probe_lift
+        self.arm.move_flange(flange(up, self._grasp_tilt), cfg.final_speed)
         self._probe_gripper(0, 'open')
         try:
             self.arm.ft_zero()   # gripper open, nothing touching: the zero the closing routine reads against
@@ -840,9 +869,82 @@ class ServoRunner:
         self._limit(grasp_tip)
         self._set(phase='descending', grasp_tip_mm=[round(v * 1000, 1) for v in grasp_tip])
         self._check_abort()
-        self.arm.move_flange(flange(grasp_tip), cfg.final_speed)
+        self.arm.move_flange(flange(grasp_tip, self._grasp_tilt), cfg.final_speed)
         self._ft_log('grasp height', self._ft_read())
         return grasp_tip
+
+    def _probe_flange(self, yaw):
+        """base_T_flange for a fingertip point at `yaw` and a tilt across the fingers (rad)."""
+        cfg = self.config
+        return lambda tip, tilt=0.0: flange_for_tip(tip, yaw, self.mount.flange_T_tip, tilt, cfg.finger_axis)
+
+    def _probe_tilt(self, top, floor_z, flange, baseline, contact_z):
+        """probe_tilt, from the first (level) touch at `contact_z` with the pre-probe `baseline`: tilt and touch again
+        until both fingertips touch. Returns (tilt rad, fingertip-centre contact z) for the grasp; (0, the first touch)
+        when the seek gives up, so the grasp is the level one."""
+        cfg, gcfg = self.config, self.config.gripper
+        first_z = contact_z
+        tilt, step, previous, touches = 0.0, np.radians(cfg.probe_tilt_step_deg), None, 1
+        self._set(phase='probe tilting')
+        while True:
+            self._wait(cfg.probe_tilt_settle)
+            wrench = self._ft_read()
+            if wrench is None:
+                raise RunFailed('F/T read failed during the probe tilt')
+            axis = 3 + gcfg.ft_tilt_torque_axis
+            torque = gcfg.ft_tilt_torque_sign * (wrench[axis] - baseline[axis])
+            self._set(probe_tilt_deg=round(float(np.degrees(tilt)), 2), probe_tilt_torque_nm=round(torque, 4),
+                      probe_tilt_touches=touches)
+            self._ft_log(f'probe tilt {np.degrees(tilt):+.2f} deg', wrench,
+                         f'tilt torque {torque:+.4f} N m, contact {contact_z * 1000:.1f} mm')
+            if abs(torque) < gcfg.ft_tilt_deadband_nm:
+                result = 'balanced'
+                break
+            sign = 1.0 if torque > 0 else -1.0     # torque < 0: the + side fingertip touches, tilt - to lower the other
+            if previous is not None and sign != previous:
+                step /= 2.0
+                if step < np.radians(cfg.probe_tilt_min_step_deg):
+                    result = 'converged'
+                    break
+            previous = sign
+            if abs(np.degrees(tilt + sign * step)) > cfg.probe_tilt_max_deg + 1e-9:
+                result = 'cap'
+                break
+            if touches >= cfg.probe_tilt_max_touches:
+                result = 'max_touches'
+                break
+            self._check_abort()
+            above = top.copy()
+            above[2] = contact_z + cfg.probe_tilt_lift
+            pose = self.arm.flange_pose()
+            pose[2, 3] += max(0.0, above[2] - float(self._tip(pose)[2]))
+            self.arm.move_flange(pose, cfg.final_speed)                 # straight up off the plate
+            tilt += sign * step
+            self.arm.move_flange(flange(above, tilt), cfg.final_speed)  # then tilt about the fingertip centre
+            self._wait(cfg.probe_tilt_settle)
+            baseline = self._ft_read()
+            if baseline is None:
+                raise RunFailed('F/T read failed during the probe tilt')
+            floor = top.copy()
+            floor[2] = floor_z
+            touch = self._probe_descend(flange(floor, tilt), baseline)
+            touches += 1
+            if touch is None:
+                result = 'lost'
+                break
+            contact_z = float(self._tip(touch[0])[2])
+        if result in ('balanced', 'converged'):
+            self._set(probe_tilt_result=result, probe_tilt_deg=round(float(np.degrees(tilt)), 2),
+                      probe_tilt_touches=touches,
+                      probe_contact_tip_mm=[round(v * 1000, 1) for v in (top[0], top[1], contact_z)])
+            log.info('probe tilt %s at %+.2f deg after %d touches: plate top %.1f mm', result, np.degrees(tilt),
+                     touches, contact_z * 1000)
+            return tilt, contact_z
+        log.warning('probe tilt gave up (%s) at %+.2f deg after %d touches: level grasp from the first touch',
+                    result, np.degrees(tilt), touches)
+        self._set(probe_tilt_result=result, probe_tilt_deg=0.0, probe_tilt_touches=touches,
+                  probe_tilt_gave_up_deg=round(float(np.degrees(tilt)), 2))
+        return 0.0, first_z
 
     def _probe_gripper(self, value, what):
         """Move the gripper to `value` and wait until it has got there. The firmware reports only the last target,
@@ -915,12 +1017,12 @@ class ServoRunner:
         self._ft_log(f'after lift (|dFz| {delta:.2f} N)', after, decision)
         return held if cfg.use_ft else fsr_held
 
-    def _nudge(self, signed_mm, yaw):
-        """Move `signed_mm` along the finger axis (flange y for finger_axis 'y')."""
-        finger = yaw + finger_angle_offset(self.config.finger_axis)
+    def _nudge(self, signed_mm):
+        """Move `signed_mm` along the finger axis (flange y for finger_axis 'y'): horizontal with the tool straight
+        down, along the tilted fingers after a probe tilt."""
         pose = self.arm.flange_pose()
         moved = pose.copy()
-        moved[:2, 3] += signed_mm / 1000.0 * np.array([np.cos(finger), np.sin(finger)])
+        moved[:3, 3] += signed_mm / 1000.0 * pose[:3, {'x': 0, 'y': 1}[self.config.finger_axis]]
         self.arm.move_flange(moved, self.config.gripper.nudge_speed)
 
     def _retry_lift(self):
@@ -930,6 +1032,11 @@ class ServoRunner:
         pose = self.arm.flange_pose()
         pose[2, 3] += cfg.retry_lift
         self.arm.move_flange(pose, cfg.level_speed)
+        if self._grasp_tilt:
+            # the servo turns only about z: level the tool about the fingertip before the next alignment
+            self.arm.move_flange(flange_for_tip(self._tip(pose), self._yaw(pose), self.mount.flange_T_tip),
+                                 cfg.level_speed)
+            self._grasp_tilt = 0.0
         if cfg.probe_contact:
             self._probe_gripper(0, 'open')   # fully open before the next FSR tare and probe close
             return

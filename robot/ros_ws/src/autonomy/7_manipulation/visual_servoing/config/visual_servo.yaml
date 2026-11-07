@@ -88,6 +88,15 @@
       probe_lift: 0.005               # m above the touch while the gripper opens
       probe_depth: 0.010              # m below the expected plate top before giving up
       probe_grip_depth: 0.0075        # m below the touched plate top the fingertips close (bench 2026-11-06: = old plate_height 0.03 / 4)
+      # Tilt the probe until both closed fingertips touch (README "Probe tilt"); the grasp and lift keep that tilt.
+      # The table leans towards the robot: one fingertip lands up to ~5 mm first. Tune with tools/probe_tilt_check.py.
+      probe_tilt: false
+      probe_tilt_step_deg: 2.0        # first tilt step; halves on each torque sign flip
+      probe_tilt_min_step_deg: 0.25   # a flip below this ends the seek at the last tilt
+      probe_tilt_max_deg: 15.0        # from straight down; beyond: level grasp from the first touch
+      probe_tilt_max_touches: 15
+      probe_tilt_lift: 0.002          # m above the last touch before each tilt step
+      probe_tilt_settle: 0.3          # s still before each F/T read of the seek
       lift: 0.10
       lift_speed: 50.0
       max_retries: 3                  # one grasp attempt per start command; keep the gripper closed afterwards
@@ -132,6 +141,10 @@
       ft_contact_count: 3             # grasp.probe_contact: consecutive reads above ft_contact_n that count as a touch
       ft_contact_backoff: 0.002       # m back up after that contact
       ft_hold_min_n: 0.3              # N of Fz change over the lift that counts as holding the plate (plate 0.60-0.69 N)
+      # grasp.probe_tilt: torque across the finger line names the fingertip that touched alone (bench: tools/probe_tilt_check.py watch)
+      ft_tilt_torque_axis: 0          # 0 tx, 1 ty, 2 tz: tx for fingers along flange y
+      ft_tilt_torque_sign: 1          # t = sign * dT < 0 while the flange +y fingertip touches alone (unverified on the arm)
+      ft_tilt_deadband_nm: 0.01       # N m; |t| below this: both fingertips touch (one fingertip at ~2.5 N: ~0.03)
       # use_ft: once one pad touches, every gripper step also slides the arm towards the other pad (tracked
       # closing), instead of nudging away and touching again. A plate held 6 mm off-centre needed ~6 mm of slide.
       ft_track_mm_per_step: 0.5       # mm of slide per gripper step: one step (10) moves each jaw ~0.5 mm

@@ -679,3 +679,156 @@ def test_probe_retry_waits_for_the_gripper_to_open():
     closes = [i for i, e in enumerate(arm.events) if e[1:] == ('gripper', 550)]
     retry_open = next(e for e in arm.events[closes[0] + 1:] if e[1:] == ('gripper', 0))
     assert arm.events[closes[1]][0] - retry_open[0] >= 550 / 80.0 + 1.0 - 1e-6
+
+
+# -- probe tilt: level the closed fingertips with a leaning plate by tilt-and-retouch --------------------------
+FINGER_HALF = 0.012     # closed fingertips sit +-12 mm from the tip centre along flange y
+STIFFNESS = 3000.0      # N/m of plate contact per fingertip
+
+
+def tilted_plate_ft(lean_deg, top=CENTER[2], gravity_nm_per_rad=0.2, held_fz=-1.5):
+    """F/T of the closed (550) fingertips on a plate whose top rises by tan(lean) per metre along the grasp's finger
+    axis (flange y at the grasp yaw). Each fingertip below the plate pushes up with STIFFNESS * depth: Fz is the sum
+    (sign as probe_ft: +), Tx = -y * F for the fingertip at flange y. Tilting adds a gravity torque the probe has to
+    re-baseline away. Once lifted (50 mm/s), Fz reads `held_fz`."""
+    slope = np.tan(np.radians(lean_deg))
+    ref = {}
+
+    def ft(arm):
+        if arm.moves and arm.moves[-1][1] == 50.0:
+            return [0.0, 0.0, held_fz, 0.0, 0.0, 0.0]
+        pose = arm.pose
+        level = rpy_matrix(np.pi, 0.0, np.arctan2(pose[1, 0], pose[0, 0]))
+        tilt = np.arctan2(*(level.T @ pose[:3, :3])[[2, 1], [1, 1]])       # roll of the flange from tool-down
+        gravity = gravity_nm_per_rad * tilt
+        if not (arm.gripper_values and arm.gripper_values[-1] == 550):
+            return [0.0, 0.0, 0.0, gravity, 0.0, 0.0]
+        centre = tip(pose)
+        axis = ref.setdefault('axis', pose[:3, 1].copy())                  # the finger axis at the first touch
+        fz, tx = 0.0, 0.0
+        for y in (FINGER_HALF, -FINGER_HALF):
+            point = (pose @ np.append(MOUNT.flange_T_tip[:3, 3] + [0.0, y, 0.0], 1.0))[:3]
+            surface = top + slope * float(np.dot(point[:2] - centre[:2], axis[:2]) + np.dot(centre[:2] - CENTER[:2],
+                                                                                              axis[:2]))
+            depth = surface - point[2]
+            if depth > 0:
+                fz += STIFFNESS * depth
+                tx += -y * STIFFNESS * depth
+        return [0.0, 0.0, fz, tx + gravity, 0.0, 0.0]
+    return ft
+
+
+def tilt_run(lean_deg, **config):
+    gripper = config.pop('gripper', GripperConfig(**dict(TWO_FINGERS, ft_samples=1, ft_tilt_deadband_nm=0.005)))
+    return run(fsr=held_from(130), ft=tilted_plate_ft(lean_deg), gripper=gripper, probe_contact=True,
+               probe_tilt=True, **config)
+
+
+def tool_tilt_deg(pose):
+    """Roll of the flange about its own x axis from tool-down at the same yaw (+: lowers the flange +y finger)."""
+    level = rpy_matrix(np.pi, 0.0, np.arctan2(pose[1, 0], pose[0, 0]))
+    rel = level.T @ pose[:3, :3]
+    return float(np.degrees(np.arctan2(rel[2, 1], rel[1, 1])))
+
+
+@pytest.mark.parametrize('lean', [6.0, -9.0, 3.3])
+def test_probe_tilt_levels_the_fingertips_and_grasps_at_that_tilt(lean):
+    status, arm = tilt_run(lean)
+    assert (status['result'], status['attempt']) == ('grasped', 1), status
+    assert status['probe_tilt_result'] == 'balanced', status
+    # the finger axis runs uphill by `lean`: the tool tilts by -lean about flange x so the fingertip line follows it
+    assert abs(status['probe_tilt_deg'] + lean) <= 0.5, status
+    assert status['probe_tilt_touches'] >= 2
+    closing = next(i for i, v in enumerate(arm.gripper_values) if v == 50)
+    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]               # the last final-speed move: the grasp
+    assert tool_tilt_deg(grasp_move) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
+    lift = next(m for m in arm.moves if m[1] == 50.0)[0]
+    assert tool_tilt_deg(lift) == pytest.approx(status['probe_tilt_deg'], abs=0.05)   # the lift keeps the tilt
+    assert closing >= 3 and arm.ft_zeroes == 2
+
+
+def test_probe_tilt_on_a_flat_plate_touches_once_and_stays_level():
+    status, arm = tilt_run(0.0)
+    assert status['result'] == 'grasped', status
+    assert status['probe_tilt_result'] == 'balanced' and status['probe_tilt_deg'] == 0.0
+    assert status['probe_tilt_touches'] == 1
+    assert all(abs(tool_tilt_deg(m[0])) < 1e-6 for m in arm.moves)
+
+
+def test_probe_tilt_beyond_the_cap_falls_back_to_the_level_grasp():
+    status, arm = tilt_run(20.0, probe_tilt_max_deg=8.0)
+    assert status['result'] == 'grasped', status
+    assert status['probe_tilt_result'] == 'cap' and status['probe_tilt_deg'] == 0.0
+    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]
+    assert abs(tool_tilt_deg(grasp_move)) < 1e-6
+    assert max(abs(tool_tilt_deg(m[0])) for m in arm.moves) <= 8.0 + 1e-6
+    # the fallback grasp height is the first, level touch
+    assert status['grasp_tip_mm'][2] == pytest.approx(status['probe_contact_tip_mm'][2] - GRIP_DEPTH * 1000, abs=0.05)
+
+
+def test_probe_tilt_never_dips_the_tip_while_reorienting():
+    """Every orientation change happens with the fingertip centre above where it touched."""
+    status, arm = tilt_run(7.0)
+    assert status['result'] == 'grasped', status
+    first_touch = status['probe_first_contact_tip_mm'][2] / 1000.0
+    prev = None
+    for pose, speed in arm.moves:
+        if prev is not None and abs(tool_tilt_deg(pose) - tool_tilt_deg(prev)) > 1e-6:
+            assert tip(prev)[2] > first_touch - 0.003 and tip(pose)[2] > first_touch - 0.003
+        prev = pose
+
+
+def test_probe_tilt_off_keeps_the_level_probe():
+    status, arm = run(fsr=held_from(130), ft=tilted_plate_ft(6.0),
+                      gripper=GripperConfig(**dict(TWO_FINGERS, ft_samples=1)), probe_contact=True)
+    assert status['result'] == 'grasped', status
+    assert 'probe_tilt_deg' not in status
+    assert all(abs(tool_tilt_deg(m[0])) < 1e-6 for m in arm.moves)
+
+
+def test_retry_after_a_tilted_grasp_relevels_before_aligning():
+    fsr_ok = held_from(130)
+    servo_tilts = []
+
+    def fsr(value, arm):                       # first close never reaches pressure: the attempt fails
+        if arm.gripper_values.count(550) < 2:
+            return (0, 0)
+        return fsr_ok(value, arm)
+
+    def hook(t, runner):
+        status = runner.status()
+        if status.get('phase') == 'servoing' and status.get('attempt') == 2:
+            servo_tilts.append(tool_tilt_deg(runner.arm.pose))
+    status, arm = run(fsr=fsr, ft=tilted_plate_ft(6.0), hook=hook,
+                      gripper=GripperConfig(**dict(TWO_FINGERS, ft_samples=1, ft_tilt_deadband_nm=0.005,
+                                                   samples=20)),
+                      probe_contact=True, probe_tilt=True, max_retries=1)
+    assert (status['result'], status['attempt']) == ('grasped', 2), status
+    assert servo_tilts and max(abs(v) for v in servo_tilts) < 1e-6      # the second servo starts straight down
+    assert abs(status['probe_tilt_deg'] + 6.0) <= 0.5                   # and the second probe tilts again
+
+
+def test_nudge_slides_along_the_tilted_finger_axis():
+    from visual_servoing.arm import flange_for_tip
+    clock = FakeClock()
+    pose = flange_for_tip(CENTER, np.radians(30.0), MOUNT.flange_T_tip, np.radians(-8.0))
+    arm = FakeArm(clock, pose)
+    arm.connect()
+    arm.position_mode()
+    runner = ServoRunner(arm, MOUNT, ServoConfig(dry_run=False), clock=clock.time, sleep=clock.sleep)
+    runner._nudge(2.0)
+    moved = arm.moves[-1][0]
+    assert np.allclose(moved[:3, 3] - pose[:3, 3], 0.002 * pose[:3, 1])
+    assert abs(moved[2, 3] - pose[2, 3]) > 0.0002                       # the tilted finger axis leaves the horizontal
+    assert np.allclose(moved[:3, :3], pose[:3, :3])
+
+
+def test_flange_for_tip_tilt_lowers_the_plus_side_finger_about_the_tip():
+    from visual_servoing.arm import flange_for_tip
+    level = flange_for_tip(CENTER, 0.4, MOUNT.flange_T_tip)
+    tilted = flange_for_tip(CENTER, 0.4, MOUNT.flange_T_tip, np.radians(5.0))
+    assert np.allclose(tip(tilted), CENTER)
+    finger = MOUNT.flange_T_tip.copy()
+    finger[1, 3] += 0.012
+    assert (tilted @ finger)[2, 3] < (level @ finger)[2, 3] - 0.001
+    assert tool_tilt_deg(tilted) == pytest.approx(5.0)

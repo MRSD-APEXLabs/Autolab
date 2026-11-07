@@ -135,6 +135,30 @@ No touch within `grasp.probe_depth` below the camera's plate top (or `min_tip_z`
 `probe_dfz_n`. The halt latency (`set_state(4)` + 0.1 s) at 8 mm/s pushes the fingers ~1 mm past the first
 contact; slow `final_speed` if that shifts the plate.
 
+### Probe tilt
+
+The table leans towards the robot, so with the tool straight down one closed fingertip usually lands first (up to
+~5 mm before the other). `grasp.probe_tilt: true` (with `probe_contact`) tilts the tool about the flange axis across
+the fingers until both touch, and keeps that tilt for the grasp and the lift:
+
+1. after each touch, settle `probe_tilt_settle` and read the torque change across the finger line,
+   `t = gripper.ft_tilt_torque_sign * dT[gripper.ft_tilt_torque_axis]`. `|t| < gripper.ft_tilt_deadband_nm`: both
+   fingertips touch, done. Otherwise its sign names the fingertip that touched alone;
+2. lift to `probe_tilt_lift` above that touch, tilt `probe_tilt_step_deg` about the fingertip centre to lower the
+   other fingertip, re-read the in-air F/T baseline (tilting puts the gripper's weight onto the torque, about as much
+   as the contact) and touch again. A sign flip halves the step; a flip below `probe_tilt_min_step_deg` ends the seek
+   at the last tilt;
+3. the plate top is the fingertip-centre height of the last touch. Lift straight up `probe_lift`, turn to the grasp
+   tilt, open, re-zero, lower `probe_grip_depth` below the touch and close as usual. FSR nudges and F/T tracking
+   slide along the tilted finger axis.
+
+More than `probe_tilt_max_deg`, `probe_tilt_max_touches` touches or a touch that finds nothing: the level grasp from
+the first touch (as without probe_tilt). A retry re-levels the tool before aligning again. Only the tilt across the
+fingers is measured; a lean along the pads stays. Status fields: `probe_tilt_result` (`balanced`, `converged`,
+`cap`, `max_touches`, `lost`), `probe_tilt_deg`, `probe_tilt_torque_nm`, `probe_tilt_touches`,
+`probe_first_contact_tip_mm`. Calibrate `ft_tilt_torque_sign` and the deadband first with
+`tools/probe_tilt_check.py` (`watch`, then `seek`), which runs the same seek interactively.
+
 ### Safety
 
 - `execute:=false` is the default; the dry-run arm object refuses every motion call.

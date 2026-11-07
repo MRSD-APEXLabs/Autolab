@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 
-from .mount import matrix_xarm_pose, transform, xarm_pose_matrix, inverse, rpy_matrix
+from .mount import matrix_xarm_pose, transform, xarm_pose_matrix, inverse, rot_x, rot_y, rpy_matrix
 
 log = logging.getLogger(__name__)
 
@@ -243,7 +243,16 @@ def level_pose(base_T_flange, yaw=None):
     return transform(rpy_matrix(np.pi, 0.0, yaw), base_T_flange[:3, 3])
 
 
-def flange_for_tip(tip_position, yaw, flange_T_tip):
-    """base_T_flange that puts the fingertip at `tip_position` with the tool down at `yaw`."""
+def tilt_rotation(tilt, finger_axis='y'):
+    """Flange-frame rotation by `tilt` (rad) about the flange axis across the fingers, signed so that + lowers the
+    finger on the + side of the finger axis (flange x for fingers along y, -y for fingers along x)."""
+    return rot_x(tilt) if finger_axis == 'y' else rot_y(-tilt)
+
+
+def flange_for_tip(tip_position, yaw, flange_T_tip, tilt=0.0, finger_axis='y'):
+    """base_T_flange that puts the fingertip at `tip_position` with the tool down at `yaw`, then tilted by `tilt`
+    (rad, tilt_rotation) about the fingertip."""
     rotation = rpy_matrix(np.pi, 0.0, yaw)
+    if tilt:
+        rotation = rotation @ tilt_rotation(tilt, finger_axis)
     return transform(rotation, np.asarray(tip_position, dtype=float) - rotation @ flange_T_tip[:3, 3])
