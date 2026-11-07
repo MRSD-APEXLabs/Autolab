@@ -74,6 +74,20 @@
       approach_speed: 30.0            # mm/s down to final_segment above the grasp height
       final_segment: 0.02
       final_speed: 8.0                # mm/s
+      # Probe the plate top by touch (7_manipulation/README.md "Probe contact"): close to probe_close, descend from final_segment
+      # above the camera's plate top until Fz rises (gripper.ft_contact_n for gripper.ft_contact_count reads),
+      # lift probe_lift, open, re-zero the F/T, lower to probe_grip_depth below the touch, close as usual.
+      # No touch within probe_depth: the attempt fails and max_retries re-aligns and probes again.
+      # Needs the F/T sensor (whatever gripper.use_ft says); replaces depth while on.
+      probe_contact: false
+      probe_close: 550                # gripper value of the closed-finger probe
+      # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin before the arm
+      # moves (550 units: 7.9 s). Time a 0 -> 550 close on the bench and set rate from it.
+      probe_gripper_rate: 80.0        # gripper units/s
+      probe_gripper_margin: 1.0       # s
+      probe_lift: 0.005               # m above the touch while the gripper opens
+      probe_depth: 0.010              # m below the expected plate top before giving up
+      probe_grip_depth: 0.0075        # m below the touched plate top the fingertips close (bench 2026-11-06: = old plate_height 0.03 / 4)
       lift: 0.10
       lift_speed: 50.0
       max_retries: 3                  # one grasp attempt per start command; keep the gripper closed afterwards
@@ -115,6 +129,7 @@
       ft_finger_sign: 1               # +1/-1 so that lateral > 0 when a + nudge (fsr_nudge_sign) unloads it
       ft_lateral_deadband_n: 0.5      # N; smaller sideways force counts as none (free closing <= 0.24 N)
       ft_contact_n: 2.0               # N of |Fz| during the final descent that stops it (0.14-0.34 N at grasp height)
+      ft_contact_count: 3             # grasp.probe_contact: consecutive reads above ft_contact_n that count as a touch
       ft_contact_backoff: 0.002       # m back up after that contact
       ft_hold_min_n: 0.3              # N of Fz change over the lift that counts as holding the plate (plate 0.60-0.69 N)
       # use_ft: once one pad touches, every gripper step also slides the arm towards the other pad (tracked
