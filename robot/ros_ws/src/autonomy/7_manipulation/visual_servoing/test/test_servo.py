@@ -623,9 +623,11 @@ def test_probe_touches_the_plate_top_then_opens_and_lowers_a_quarter_plate(top):
     contact = status['probe_contact_tip_mm'][2]
     assert contact == pytest.approx(top * 1000, abs=0.5)
     assert status['grasp_tip_mm'][2] == pytest.approx(contact - GRIP_DEPTH * 1000, abs=0.05)
-    level, above, probe, up, grasp = arm.moves[:5]
+    level, above, fast, probe, up, grasp = arm.moves[:6]
     assert tip(above[0])[2] == pytest.approx(CENTER[2] + 0.02) and above[1] == 30.0
-    assert probe[1] == 8.0 and tip(probe[0])[2] == pytest.approx(CENTER[2] - 0.010)
+    # final_speed down to probe_slow_margin above the camera's top, then probe_touch_speed to the probe floor
+    assert fast[1] == 8.0 and tip(fast[0])[2] == pytest.approx(CENTER[2] + 0.003)
+    assert probe[1] == 2.0 and tip(probe[0])[2] == pytest.approx(CENTER[2] - 0.010)
     assert tip(up[0])[2] * 1000 == pytest.approx(contact + 5.0, abs=0.05)
     assert np.allclose(tip(grasp[0])[:2], tip(above[0])[:2])           # straight down over the plate
 
@@ -753,6 +755,21 @@ def test_probe_tilt_on_a_flat_plate_touches_once_and_stays_level():
     assert status['probe_tilt_result'] == 'balanced' and status['probe_tilt_deg'] == 0.0
     assert status['probe_tilt_touches'] == 1
     assert all(abs(tool_tilt_deg(m[0])) < 1e-6 for m in arm.moves)
+
+
+def test_probe_tilt_bisects_the_bracket_and_ends_at_the_interpolated_zero():
+    """Bench 2026-11-08: halving the step on a flip walked back over tilts already touched. Steps of 1 deg until the
+    torque changes sign, then bisection; with a deadband nothing reaches, the end tilt is the torque / Fz zero."""
+    gripper = GripperConfig(**dict(TWO_FINGERS, ft_samples=1, ft_tilt_deadband_nm=1e-9))
+    status, arm = tilt_run(3.3, gripper=gripper)
+    assert status['result'] == 'grasped', status
+    assert status['probe_tilt_result'] == 'converged', status
+    touched = [round(tool_tilt_deg(m[0]), 3) for m in arm.moves if m[1] == 2.0]   # each touch's slow leg
+    assert touched == [0.0, -1.0, -2.0, -3.0, -4.0, -3.5, -3.25]
+    assert status['probe_tilt_touches'] == len(touched)
+    assert status['probe_tilt_deg'] == pytest.approx(-3.3, abs=0.1)                 # between -3.5 and -3.25
+    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]
+    assert tool_tilt_deg(grasp_move) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
 
 
 def test_probe_tilt_beyond_the_cap_falls_back_to_the_level_grasp():

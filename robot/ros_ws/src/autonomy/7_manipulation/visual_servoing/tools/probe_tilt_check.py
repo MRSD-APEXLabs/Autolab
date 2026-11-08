@@ -7,11 +7,14 @@ before the other. The seek finds the tilt about the flange x axis (the axis acro
 along flange y) at which both fingertips touch together. The grasp then keeps that tilt.
 
 How the seek works (no finger geometry needed):
-  1. touch: read the in-air F/T baseline, descend at --speed until |Fz - baseline| > --contact-n for --contact-count
-     reads, halt, then read the settled wrench in contact. tilt torque t = --torque-sign * dT[--torque-axis].
+  1. touch: read the in-air F/T baseline, descend until |Fz - baseline| > --contact-n for --contact-count reads,
+     halt, then read the settled wrench in contact. tilt torque t = --torque-sign * dT[--torque-axis]. The descent
+     goes at --speed down to --slow-margin mm above the last touch, then at --touch-speed (no last touch: all of it):
+     the stop lags contact ~90 ms and the plate is stiff, so the touch speed sets the contact force.
   2. |t| < --torque-deadband: both fingers touch, done.
-  3. otherwise lift --lift mm, tilt by sign(t) * step about the fingertip centre (lowering the high finger), touch
-     again. When t changes sign the step halves; below --min-step the seek ends between the two last tilts.
+  3. otherwise lift --lift mm, tilt by sign(t) * --step about the fingertip centre (lowering the high finger), touch
+     again. Once t has had both signs, bisect the two tilts either side instead; when they are --min-step apart the
+     seek ends at the tilt where t / |dFz| crosses zero between them (linear) and moves there.
   4. --max-tilt bounds the total tilt from straight down.
 The baseline is re-read in the air before every touch: tilting moves the gripper's weight onto the torque reading by
 about as much as the contact itself.
@@ -203,8 +206,19 @@ class Bench:
         start = self.arm.flange_pose()
         target = start.copy()
         target[2, 3] -= a.probe_depth / 1000.0
-        deadline = time.monotonic() + a.probe_depth / a.speed * 2.0 + 2.0
-        self.arm.move_flange(target, a.speed, wait=False)
+        # fast (--speed) down to --slow-margin above the last touch, then --touch-speed
+        legs, fast_mm = [], 0.0
+        if self.last_touch is not None:
+            fast_mm = (self.tip(start)[2] - self.last_touch['tip'][2]) * 1000.0 - a.slow_margin
+            fast_mm = min(max(fast_mm, 0.0), a.probe_depth)
+        if fast_mm > 0.5:
+            mid = start.copy()
+            mid[2, 3] -= fast_mm / 1000.0
+            legs.append((mid, a.speed))
+        legs.append((target, a.touch_speed))
+        deadline = time.monotonic() + (fast_mm / a.speed + (a.probe_depth - fast_mm) / a.touch_speed) * 2.0 + 2.0
+        leg = 0
+        self.arm.move_flange(legs[0][0], legs[0][1], wait=False)
         first, count = None, 0
         try:
             while True:
@@ -220,9 +234,12 @@ class Bench:
                         break
                 else:
                     count = 0
-                    if np.linalg.norm(pose[:3, 3] - target[:3, 3]) < 0.0005:
-                        print(f'no contact within {a.probe_depth:.1f} mm')
-                        return None
+                    if np.linalg.norm(pose[:3, 3] - legs[leg][0][:3, 3]) < 0.0005:
+                        if leg == len(legs) - 1:
+                            print(f'no contact within {a.probe_depth:.1f} mm')
+                            return None
+                        leg += 1
+                        self.arm.move_flange(legs[leg][0], legs[leg][1], wait=False)
                 if time.monotonic() > deadline:
                     raise RuntimeError('touch did not reach its target')
                 time.sleep(0.02)
@@ -250,33 +267,42 @@ class Bench:
         rec = self.touch('seek 0')
         if rec is None:
             return
-        step, prev, history = a.step, None, [rec]
+        sides = {}   # torque sign -> latest touch record with that sign
         for i in range(1, a.max_iter + 1):
             t = rec['t']
             if abs(t) < a.torque_deadband:
                 print(f'balanced at tilt {rec["tilt"]:+.2f} deg after {i - 1} retouches')
                 return
             s = 1.0 if t > 0 else -1.0
-            if prev is not None and s != prev:
-                step /= 2.0
-                if step < a.min_step:
-                    print(f'torque flipped with step < {a.min_step} deg: both fingers touch between '
-                          f'{history[-2]["tilt"]:+.2f} and {rec["tilt"]:+.2f} deg; using {rec["tilt"]:+.2f}')
-                    return
-            prev = s
+            sides[s] = rec
             pose = self.arm.flange_pose()
             current, _ = self.tilt(pose)
-            if abs(current + s * step) > a.max_tilt:
-                print(f'cap: tilt {current + s * step:+.2f} deg exceeds --max-tilt {a.max_tilt}; stopping at '
+            if len(sides) == 2:
+                pos, neg = sides[1.0], sides[-1.0]
+                if abs(pos['tilt'] - neg['tilt']) <= a.min_step + 1e-9:
+                    lever = lambda r: r['t'] / max(abs(r['dw'][2]), 1e-6)
+                    w = lever(pos) / (lever(pos) - lever(neg))
+                    final = pos['tilt'] + w * (neg['tilt'] - pos['tilt'])
+                    tip = pos['tip'] + w * (neg['tip'] - pos['tip'])
+                    print(f'bracket {pos["tilt"]:+.2f} .. {neg["tilt"]:+.2f} deg after {i - 1} retouches: torque / Fz '
+                          f'{lever(pos) * 1000:+.1f} / {lever(neg) * 1000:+.1f} mm, zero at {final:+.2f} deg; moving there')
+                    self.move_z(a.lift, a.speed)
+                    self.move(self.tilted(self.arm.flange_pose(), final - current), a.tilt_speed)
+                    self.last_touch = dict(rec, tilt=final, tip=tip, finger='both (interpolated)')
+                    return
+                target = 0.5 * (pos['tilt'] + neg['tilt'])
+            else:
+                target = current + s * a.step
+            if abs(target) > a.max_tilt:
+                print(f'cap: tilt {target:+.2f} deg exceeds --max-tilt {a.max_tilt}; stopping at '
                       f'{current:+.2f} deg ({rec["finger"]} still touches alone)')
                 return
             self.move_z(a.lift, a.speed)
-            self.move(self.tilted(self.arm.flange_pose(), s * step), a.tilt_speed)
+            self.move(self.tilted(self.arm.flange_pose(), target - current), a.tilt_speed)
             rec = self.touch(f'seek {i}')
             if rec is None:
                 print('lost the plate during the seek')
                 return
-            history.append(rec)
         print(f'--max-iter {a.max_iter} reached at tilt {rec["tilt"]:+.2f} deg')
 
     def grasp(self, value):
@@ -375,22 +401,25 @@ def main():
     p.add_argument('--execute', action='store_true', help='allow arm and gripper motion')
     p.add_argument('--config', default=str(CONFIG), help='visual_servo.yaml for the fingertip (mount.*)')
     p.add_argument('--log', default=None, help='append every touch to this CSV')
-    p.add_argument('--report-type', default=None, choices=('normal', 'rich', 'real'),
-                   help='xArm SDK report socket the F/T is read from, on a second read-only connection (default: '
-                        'the main connection). `real` is the fast one; check with `watch` that values change every line')
+    p.add_argument('--report-type', default='real', choices=('main', 'normal', 'rich', 'real'),
+                   help='xArm SDK report socket the F/T is read from, on a second read-only connection. `real` '
+                        '(default) updates every `watch` line; `main` reads the main connection\'s report (~5 Hz on the '
+                        'bench)')
     # probe (servo defaults: grasp.probe_*, gripper.ft_contact_*)
     p.add_argument('--probe-close', type=int, default=550)
     p.add_argument('--probe-depth', type=float, default=15.0, help='mm a touch may descend')
-    p.add_argument('--speed', type=float, default=8.0, help='mm/s for touches and lifts (final_speed)')
-    p.add_argument('--contact-n', type=float, default=2.0, help='|dFz| N that counts as contact')
-    p.add_argument('--contact-count', type=int, default=3)
+    p.add_argument('--speed', type=float, default=8.0, help='mm/s for lifts and the fast part of a touch (final_speed)')
+    p.add_argument('--touch-speed', type=float, default=2.0, help='mm/s near the expected contact (probe_touch_speed)')
+    p.add_argument('--slow-margin', type=float, default=3.0, help='mm above the last touch the touch speed starts')
+    p.add_argument('--contact-n', type=float, default=0.5, help='|dFz| N that counts as contact')
+    p.add_argument('--contact-count', type=int, default=2)
     p.add_argument('--lift', type=float, default=2.0, help='mm up before each tilt step / before the grasp opens')
     # tilt seek
     p.add_argument('--torque-axis', type=int, default=0, choices=(0, 1, 2), help='0 Tx, 1 Ty, 2 Tz')
     p.add_argument('--torque-sign', type=int, default=1, choices=(-1, 1))
-    p.add_argument('--torque-deadband', type=float, default=0.01, help='N m: |tilt torque| below = both touch')
+    p.add_argument('--torque-deadband', type=float, default=0.004, help='N m: |tilt torque| below = both touch')
     p.add_argument('--step', type=float, default=1.0, help='deg, first tilt step')
-    p.add_argument('--min-step', type=float, default=0.25, help='deg; a sign flip below this ends the seek')
+    p.add_argument('--min-step', type=float, default=0.25, help='deg; a bracket this narrow ends the seek')
     p.add_argument('--max-tilt', type=float, default=15.0, help='deg from straight down')
     p.add_argument('--max-iter', type=int, default=15)
     p.add_argument('--tilt-speed', type=float, default=10.0, help='mm/s for tilt moves')
@@ -409,7 +438,7 @@ def main():
 
     mount = load_mount(args.config)
     print(mount.describe())
-    arm = XArm(args.ip, read_only=not args.execute, ft_report_type=args.report_type)
+    arm = XArm(args.ip, read_only=not args.execute, ft_report_type=None if args.report_type == 'main' else args.report_type)
     arm.connect()
     try:
         if args.execute:

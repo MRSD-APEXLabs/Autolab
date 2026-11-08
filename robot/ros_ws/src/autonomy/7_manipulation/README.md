@@ -124,7 +124,8 @@ is then unused). After the F/T zero and FSR tare at the hover:
 
 1. close the gripper to `grasp.probe_close` (550) so the closed fingers form a probe;
 2. move to `final_segment` above the camera's plate top, then descend at `final_speed` until Fz departs from its
-   pre-probe median by more than `gripper.ft_contact_n` for `gripper.ft_contact_count` reads in a row, and halt.
+   pre-probe median by more than `gripper.ft_probe_contact_n` for `gripper.ft_contact_count` reads in a row, and halt
+   (final_speed down to `probe_slow_margin` above the camera's plate top, then `probe_touch_speed`).
    The plate-top height is the fingertip height at the *first* of those reads (the halt lands slightly deeper);
 3. lift `grasp.probe_lift` (5 mm), open the gripper fully, wait `close_settle`, and re-zero the F/T sensor;
 4. lower to `grasp.probe_grip_depth` (7.5 mm, tuned on the bench) below the touch and run the usual closing routine.
@@ -146,8 +147,10 @@ the fingers until both touch, and keeps that tilt for the grasp and the lift:
    fingertips touch, done. Otherwise its sign names the fingertip that touched alone;
 2. lift to `probe_tilt_lift` above that touch, tilt `probe_tilt_step_deg` about the fingertip centre to lower the
    other fingertip, re-read the in-air F/T baseline (tilting puts the gripper's weight onto the torque, about as much
-   as the contact) and touch again. A sign flip halves the step; a flip below `probe_tilt_min_step_deg` ends the seek
-   at the last tilt;
+   as the contact) and touch again. Steps of `probe_tilt_step_deg` until the torque changes sign, then bisection of
+   the two tilts either side; once they are `probe_tilt_min_step_deg` apart the seek ends at the tilt where
+   torque / |dFz| crosses zero between them. Each touch goes at `final_speed` to `probe_slow_margin` above the expected
+   contact, then at `probe_touch_speed`, and stops on `gripper.ft_probe_contact_n`;
 3. the plate top is the fingertip-centre height of the last touch. Lift straight up `probe_lift`, turn to the grasp
    tilt, open, re-zero, lower `probe_grip_depth` below the touch and close as usual. FSR nudges and F/T tracking
    slide along the tilted finger axis.

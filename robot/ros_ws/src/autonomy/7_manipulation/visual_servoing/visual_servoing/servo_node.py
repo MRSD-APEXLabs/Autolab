@@ -71,7 +71,8 @@ class VisualServoNode(Node):
         control_host, control_port = param('control_host', '0.0.0.0'), int(param('control_port', 8765))
 
         self.detector = detector if detector is not None else self._make_detector(param)
-        self.arm = arm if arm is not None else XArm(robot_ip, read_only=self.config.dry_run)
+        self.arm = arm if arm is not None else XArm(robot_ip, read_only=self.config.dry_run,
+                                                    ft_report_type=self.config.gripper.ft_report_type or None)
         self.runner = ServoRunner(self.arm, self.mount, self.config, prepare=self._prepare_camera)
         self.bridge = CvBridge()
 
