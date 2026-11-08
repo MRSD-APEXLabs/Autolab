@@ -286,3 +286,57 @@ def test_start_while_paused_is_rejected():
     sm.pause()
     with pytest.raises(RuntimeError):
         sm.start()
+
+
+# ── anomaly recordings ───────────────────────────────────────────────────────
+
+def _running_sm():
+    sm = RoutineStateMachine([{'name': 'a'}, {'name': 'b'}])
+    sm.start()
+    return sm
+
+
+def test_recordings_empty_on_new():
+    assert RoutineStateMachine([{'name': 'a'}]).recordings == []
+
+
+def test_add_recording_while_running():
+    sm = _running_sm()
+    assert sm.add_recording('c1') is True
+    sm.pause()
+    assert sm.add_recording('c2') is True
+    assert sm.recordings == ['c1', 'c2']
+
+
+def test_recording_ignored_when_inactive():
+    idle = RoutineStateMachine([{'name': 'a'}])
+    assert idle.add_recording('c1') is False
+    assert idle.recordings == []
+    done = RoutineStateMachine([{'name': 'a'}])
+    done.start()
+    done.on_success()
+    assert done.state == 'success'
+    assert done.add_recording('c2') is False
+    assert done.recordings == []
+
+
+def test_recording_dedup():
+    sm = _running_sm()
+    sm.add_recording('c1')
+    assert sm.add_recording('c1') is False
+    assert sm.recordings == ['c1']
+
+
+def test_recordings_kept_after_success():
+    sm = _running_sm()
+    sm.add_recording('c1')
+    sm.on_success()
+    sm.on_success()
+    assert sm.state == 'success'
+    assert sm.recordings == ['c1']
+
+
+def test_to_dict_has_recordings():
+    sm = _running_sm()
+    sm.add_recording('c1')
+    assert sm.to_dict()['recordings'] == ['c1']

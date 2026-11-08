@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import mqtt from "mqtt";
+import ClogCheckCard from "./ClogCheckCard";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
@@ -222,6 +223,9 @@ export default function ExperimentSequence() {
           </p>
         </div>
       )}
+
+      {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
+      {status?.recordings?.length > 0 && <ClogCheckCard clipIds={status.recordings} />}
 
       {/* Active Step Card */}
       {status && (state === "running" || state === "paused") && status.current_step_name && (

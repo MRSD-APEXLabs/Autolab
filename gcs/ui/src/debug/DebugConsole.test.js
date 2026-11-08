@@ -5,6 +5,7 @@ import DebugConsole from './DebugConsole';
 jest.mock('mqtt');
 
 beforeEach(() => {
+  global.fetch = jest.fn(() => new Promise(() => {}));
   mqtt.connect.mockReturnValue({
     on: jest.fn(),
     publish: jest.fn(),
@@ -14,13 +15,14 @@ beforeEach(() => {
   });
 });
 
-test('renders all five subsystem panels', () => {
+test('renders all subsystem panels', () => {
   render(<DebugConsole />);
   expect(screen.getByText('Navigation')).toBeInTheDocument();
   expect(screen.getByText('Planning')).toBeInTheDocument();
   expect(screen.getByText('Perception')).toBeInTheDocument();
   expect(screen.getByText('Manipulation')).toBeInTheDocument();
   expect(screen.getByText('Lab Machine Integration')).toBeInTheDocument();
+  expect(screen.getByText('Clog Detection')).toBeInTheDocument();
 });
 
 test('shows a disconnected banner before the mqtt client connects', () => {
