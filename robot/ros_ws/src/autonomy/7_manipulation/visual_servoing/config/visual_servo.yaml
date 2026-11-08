@@ -73,14 +73,14 @@
                                       # 1 mm less descent than the previous -0.002 setting
       approach_speed: 30.0            # mm/s down to final_segment above the grasp height
       final_segment: 0.02
-      final_speed: 8.0                # mm/s
+      final_speed: 3.0                # mm/s
       # Probe the plate top by touch (7_manipulation/README.md "Probe contact"): close to probe_close, descend from final_segment
       # above the camera's plate top until Fz rises (gripper.ft_contact_n for gripper.ft_contact_count reads),
       # lift probe_lift, open, re-zero the F/T, lower to probe_grip_depth below the touch, close as usual.
       # No touch within probe_depth: the attempt fails and max_retries re-aligns and probes again.
       # Needs the F/T sensor (whatever gripper.use_ft says); replaces depth while on.
-      probe_contact: false
-      probe_close: 550                # gripper value of the closed-finger probe
+      probe_contact: true
+      probe_close: 500                # gripper value of the closed-finger probe
       # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin before the arm
       # moves (550 units: 7.9 s). Time a 0 -> 550 close on the bench and set rate from it.
       probe_gripper_rate: 80.0        # gripper units/s
@@ -90,7 +90,7 @@
       probe_grip_depth: 0.0075        # m below the touched plate top the fingertips close (bench 2026-11-06: = old plate_height 0.03 / 4)
       # Tilt the probe until both closed fingertips touch (README "Probe tilt"); the grasp and lift keep that tilt.
       # The table leans towards the robot: one fingertip lands up to ~5 mm first. Tune with tools/probe_tilt_check.py.
-      probe_tilt: false
+      probe_tilt: true
       probe_tilt_step_deg: 1.0        # first tilt step; halves on each torque sign flip
       probe_tilt_min_step_deg: 0.25   # a flip below this ends the seek at the last tilt
       probe_tilt_max_deg: 15.0        # from straight down; beyond: level grasp from the first touch
