@@ -193,7 +193,7 @@ def voxel_downsample(xyz: np.ndarray, voxel: float) -> np.ndarray:
 
 
 def cloud_xyz(data, fields: Sequence, point_step: int, width: int, height: int = 1,
-              row_step: int = 0, is_bigendian: bool = False
+              row_step: int = 0, is_bigendian: bool = False, selected_ring: int = -1
               ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Zero-copy views of the x, y, z columns of a PointCloud2 data buffer.
@@ -203,6 +203,8 @@ def cloud_xyz(data, fields: Sequence, point_step: int, width: int, height: int =
     offset 18): numpy's default aligned struct layout would read garbage. The returned arrays are
     strided, possibly unaligned views [height * width] into `data`; nothing is copied here.
     Organized clouds (height > 1, optional row padding) are handled through row_step.
+    selected_ring >= 0 keeps only that UINT16 ring in BOTH downstream outputs.
+    Missing ring metadata is an error when filtering; never fall back to all channels.
     """
     by_name = {f.name: f for f in fields}
     formats, offsets = [], []
@@ -214,8 +216,16 @@ def cloud_xyz(data, fields: Sequence, point_step: int, width: int, height: int =
             raise ValueError(f"PointCloud2 field '{name}' has non-float datatype {field.datatype}")
         formats.append(('>' if is_bigendian else '<') + _FLOAT_TYPES[field.datatype])
         offsets.append(field.offset)
+    names = ['x', 'y', 'z']
+    if selected_ring >= 0:
+        ring = by_name.get('ring')
+        if ring is None or ring.datatype != PointField.UINT16 or ring.count != 1:
+            raise ValueError('selected_ring requires a scalar UINT16 PointCloud2 ring field')
+        names.append('ring')
+        formats.append(('>' if is_bigendian else '<') + 'u2')
+        offsets.append(ring.offset)
     try:
-        dtype = np.dtype({'names': ['x', 'y', 'z'], 'formats': formats, 'offsets': offsets,
+        dtype = np.dtype({'names': names, 'formats': formats, 'offsets': offsets,
                           'itemsize': point_step})
     except ValueError as exc:  # a field does not fit inside point_step
         raise ValueError(f'inconsistent PointCloud2 layout: {exc}') from exc
@@ -235,6 +245,8 @@ def cloud_xyz(data, fields: Sequence, point_step: int, width: int, height: int =
                          f'row_step {row_step})')
     points = np.ndarray(shape=(height, width), dtype=dtype, buffer=data,
                         strides=(row_step, point_step))
+    if selected_ring >= 0:
+        points = points[points['ring'] == selected_ring]
     return points['x'].reshape(-1), points['y'].reshape(-1), points['z'].reshape(-1)
 
 
@@ -285,6 +297,12 @@ class CloudToScanNode(Node):
                 ParameterDescriptor(description=description, read_only=True)).value
 
         defaults = ScanConfig()
+        self._selected_ring = declare(
+            'selected_ring', -1,
+            'VLP-16 ring for /scan and /obstacle_points: -1 = all, 7 = -1 degree, 8 = +1 degree '
+            '(rings are sorted by elevation, not hardware laser ID).')
+        if not -1 <= self._selected_ring <= 15:
+            raise ValueError('invalid cloud_to_scan parameters: selected_ring must be in [-1, 15]')
         config = ScanConfig(
             lidar_height=declare(
                 'lidar_height', defaults.lidar_height,
@@ -347,6 +365,7 @@ class CloudToScanNode(Node):
         self._sub = self.create_subscription(PointCloud2, 'velodyne_points', self._on_cloud, qos)
 
         conv = self._converter
+        self.get_logger().info(f'cloud_to_scan: selected_ring={self._selected_ring} (-1 = all)')
         self.get_logger().info(
             f'cloud_to_scan: velodyne_points -> scan ({conv.num_beams} beams, azimuth '
             f'[{config.angle_min_deg:.1f}, {math.degrees(conv.angle_max):.1f}] deg @ '
@@ -367,7 +386,7 @@ class CloudToScanNode(Node):
         start = time.perf_counter()
         try:
             x, y, z = cloud_xyz(msg.data, msg.fields, msg.point_step, msg.width, msg.height,
-                                msg.row_step, msg.is_bigendian)
+                                msg.row_step, msg.is_bigendian, selected_ring=self._selected_ring)
         except ValueError as exc:
             # Publishing nothing is the safe reaction: the consumers' source timeouts then stop
             # the robot instead of letting it drive on stale or garbled data.

@@ -3,6 +3,9 @@
 # (velodyne_20260829_141942); heights are ABOVE THE FLOOR, azimuths are in the velodyne frame.
 cloud_to_scan:
   ros__parameters:
+    # ROS ring IDs are sorted by elevation: ring 7 = -1 deg (hardware laser ID 14).
+    # Applies to BOTH /scan and /obstacle_points. Set -1 to restore all channels.
+    selected_ring: 7
     lidar_height: 0.330            # optical centre above the floor (floor-plane fit: 0.3296 m, std 1.4 mm)
 
     # Usable azimuth window. Everything else ([154, 180] U [-180, -62] deg, ~136 deg behind / right of the robot)

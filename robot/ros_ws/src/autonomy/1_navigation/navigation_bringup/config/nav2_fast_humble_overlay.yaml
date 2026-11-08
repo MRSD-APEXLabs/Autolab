@@ -1,0 +1,20 @@
+# Humble lacks VelocityPolygon. Its predictive Approach action provides an
+# earlier speed-dependent response without enlarging the low-speed dock zone.
+# At max DockPath translation (~0.134 m/s), 0.55 s is less than the existing
+# 8 cm stop margin. No Jazzy-only polygon type or nested string points are used.
+collision_monitor:
+  ros__parameters:
+    polygons: ["PolygonStop", "PolygonSlow", "FastApproach"]
+    PolygonSlow:
+      type: "polygon"
+      points: [0.69, 0.69, 0.69, -0.69, -0.69, -0.69, -0.69, 0.69]
+      max_points: 3
+    FastApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: "/local_costmap/published_footprint"
+      time_before_collision: 0.55
+      simulation_time_step: 0.05
+      max_points: 3
+      visualize: false
+      enabled: true

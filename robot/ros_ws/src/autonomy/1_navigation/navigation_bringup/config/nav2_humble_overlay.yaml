@@ -2,6 +2,9 @@
 # values win. Only what Humble's Nav2 spells differently; parameters Humble does not know are ignored by it.
 behavior_server:
   ros__parameters:
+    # Humble has one behavior frame; its collision checker uses the odom-frame
+    # local costmap. Jazzy splits local_frame (odom) from global_frame (map).
+    global_frame: odom
     # Humble registers the behaviors under "package/Class", Jazzy under "package::Class".
     spin:
       plugin: "nav2_behaviors/Spin"
@@ -20,5 +23,10 @@ collision_monitor:
       points: [0.42, 0.42, 0.42, -0.42, -0.42, -0.42, -0.42, 0.42]
       max_points: 3
     PolygonSlow:
+      type: "polygon"
       points: [0.69, 0.69, 0.69, -0.69, -0.69, -0.69, -0.69, 0.69]
       max_points: 3
+
+controller_server:
+  ros__parameters:
+    progress_checker_plugin: "progress_checker"

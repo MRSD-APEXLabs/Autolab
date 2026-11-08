@@ -34,6 +34,7 @@ and starts nothing, instead of failing the whole autonomy bringup. See ../README
 """
 
 import os
+import yaml
 
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
@@ -48,9 +49,9 @@ from launch_ros.substitutions import FindPackageShare
 PKG = 'navigation_bringup'
 
 # Default map and saved places: maps/ of this package. Override with map:=/path/to/other.yaml.
-DEFAULT_MAP_NAME = 'map.yaml'
+DEFAULT_MAP_NAME = 'best.yaml'
 
-RUNTIME_PACKAGES = ('swerve_navigation', 'velodyne_driver', 'velodyne_pointcloud', 'joy',
+RUNTIME_PACKAGES = ('swerve_navigation', 'velodyne_driver', 'velodyne_pointcloud', 'sdl2_vendor',
                     'robot_state_publisher')
 
 # swerve_bridge imports the phoenix6 PYTHON package from the first of these that has it (the
@@ -127,6 +128,21 @@ def resolve_goal_heading(nav_motion, goal_heading):
     return goal_heading
 
 
+def resolve_nav_motion(selection, map_yaml):
+    if selection != 'auto':
+        return selection
+    locations = os.path.splitext(str(map_yaml))[0] + '.locations.yaml'
+    try:
+        with open(locations) as handle:
+            mode = (yaml.safe_load(handle) or {}).get('navigation', {}).get('nav_motion', 'forward')
+    except FileNotFoundError:
+        return 'forward'
+    if mode not in ('forward', 'omni'):
+        raise RuntimeError(f'invalid navigation.nav_motion in {locations}: {mode!r}')
+    return mode
+
+
+
 def _lifecycle_manager(name, node_names):
     return Node(
         package='nav2_lifecycle_manager', executable='lifecycle_manager', name=name,
@@ -166,16 +182,33 @@ def _nodes(context):
             f'map file not found: {map_yaml}. Pass map:=/path/to/map.yaml, or build one with '
             'the mapping mode in nav_ws and save it next to this one   -- nothing was started.')
 
+    nav_motion = arg('nav_motion')
+    locations_file = os.path.splitext(map_yaml)[0] + '.locations.yaml'
+    try:
+        with open(locations_file) as handle:
+            map_settings = yaml.safe_load(handle) or {}
+    except FileNotFoundError:
+        map_settings = {}
+    nav_motion = resolve_nav_motion(nav_motion, map_yaml)
+    if nav_motion not in ('omni', 'forward'):
+        raise RuntimeError(f'invalid map navigation.nav_motion: {nav_motion}')
+    nav_speed = arg('nav_speed')
     params = [os.path.join(share, 'config', 'nav2_params.yaml')]
-    # overlays come after the base file, so their values win
+    if nav_motion == 'omni':
+        params.append(os.path.join(share, 'config', 'nav2_omni_overlay.yaml'))
+    if nav_speed == 'fast':
+        params.append(os.path.join(share, 'config', 'nav2_fast_overlay.yaml'))
+        if nav_motion == 'omni':
+            params.append(os.path.join(share, 'config', 'nav2_fast_omni_overlay.yaml'))
+    # Humble conversions must be LAST: flat polygons / max_points, no velocity_polygon.
     if HUMBLE:
         params.append(os.path.join(share, 'config', 'nav2_humble_overlay.yaml'))
-    if arg('nav_motion') == 'omni':
-        params.append(os.path.join(share, 'config', 'nav2_omni_overlay.yaml'))
+        if nav_speed == 'fast':
+            params.append(os.path.join(share, 'config', 'nav2_fast_humble_overlay.yaml'))
     params.append(WALL_TIME)
 
     x, y, yaw = (parse_float(name, arg(name)) for name in ('x', 'y', 'yaw'))
-    goal_heading = resolve_goal_heading(arg('nav_motion'), arg('goal_heading'))
+    goal_heading = resolve_goal_heading(nav_motion, arg('goal_heading'))
     approach = parse_float('approach_distance', arg('approach_distance'))
     bt_xml = os.path.join(share, 'behavior_trees', 'navigate_to_pose_cautious_humble.xml'
                           if HUMBLE else 'navigate_to_pose_cautious.xml')
@@ -191,7 +224,7 @@ def _nodes(context):
     # Every node that commands velocity is remapped away from /cmd_vel (see module docstring).
     to_nav_raw = [('cmd_vel', 'cmd_vel_nav_raw')]
     actions = [
-        LogInfo(msg=f"[navigation] map={map_yaml} nav_motion={arg('nav_motion')} "
+        LogInfo(msg=f"[navigation] map={map_yaml} nav_motion={nav_motion} nav_speed={nav_speed} "
                     f'goal_heading={goal_heading} approach={approach} '
                     f'AMCL initial pose x={x} y={y} yaw={yaw}'),
         LogInfo(msg='[navigation] *** HARDWARE MODE: swerve_bridge drives the REAL robot. Keep the '
@@ -262,7 +295,11 @@ def _nodes(context):
              output='both',
              parameters=[WALL_TIME, {'locations_file': locations_file, 'global_frame': 'map',
                                      'base_frame': 'base_footprint',
-                                     'approach_distance': approach}]),
+                                     'approach_distance': approach,
+                                     'station_transit_keep_heading': nav_motion == 'omni',
+                                     'docking_behavior_tree': os.path.join(share, 'behavior_trees',
+                                         'navigate_to_station_staging_humble.xml' if HUMBLE else
+                                         'navigate_to_station_staging.xml')}]),
     ]
 
     # ---- description, operator, visualisation ----
@@ -280,10 +317,8 @@ def _nodes(context):
         Node(package='swerve_navigation', executable='cmd_vel_mux', name='cmd_vel_mux', output='both',
              parameters=[_share('config', 'cmd_vel_mux.yaml'), WALL_TIME]),
 
-        # If the pad is not found after a reboot with nobody logged in on the local display (no
-        # uaccess ACL on /dev/input/event*), SDL can fall back to the world-readable legacy
-        # /dev/input/js* devices:  additional_env={'SDL_LINUX_JOYSTICK_CLASSIC': '1'}
-        Node(package='joy', executable='joy_node', name='joy_node', output='both',
+        # One named Bluetooth/USB SDL reader; Docker must expose live input nodes.
+        Node(package='swerve_navigation', executable='joy_auto', name='joy_node', output='both',
              parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
         Node(package='swerve_navigation', executable='joy_teleop', name='joy_teleop', output='both',
              parameters=[_share('config', 'joy.yaml'), WALL_TIME], condition=with_joy),
@@ -305,7 +340,9 @@ def _nodes(context):
                 'global_frame': 'map', 'base_frame': 'base_footprint',
                 'locations_file': locations_file,
                 # Goals take the same path as a goal clicked in RViz: staged approach included.
-                'goal_topic': '/goal_pose_staged' if approach > 0.0 else '/goal_pose',
+                'goal_topic': '/goal_pose_staged' if approach > 0.0 or
+                              map_settings.get('docking', {}).get('enabled') is True else '/goal_pose',
+                'station_docking': map_settings.get('docking', {}).get('enabled') is True,
                 'cancel_topic': '/nav_cancel'}]))
     return actions
 
@@ -323,7 +360,10 @@ def generate_launch_description():
                         f'<navigation_bringup share>/maps/{DEFAULT_MAP_NAME}. The saved places '
                         'are read from <map>.locations.yaml next to it.'),
         DeclareLaunchArgument(
-            'nav_motion', default_value='forward', choices=['forward', 'omni'],
+            'nav_speed', default_value='fast', choices=['normal', 'fast'],
+            description='fast: 2x transit limits with smooth ramps and slow final docking. normal: previous smooth speeds.'),
+        DeclareLaunchArgument(
+            'nav_motion', default_value='auto', choices=['auto', 'forward', 'omni'],
             description='forward: Nav2 drives like a diff-drive, always into the lidar field of '
                         'view (the robot is blind behind / right). omni: also strafe (adds '
                         'config/nav2_omni_overlay.yaml).'),
@@ -357,7 +397,7 @@ def generate_launch_description():
                         'rest of the system talks to.'),
         DeclareLaunchArgument(
             'joy', default_value='true',
-            description='Start joy_node + joy_teleop (Xbox pad: hold LT to drive, RB = turbo, '
+            description='Start Bluetooth/USB selector + joy_teleop (Xbox pad: hold LT to drive, RB = turbo, '
                         'B = e-stop, start = release e-stop, X = cancel navigation, A = re-zero '
                         'the field-centric heading). The pad is the only e-stop: never run the '
                         'real robot without it.'),

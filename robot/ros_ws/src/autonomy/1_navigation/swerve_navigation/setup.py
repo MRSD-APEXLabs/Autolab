@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'swerve_bridge = swerve_navigation.swerve_bridge:main',
+            'joy_auto = swerve_navigation.joy_auto:main',
             'joy_teleop = swerve_navigation.joy_teleop:main',
             'cmd_vel_mux = swerve_navigation.cmd_vel_mux:main',
             'cloud_to_scan = swerve_navigation.cloud_to_scan:main',

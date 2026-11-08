@@ -1,0 +1,9 @@
+# Add to Autolab's ROOT docker-compose.yaml, after stopping navigation.
+# Keep this override on later recreates to preserve hotplug/reconnect support.
+services:
+  robot-l4t:
+    volumes:
+      - type: bind
+        source: /dev/input
+        target: /dev/input
+        read_only: true

@@ -1,17 +1,16 @@
-# Gamepad: joy_node (ros-jazzy-joy 3.3.0, raw SDL joystick API) + swerve_navigation joy_teleop.
+# Gamepad: joy_auto (Bluetooth preferred, USB fallback); normalised Xbox layout on Humble/Jazzy.
 
 joy_node:
   ros__parameters:
-    # EXACT SDL name (SDL_JoystickNameForIndex). Not "X360 Controller" (what joy_enumerate_devices prints) and not
-    # "Microsoft X-Box 360 pad" (the kernel name). Never select by device_id: index 0 on this machine is the
-    # 3Dconnexion SpaceMouse.
-    device_name: "Xbox 360 Controller"
+    # SDL joystick names probed on this machine. The Bluetooth 8BitDo Pro 2 in X mode
+    # reports Xbox One S Controller; USB is the existing Xbox 360 pad.
+    # Preference is re-evaluated continuously, including hotplug/reconnect.
+    preferred_device_name: "Xbox One S Controller"
+    fallback_device_name: "Xbox 360 Controller"
     deadzone: 0.15              # this pad rests at 0.07 on right-stick X; the 0.05 default leaks a constant creep
     autorepeat_rate: 20.0       # [Hz] keeps /joy flowing while the sticks are held still
-    coalesce_interval_ms: 1
-    sticky_buttons: false
 
-# Layout from joy_node for this pad (8 axes, 11 buttons; left / up = +1, triggers rest at +1):
+# Normalised /joy layout (8 axes, 11 buttons; left / up = +1, triggers rest at +1):
 #   axes    0 LX  1 LY  2 LT  3 RX  4 RY  5 RT  6 dpad-X  7 dpad-Y
 #   buttons 0 A  1 B  2 X  3 Y  4 LB  5 RB  6 back  7 start  8 guide  9 L3  10 R3
 # Same feel as the user's final.py: RIGHT stick translates, LEFT stick X rotates, no sign flips.

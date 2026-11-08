@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
       Splitter Ratio: 0.5833333134651184
-    Tree Height: 420
+    Tree Height: 204
   - Class: rviz_common/Tool Properties
     Expanded:
       - /Publish Point1
@@ -18,7 +18,7 @@ Panels:
     Name: Views
     Splitter Ratio: 0.3333333432674408
   - Class: nav2_rviz_plugins/Navigation 2
-    Name: Navigation 2
+    Name: Nav2 transit (see docking status)
 Visualization Manager:
   Class: ""
   Displays:
@@ -41,8 +41,6 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Value: true
     - Alpha: 1
-      Binary representation: false
-      Binary threshold: 100
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: true
@@ -65,18 +63,31 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
-      Filter (blacklist): ""
-      Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: true
+        base_footprint:
+          Value: true
+        base_link:
+          Value: true
+        map:
+          Value: true
+        odom:
+          Value: true
+        velodyne:
+          Value: true
       Marker Scale: 0.5
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        map:
+          odom:
+            base_footprint:
+              base_link:
+                velodyne:
+                  {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -96,7 +107,21 @@ Visualization Manager:
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
-        Link Tree Style: ""
+        Link Tree Style: Links in Alphabetic Order
+        base_footprint:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        velodyne:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
       Mass Properties:
         Inertia: false
         Mass: false
@@ -226,8 +251,6 @@ Visualization Manager:
     - Class: rviz_common/Group
       Displays:
         - Alpha: 0.30000001192092896
-          Binary representation: false
-          Binary threshold: 100
           Class: rviz_default_plugins/Map
           Color Scheme: costmap
           Draw Behind: false
@@ -281,8 +304,6 @@ Visualization Manager:
     - Class: rviz_common/Group
       Displays:
         - Alpha: 0.699999988079071
-          Binary representation: false
-          Binary threshold: 100
           Class: rviz_default_plugins/Map
           Color Scheme: costmap
           Draw Behind: false
@@ -389,6 +410,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /point_to_goal/goal_marker
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Station docking status
+      Namespaces:
+        station_docking_status: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /station_docking/marker
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Waypoints
@@ -456,7 +490,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0
+      Angle: -3.0149974822998047
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -475,15 +509,16 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1000
+  Height: 955
   Hide Left Dock: false
   Hide Right Dock: true
-  Navigation 2:
+  Nav2 transit (see docking status):
     collapsed: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000019b00000365fc0200000004fb000000100044006900730070006c006100790073010000003b00000107000000c700fffffffb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000148000000810000005c00fffffffb0000000a0056006900650077007301000001cf000000a8000000a000fffffffb00000042004e0061007600320020007400720061006e0073006900740020002800730065006500200064006f0063006b0069006e006700200073007400610074007500730029010000027d000001230000012300ffffff0000031d0000036500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Tool Properties:
-    collapsed: true
+    collapsed: false
   Views:
-    collapsed: true
-  Width: 1600
-  X: 60
-  Y: 60
+    collapsed: false
+  Width: 1214
+  X: 66
+  Y: 32

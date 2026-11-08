@@ -1,0 +1,13 @@
+<!-- Only the OPEN staging pose is given to this tree, never the parked pose.
+     Stop on failure. No spin/back-up recovery or direct-to-station fallback.
+     Explicit goal checkers keep the ordinary navigation tolerance unchanged. -->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <PipelineSequence name="NavigateToOpenStaging">
+      <RateController hz="1.0">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+      </RateController>
+      <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="dock_staging_checker"/>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>
