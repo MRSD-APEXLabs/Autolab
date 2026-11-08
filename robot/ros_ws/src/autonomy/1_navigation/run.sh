@@ -9,10 +9,11 @@
 #                  every topic behaves normally, the robot cannot move.
 #   --yes          skip the typed confirmation (--hardware only)
 #   launch args    passed to navigation.launch.py, e.g.
-#                    map:=/path/to/other.yaml       another map (default: the one in the package)
+#                    map:=/path/to/other.yaml       another map (default: best)
 #                    x:=1.0 y:=0.5 yaw:=1.57        initial pose in the map
 #                    rviz:=false                    headless
 #                    api_namespace:=/robot_1        publish the API as /robot_1/nav/...
+#                    nav_speed:=normal              restore the previous smooth transit speeds
 #                    nav_motion:=omni               allow strafing - read the blind-wedge warning
 #
 # The Humble container uses an isolated ROS domain and Fast DDS over UDP.  RViz runs as a second
@@ -139,32 +140,9 @@ if ((HARDWARE)); then
     echo "Could not bring the CANivore network up: is it plugged in? (check: caniv -l)" >&2
     exit 1
   fi
-  # The pad has to be READABLE, not just present: in the robot container /dev/input/event* is
-  # root:input 0660 and the container user is not in the host's input group unless
-  # docker-compose's group_add says so - joy_node then silently finds no joystick at all.
-  # SDL uses the EVENT devices, not the legacy /dev/input/js*: js0 is world-readable here, so
-  # checking that one would pass while joy_node still sees nothing.
-  have_input=0
-  readable_input=0
-  for dev in /dev/input/event*; do
-    [[ -e "$dev" ]] || continue
-    have_input=1
-    [[ -r "$dev" ]] && readable_input=1
-  done
-  if ((have_input == 0)); then
-    echo "REFUSING: no joystick found. The Xbox pad is the e-stop: plug it in first." >&2
-    exit 1
-  fi
-  if ((readable_input == 0)); then
-    gid="$(stat -c '%g' /dev/input/event* 2> /dev/null | head -1)"
-    echo "REFUSING: /dev/input/* exists but this user cannot read it, so joy_node would find no" >&2
-    echo "          gamepad - and the pad is the e-stop.  You are $(id -un), groups: $(id -Gn)." >&2
-    echo "          The devices belong to group ${gid:-?}.  In the robot container:" >&2
-    echo "            now:        sg hostinput -c '$0 --hardware'" >&2
-    echo "            permanent:  group_add: [\"${gid:-996}\"] for this service in" >&2
-    echo "                        robot/docker/docker-compose.yaml, then docker compose up -d" >&2
-    exit 1
-  fi
+  # Opening the selected gamepad is required: an accessible keyboard event node
+  # does not prove that the Bluetooth controller is exposed to the container.
+  /usr/bin/python3 "$SRC_DIR/scripts/check_controller.py"
   cat << 'EOF2'
 
 ================================================================================================
@@ -172,7 +150,7 @@ if ((HARDWARE)); then
 ================================================================================================
   This ENABLES THE SWERVE DRIVETRAIN and THE ROBOT WILL MOVE BY ITSELF towards the goals it is
   given - from RViz, from a saved place, or from /nav/goal_pose and /nav/goal_location published
-  by the rest of the system (up to 0.40 m/s).  Keep the Xbox pad IN YOUR HAND:
+  by the rest of the system (up to 0.90 m/s forward by default; nav_speed:=normal restores 0.45).  Keep the Xbox pad IN YOUR HAND:
 
       B          E-STOP (latched)          Start   release it (LT released, sticks centred)
       hold LT    joystick OVERRIDES navigation     X       cancel the current goal

@@ -18,7 +18,7 @@ Panels:
     Name: Views
     Splitter Ratio: 0.3333333432674408
   - Class: nav2_rviz_plugins/Navigation 2
-    Name: Navigation 2
+    Name: Nav2 transit (see docking status)
 Visualization Manager:
   Class: ""
   Displays:
@@ -388,6 +388,18 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /point_to_goal/goal_marker
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Station docking status
+      Namespaces: {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /station_docking/marker
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true

@@ -59,7 +59,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.signals import SignalHandlerOptions
 from rclpy.subscription import Subscription
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String, Float64
+from .yaw_bias import YawBiasConfig, YawBiasCompensator, StationHeadingHold
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 
@@ -606,7 +607,8 @@ class Drivetrain:
 
     def __init__(self, *, target: str, site_packages: str, tuner_constants_dir: str,
                  work_dir: str, odometry_hz: float, drive_request_type: str,
-                 deadband: float, rotational_deadband: float, diagnostics: bool, logger) -> None:
+                 deadband: float, rotational_deadband: float, diagnostics: bool, logger, steer_profile: bool = False,
+                 steer_profile_speed: float = 3.0, steer_profile_accel: float = 12.0) -> None:
         if target not in (TARGET_HARDWARE, TARGET_SIMULATION):
             raise ValueError(f'invalid target {target!r}')
         request_type_name = drive_request_type_name(drive_request_type)
@@ -630,7 +632,7 @@ class Drivetrain:
             if site_packages not in sys.path:
                 sys.path.append(site_packages)
             import phoenix6
-            from phoenix6 import swerve, unmanaged, utils
+            from phoenix6 import configs, swerve, unmanaged, utils
 
             package_root = os.path.realpath(site_packages) + os.sep
             if not os.path.realpath(phoenix6.__file__).startswith(package_root):
@@ -672,6 +674,8 @@ class Drivetrain:
                 getattr(swerve.SwerveModule.DriveRequestType, request_type_name))
             .with_deadband(float(deadband))
             .with_rotational_deadband(float(rotational_deadband)))
+        if steer_profile:
+            self._request.with_steer_request_type(swerve.SwerveModule.SteerRequestType.MOTION_MAGIC_EXPO)
         # python float on purpose: phoenix6 26.3.0 rejects an int odometry frequency.
         self._drivetrain = constants_module.TunerSwerveDrivetrain(
             tuner.drivetrain_constants, float(odometry_hz), modules)
@@ -680,6 +684,20 @@ class Drivetrain:
             libraries = mapped_ctre_libraries()
             check_native_target(target, bool(utils.is_simulation()), libraries)
             self.stop()     # replace the drivetrain's initial Idle request by an explicit zero
+            if steer_profile:
+                # Swerve construction overwrites the initial Expo kV/kA, so apply
+                # only this config group afterwards. Units are module turns, not
+                # rotor turns. Slot gains, offsets and drive configs stay intact.
+                profile = (configs.MotionMagicConfigs()
+                           .with_motion_magic_cruise_velocity(steer_profile_speed / math.tau)
+                           .with_motion_magic_expo_k_v(12.0 * math.tau / steer_profile_speed)
+                           .with_motion_magic_expo_k_a(12.0 * math.tau / steer_profile_accel))
+                for index in range(len(modules)):
+                    status = self._drivetrain.get_module(index).steer_motor.configurator.apply(profile)
+                    if not status.is_ok():
+                        raise RuntimeError(f'module {index} steering profile failed: {status}')
+                logger.info(f'profiled azimuth: {steer_profile_speed:.2f} rad/s, '
+                            f'{steer_profile_accel:.2f} rad/s^2 at nominal 12 V')
             if self._simulation:
                 from swerve_navigation.phoenix_sim import PySimSwerve
                 self._sim = PySimSwerve(self._drivetrain, modules)
@@ -801,16 +819,23 @@ class ControlLoop:
     Nothing is ever raised to the caller: the timer (and with it the watchdog) must keep running.
     """
 
-    def __init__(self, governor: CommandGovernor, drivetrain, report_fault) -> None:
+    def __init__(self, governor: CommandGovernor, drivetrain, report_fault, command_adapter=None) -> None:
         self._governor = governor
         self._drivetrain = drivetrain
         self._report_fault = report_fault
+        self._command_adapter = command_adapter
         self.fault_count = 0
         self.last_fault = ''
 
     def step(self, now: float, inhibit: bool) -> None:
         try:
             command = self._governor.update(now, inhibit=inhibit)
+            if self._command_adapter is not None:
+                adapted = self._command_adapter(command, now)
+                if (adapted.enable != command.enable or adapted.vx != command.vx or
+                        adapted.vy != command.vy or not math.isfinite(adapted.wz)):
+                    raise ValueError('command adapter changed translation/enable or produced invalid yaw')
+                command = adapted
             if command.enable:
                 self._drivetrain.drive(command.vx, command.vy, command.wz)
             else:
@@ -929,6 +954,14 @@ class SwerveBridge(Node):
         self._rotational_deadband = self._param(
             'rotational_deadband', 0.05,
             'Commanded rotation below this [rad/s] is treated as zero (see deadband). 0.0 disables.')
+        self._steer_profile = self._param('steer_profile', False,
+                                          'Use onboard Motion Magic Expo for smooth module reorientation.')
+        self._steer_profile_speed = self._param('steer_profile_speed', 3.0,
+                                                'Module profile cruise speed [rad/s].')
+        self._steer_profile_accel = self._param('steer_profile_accel', 12.0,
+                                                'Module profile initial acceleration at nominal 12 V [rad/s^2].')
+        _require_finite_positive('steer_profile_speed', self._steer_profile_speed)
+        _require_finite_positive('steer_profile_accel', self._steer_profile_accel)
         steer = None
         if self._param('steer_filter', True,
                        'Stabilise the module angles against command jitter (SteerStabiliser).'):
@@ -951,6 +984,37 @@ class SwerveBridge(Node):
             'phoenix_diagnostics', False,
             'Start the phoenix6 diagnostics server (TCP 1250) so Tuner X can attach.  Off by '
             'default: on this robot its start is what precedes the control timer going silent.')
+        yaw_enabled = self._param('yaw_bias_enabled', False,
+                                  'Apply fitted translational yaw bias on hardware during transit only.')
+        if yaw_enabled and self._hardware and self._drive_request_type != 'velocity':
+            raise ValueError('yaw bias was calibrated for velocity drive mode, not open_loop')
+        yaw_config = YawBiasConfig(
+            vx_gain=self._param('yaw_bias_vx_gain', 0.0, 'Forward velocity to yaw coupling [rad/m].'),
+            vy_gain=self._param('yaw_bias_vy_gain', 0.0, 'Lateral velocity to yaw coupling [rad/m].'),
+            gain=self._param('yaw_bias_gain', 0.75, 'Fraction of identified yaw bias to counteract.'),
+            max_correction=self._param('yaw_bias_max_correction', 0.07,
+                                       'Maximum added yaw correction [rad/s], hard limit 0.15.'),
+            model_speed=self._param('yaw_bias_model_speed', 0.30,
+                                    'Saturate model inputs above this translation speed [m/s].'),
+            command_deadband=self._rotational_deadband,
+            max_angular_speed=limits.max_angular_speed, max_angular_accel=limits.max_angular_accel)
+        # The measured real-world bias is absent from Phoenix simulation.
+        self._yaw_bias = YawBiasCompensator(yaw_config) if yaw_enabled and self._hardware else None
+        station_hold = self._param('station_heading_hold_enabled', False,
+                                  'Counter yaw drift only during commanded and measured station translation.')
+        hold_controller = StationHeadingHold(yaw_config,
+            kp=self._param('station_heading_kp', 1.5, 'Station heading proportional gain [1/s].'),
+            kd=self._param('station_heading_kd', .15, 'Station gyro rate damping gain.'))
+        self._station_heading_hold = hold_controller if station_hold and self._yaw_bias is not None else None
+        self._yaw_source = 'unknown'
+        self._yaw_lock_seen = False
+        self._yaw_lock_stamp = -math.inf
+        self._yaw_lock = True
+        self._station_heading_target = None
+        self._station_heading_target_stamp = -math.inf
+        self._yaw_has_docking = True  # fail closed until graph discovery/status refresh
+        self._yaw_mode_started = time.monotonic()
+        self._applied_command = (0.0, 0.0, 0.0)
         self._pose_covariance = diagonal_covariance(self._param(
             'pose_covariance_diagonal', [0.01, 0.01, 1e-6, 1e-6, 1e-6, 0.02],
             'Diagonal of the /odom pose covariance (x, y, z, roll, pitch, yaw).'),
@@ -1011,6 +1075,15 @@ class SwerveBridge(Node):
         group = MutuallyExclusiveCallbackGroup()
         self._odom_pub = self.create_publisher(Odometry, 'odom', 10)
         self._status_pub = self.create_publisher(DiagnosticArray, 'swerve/status', 1)
+        self._applied_pub = self.create_publisher(Twist, 'swerve/applied_cmd_vel', 1)
+        if self._yaw_bias is not None:
+            latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+            self._yaw_mode_started = time.monotonic()
+            self.create_subscription(Bool, 'station_docking/rotation_locked', self._on_yaw_lock, latched)
+            self.create_subscription(Float64, 'station_docking/heading_target', self._on_station_heading, latched)
+            self.create_subscription(String, 'cmd_vel_mux/active_source',
+                                     lambda msg: setattr(self, '_yaw_source', msg.data), latched)
         self._tf_broadcaster = TransformBroadcaster(self) if self._publish_tf else None
         # rclpy passes the MessageInfo (reception timestamps) only to a callback that REQUIRES a
         # second argument, and only from Iron on: Humble's rclpy has no MessageInfo and calls
@@ -1036,11 +1109,14 @@ class SwerveBridge(Node):
             target=self._target, site_packages=self._site_packages,
             tuner_constants_dir=self._tuner_constants_dir, work_dir=self._work_dir,
             odometry_hz=self._odometry_hz, drive_request_type=self._drive_request_type,
-            deadband=self._deadband, rotational_deadband=self._rotational_deadband,
+            deadband=self._deadband,
+            rotational_deadband=0.0 if self._yaw_bias is not None else self._rotational_deadband,
+            steer_profile=self._steer_profile, steer_profile_speed=self._steer_profile_speed,
+            steer_profile_accel=self._steer_profile_accel,
             diagnostics=self._phoenix_diagnostics, logger=log)
         self._control = ControlLoop(
             self._governor, self._drivetrain,
-            lambda message: log.error(message, throttle_duration_sec=1.0))
+            lambda message: log.error(message, throttle_duration_sec=1.0), self._correct_yaw)
         try:
             # The single timer is the only caller of set_control()/feed_enable().  Steady clock:
             # a wall-clock step (NTP) must neither stall nor burst the control loop.
@@ -1110,6 +1186,7 @@ class SwerveBridge(Node):
         # field-centric teleop) would be steering blind -> inhibit.
         ready = self._odometry_ready(now)
         self._control.step(now, inhibit=not ready)     # first: nothing may delay the safety path
+        self._guarded('applied command publish', self._publish_applied, now)
         if not ready:
             self._guarded('odometry stall report', self._report_stalled_odometry, now)
         self._guarded('odometry publish', lambda at: self._publish_odometry(at, ready), now)
@@ -1120,6 +1197,54 @@ class SwerveBridge(Node):
         if now - self._last_heartbeat >= HEARTBEAT_PERIOD_S:
             self._last_heartbeat = now
             self._guarded('heartbeat', self._log_heartbeat, now)
+
+    def _on_yaw_lock(self, msg: Bool) -> None:
+        self._yaw_lock_seen, self._yaw_lock, self._yaw_lock_stamp = True, msg.data, time.monotonic()
+
+    def _on_station_heading(self, msg: Float64) -> None:
+        self._station_heading_target = msg.data if math.isfinite(msg.data) else None
+        self._station_heading_target_stamp = time.monotonic()
+
+    def _correct_yaw(self, command: DriveCommand, now: float) -> DriveCommand:
+        if not command.enable:
+            if self._yaw_bias is not None:
+                self._yaw_bias.reset()
+            if self._station_heading_hold is not None:
+                self._station_heading_hold.reset()
+            self._applied_command = (0.0, 0.0, 0.0)
+            return command
+        wz = command.wz
+        if self._yaw_bias is not None:
+            fresh_lock = self._yaw_lock_seen and 0 <= now - self._yaw_lock_stamp <= 0.5
+            locked = ((not fresh_lock or self._yaw_lock) if self._yaw_lock_seen else
+                      self._yaw_has_docking or now - self._yaw_mode_started < 3.0)
+            wz = self._yaw_bias.apply(
+                command.vx, command.vy, command.wz, now, locked=locked,
+                force_zero=fresh_lock and self._yaw_lock and self._yaw_source == 'nav',
+                source_known=self._yaw_source in ('nav', 'teleop'))
+            hold = self._station_heading_hold
+            if hold is not None:
+                fresh_target = (self._station_heading_target is not None and
+                                0 <= now - self._station_heading_target_stamp <= .5)
+                if fresh_lock and fresh_target and self._yaw_lock and self._yaw_source == 'nav' and abs(command.wz) <= .05:
+                    sample = self._sample  # watchdog has already verified freshness before this adapter
+                    wz = hold.apply(command.vx, command.vy, sample.yaw, sample.wz,
+                                    math.hypot(sample.vx, sample.vy), now,
+                                    target_yaw=self._station_heading_target)
+                else:
+                    hold.reset()
+        self._applied_command = (command.vx, command.vy, wz)
+        return DriveCommand(command.vx, command.vy, wz, command.enable)
+
+    def _publish_applied(self, _now) -> None:
+        msg = Twist()
+        if self._governor.state is ArmState.ARMED:
+            msg.linear.x, msg.linear.y, msg.angular.z = self._applied_command
+            if self._yaw_bias is None and abs(msg.angular.z) < self._rotational_deadband:
+                msg.angular.z = 0.0  # account for the native request's angular deadband
+            if math.hypot(msg.linear.x, msg.linear.y) < self._deadband:
+                msg.linear.x = msg.linear.y = 0.0
+        self._applied_pub.publish(msg)
 
     def _guarded(self, what: str, step, now: float) -> None:
         # Publishing problems must never take the control loop (and with it the watchdog) down.
@@ -1320,6 +1445,13 @@ class SwerveBridge(Node):
             sim_alive=self._drivetrain.sim_alive(),
             drive_request_type=self._drive_request_type,
             sim_error=self._drivetrain.sim_error()))
+        values += [('yaw_bias_enabled', str(self._yaw_bias is not None)),
+                   ('yaw_bias_mode', self._yaw_bias.mode if self._yaw_bias else 'disabled'),
+                   ('yaw_bias_correction_rad_s', str(self._yaw_bias.correction if self._yaw_bias else 0.0))]
+        values += [('station_heading_hold_enabled', str(self._station_heading_hold is not None)),
+                   ('station_heading_target_rad', str(self._station_heading_target)),
+                   ('station_heading_correction_rad_s',
+                    str(self._station_heading_hold.correction if self._station_heading_hold else 0.0))]
         status = DiagnosticStatus()
         status.level = bytes([level])
         status.name = 'swerve_bridge: drivetrain'

@@ -1,0 +1,37 @@
+# Named places in the frame of maps/best.yaml (x, y in metres; yaw in radians,
+# counter-clockwise from the map x axis). Written by scripts/locations.sh.
+map: best
+navigation:
+  nav_motion: omni
+docking:
+  enabled: true
+  approach_distance: 0.8
+  speed: 0.10
+locations:
+  OT-2:
+    x: -0.535
+    y: 0.46
+    yaw: -2.9042
+    saved: '2026-11-06T15:14:21'
+    amcl_std_x_y_yaw:
+    - 0.057
+    - 0.065
+    - 0.052
+  shaker:
+    x: -0.069
+    y: 1.719
+    yaw: 1.7401
+    saved: '2026-11-06T15:15:10'
+    amcl_std_x_y_yaw:
+    - 0.066
+    - 0.068
+    - 0.062
+  home:
+    x: 0.224
+    y: -0.578
+    yaw: -1.3588
+    saved: '2026-11-06T15:16:11'
+    amcl_std_x_y_yaw:
+    - 0.054
+    - 0.064
+    - 0.06

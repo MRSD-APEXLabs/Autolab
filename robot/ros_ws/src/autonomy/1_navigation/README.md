@@ -14,6 +14,33 @@ Runs in the robot container (ROS 2 Humble) and on the host (ROS 2 Jazzy) from th
   run.sh                safety-gated runner (dry run by default)
 ```
 
+## Current defaults
+
+Navigation now defaults to **best**, **omni** and **fast**. `best.yaml`, `best.pgm`,
+`best.locations.yaml` and the SLAM archive were copied from the working reference.
+Saved stations are `OT-2`, `shaker`, and `home`; legacy `ot2` API requests also match
+`OT-2`. The previous `map.*` files remain available with an explicit map argument.
+
+Fast transit is capped at 0.90 m/s forward, 0.40 m/s lateral and 1.20 rad/s for open
+staging alignment. `nav_speed:=normal` restores 0.45 / 0.20 / 0.60. Gentle acceleration,
+onboard azimuth profiling, fitted drift correction and slow translation-only station
+parking/withdrawal are retained. Large heading changes happen in checked open staging
+space. `/nav/state` reports `SUCCEEDED` only after whole-mission verification, never
+when the child staging action completes.
+
+All port changes stay in this `1_navigation` directory. The outer autonomy launcher,
+behavior executives, Dockerfiles and `.env` do not need edits. Rebuild the two packages
+inside the Humble container with `build.sh`, then restart navigation. Check the initial
+pose against the new map before sending a goal.
+
+Validation (2026-11-08): both packages compiled in an isolated ARM64 Humble
+container. 591 port regression checks passed under Humble/Python 3.10 and under
+Jazzy/Python 3.12. The actual Humble Nav2 stack completed OT-2 -> shaker -> home ->
+OT-2 -> undock through the public `/nav` API with zero simulated collisions and
+no staging-as-arrival reports. A separate undock test verified the final public
+`SUCCEEDED` state. The working reference passed its 817 checks. These tests used
+a kinematic base and simulated lidar; the physical Autolab stack was not started.
+
 ## Quick start (all ROS processes in Docker/Humble)
 
 ```bash
@@ -50,11 +77,11 @@ Then, in a second terminal inside the container (`sws` is enough, the packages a
 ```bash
 ros2 topic echo /nav/locations --once
 ros2 topic echo /nav/state
-ros2 topic pub --once /nav/goal_location std_msgs/String '{data: ot2}'
+ros2 topic pub --once /nav/goal_location std_msgs/String '{data: OT-2}'
 ros2 topic pub --once /nav/cancel std_msgs/Empty '{}'
 ```
 
-## Changes to the rest of Autolab
+## Existing outer-stack integration (unchanged by this update)
 
 `.env` already pointed at this package, so nothing there changed:
 
@@ -104,6 +131,20 @@ The overlay carries only what Humble spells differently: behaviour plugins are
 `error_code`. Where Humble cannot tell a failed staging leg from one preempted by another client,
 the approach stops instead of driving to the goal on its own.
 
+Additional Humble compatibility in the current port:
+
+- Humble behavior-server `global_frame` is `odom`, matching its local collision checker.
+  Jazzy separates `local_frame=odom` from `global_frame=map`.
+- Station actions tolerate Humble results without `error_code`; unsuccessful status still stops.
+- The staging tree has a separate BT.CPP v3 version without Jazzy error-code ports.
+- Humble overlays load after motion/speed overlays, preserving flat polygon points,
+  `max_points`, slash-style behavior plugin IDs and the singular progress-checker setting.
+- Humble has no VelocityPolygon. Fast mode retains the proven low-speed slowdown polygon
+  and adds the native predictive Approach action at 0.55 s. At DockPath's maximum
+  translation speed, this prediction stays inside the existing 8 cm stop margin.
+- The tf2 0.25.24 overlay, disabled Phoenix diagnostics, CAN-clock monitoring and
+  Humble message-callback adapter are preserved.
+
 If you edit the Jazzy tree or the Nav2 parameters, keep the Humble copies in step.
 
 ## Topic API
@@ -130,11 +171,12 @@ Out (latched, so a late subscriber gets the current value, except where noted):
 | `/nav/pose` | `geometry_msgs/PoseStamped` | AMCL pose in `map` (not latched) |
 | `/nav/distance_remaining`, `/nav/time_remaining` | `std_msgs/Float32` | Nav2 feedback (not latched) |
 
-Goals are republished on `/goal_pose_staged`, so a goal from the API takes exactly the same
-staged-approach path as an RViz click. State is *derived* from `/navigate_to_pose/_action/status`
-and its feedback rather than from an action client of its own, so it reports what the robot is
-really doing no matter who commanded it. A 1.2 s settle keeps the gap between the two staged legs
-from looking like arrival.
+Goals are republished on `/goal_pose_staged`, using the same station coordinator as RViz.
+For maps with docking enabled, `/station_docking/result` owns the public outcome across
+withdrawal, transit, alignment and final approach. Child NavigateToPose success does not
+end the mission. Whole-mission ETA is unavailable (`time_remaining = -1`); distance is
+measured against the final goal. For maps without docking enabled, direct Nav2 goals
+retain the previous action-status/feedback behavior.
 
 `api_namespace:=/robot_1` moves the whole API under that namespace.
 
@@ -149,7 +191,7 @@ In the Humble robot container, RViz defaults to off even though the launch-file 
 run `rviz_docker.sh` from the host. On Jazzy, or when `rviz:=true` is explicit, the launch-file
 setting is used unchanged.
 
-The default map is `navigation_bringup/maps/map.yaml` with the places in `map.locations.yaml`.
+The default map is `navigation_bringup/maps/best.yaml` with places in `best.locations.yaml`.
 `navigation_bringup/phoenix6/tuner_constants.py` is the Tuner X output for this drivetrain,
 copied from `~/nav_nav/Navigation/generated`: re-copy it after re-tuning.
 
@@ -168,3 +210,55 @@ the active lifecycle state. The container's Humble RViz was the unstable compone
 kept out of the robot process by default. A dry-run goal can still eventually fail because the
 simulated base moves while the real lidar shows a stationary world and the pose estimate walks
 into mapped obstacles; that happens on both distros and says nothing about the real robot.
+
+## Wireless controller
+
+The reader is `swerve_navigation/joy_auto`, launched with node name `joy_node`.
+It prefers the Bluetooth 8BitDo Pro 2 in X mode (`Xbox One S Controller` in SDL)
+and falls back to `Xbox 360 Controller` over USB. Only one reader publishes `/joy`.
+Switching controllers requires releasing LT, centring sticks and releasing buttons;
+B remains available during that handover. E-stop stays latched across reconnects.
+Only the selected controller supplies controls. Losing both releases teleop; the
+existing mux may then return to Nav2, as when LT is released.
+
+Docker's privileged-device snapshot can miss a Bluetooth pad connected after the
+container started. The controller may appear in `/sys/class/input` while its
+`/dev/input/event*` node is missing inside Docker. Keyboard event nodes alone do
+not prove the gamepad works. `run.sh --hardware` now opens the named controller
+with SDL before starting the drivetrain; `scripts/check_controller.py` performs
+that same read-only check without publishing ROS messages.
+
+For hotplug/reconnect, use the included override. **First stop navigation and any
+other robot work: the following command recreates the robot container.** Run on
+the host:
+
+```bash
+cd ~/coding/Autolab
+docker compose --profile deploy -f docker-compose.yaml \
+  -f robot/ros_ws/src/autonomy/1_navigation/docker-input.override.yaml \
+  up -d --no-deps robot-l4t
+```
+
+The override bind-mounts the live host `/dev/input` directory read-only and retains
+the existing service's input group. It changes no files outside `1_navigation`.
+Keep this override in subsequent recreate commands so the mount remains present.
+Inside the Humble container, rebuild and then use the usual runner:
+
+```bash
+cd /home/robot/AutoLab/robot/ros_ws
+./src/autonomy/1_navigation/build.sh
+python3 ./src/autonomy/1_navigation/scripts/check_controller.py
+./src/autonomy/1_navigation/run.sh --hardware
+```
+
+Inspect the selected pad with `ros2 topic echo /joy/selected_device --once` in the
+same navigation domain (42 by default). Normalisation, hotplug preference,
+disconnection, held-LT handover and latched e-stop behavior have regression tests.
+The port does not start a second reader in an already running navigation stack.
+
+Wireless-port validation (2026-11-08): 599 Humble regression checks and a fresh
+Humble package build passed. In a network-isolated Humble container with only the
+Bluetooth event device exposed, the real SDL selector chose `Xbox One S Controller`
+and published 20 correctly shaped Joy samples at about 20 Hz on private probe
+topics. No teleop, velocity mux or hardware bridge was started in that test. The
+live robot container was inspected but was not restarted or remounted.

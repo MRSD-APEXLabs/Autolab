@@ -6,6 +6,7 @@ swerve_bridge:
     # value with its "hardware" launch argument (default false), so editing it here does not arm the launch files.
     # Leave it false: it only matters for a bare "ros2 run ... --params-file".
     hardware: false
+    phoenix_diagnostics: false
 
     phoenix6_site_packages: "/home/labx/nav_nav/Navigation/generated/venv/lib/python3.12/site-packages"
     tuner_constants_dir: "/home/labx/nav_nav/Navigation/generated"
@@ -19,7 +20,7 @@ swerve_bridge:
 
     cmd_timeout: 0.3                   # [s] no fresh /cmd_vel -> zero request and the enable signal is no longer fed
 
-    # Last line of defence; the teleop scales (0.8 m/s turbo) and Nav2 limits (0.4 m/s) sit below these.
+    # Last line of defence; the teleop scales (0.8 m/s turbo) and Nav2 limits (0.45 m/s) sit below these.
     max_linear_speed: 1.0              # [m/s] clamp on the NORM of (vx, vy)
     max_angular_speed: 1.5             # [rad/s]
     max_linear_accel: 1.2              # [m/s^2] limits speeding UP only; stops are always immediate. Was 2.0: the
@@ -39,11 +40,32 @@ swerve_bridge:
     deadband: 0.02              # [m/s]
     rotational_deadband: 0.05   # [rad/s]
 
+    # Fitted from recordings/drive_drift_20261106_155903.csv (see *_fit.json).
+    # Hardware only; disabled for dock/undock, settling and stale docking-mode heartbeat.
+    # Raw commands keep their original deadband; the learned correction is applied after
+    # the steer filter so it is not discarded. Model inputs saturate at the measured 0.30 m/s.
+    yaw_bias_enabled: true
+    yaw_bias_vx_gain: 0.10370857339120197   # measured yaw coupling [rad/m]
+    yaw_bias_vy_gain: -0.20359885945361017
+    yaw_bias_gain: 0.75                   # conservative compensation, not full inverse gain
+    yaw_bias_max_correction: 0.07         # [rad/s]
+    yaw_bias_model_speed: 0.30            # [m/s]; compensation active only at 0.10-0.45 m/s
+    # No intentional docking turns: bounded gyro counter-steering ONLY while translating.
+    # Stops/parked states produce zero angular command. Moving gross yaw limit is 0.25 rad.
+    station_heading_hold_enabled: true
+    station_heading_kp: 1.5
+    station_heading_kd: 0.15
+
     # Steer stabiliser: the module angles depend only on the DIRECTION of the twist (vx, vy, steer_radius * wz),
     # so controller noise (MPPI wz jitter at low vx is the worst case) makes all four azimuths wobble. Direction
     # changes below steer_hold_angle are ignored; larger ones are followed at steer_max_rate while moving.
     # Stops, slowdowns and starts from rest are never delayed. steer_filter: false restores the old behaviour.
     steer_filter: true
-    steer_hold_angle: 0.035     # [rad] 2 deg. Raise (0.05-0.09) if the azimuths still twitch; costs path accuracy.
-    steer_max_rate: 2.5         # [rad/s] 90 deg direction change in 0.63 s. Lower = calmer but lazier steering.
+    steer_hold_angle: 0.05      # [rad] suppress small direction chatter (~2.9 deg).
+    steer_max_rate: 1.5         # [rad/s] soften moving command-direction changes.
     steer_radius: 0.359         # [m] module distance from the base centre
+    # Onboard azimuth profiling also smooths wheel reorientation from rest.
+    # Module-angle units, independent of chassis turning speed. No PID/offset changes.
+    steer_profile: true
+    steer_profile_speed: 3.0    # [rad/s] ~172 deg/s module cruise rate
+    steer_profile_accel: 12.0    # [rad/s^2] nominal initial profile acceleration at 12 V

@@ -8,6 +8,10 @@ below), so the ROBOT DRIVES THERE.  X on the pad cancels, B is the e-stop.
 The file is re-read whenever it changes, so a place saved while navigation runs appears within
 a second.  Right-click an arrow for a menu with the same "Go" entry.
 
+Maps with docking.enabled in their locations file use StationDocking instead:
+straight withdrawal, navigation/alignment in open space, translation-only arrival without
+terminal rotation. CLI goals use the same goal_pose_staged topic as RViz.
+
 Staged approach (approach_distance > 0): a goal is driven to in two legs so the robot never turns
 next to the obstacle it parks at (e.g. a table):
   1. a STAGING pose approach_distance behind the goal, already facing the goal heading - any
@@ -29,7 +33,6 @@ from interactive_markers import InteractiveMarkerServer, MenuHandler
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.action import ActionClient
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
@@ -119,7 +122,8 @@ def goal_message(place: Place, frame: str, stamp) -> PoseStamped:
     x, y, yaw = place
     goal = PoseStamped()
     goal.header.frame_id = frame
-    goal.header.stamp = stamp
+    if stamp is not None:
+        goal.header.stamp = stamp
     goal.pose.position.x, goal.pose.position.y = x, y
     goal.pose.orientation.z, goal.pose.orientation.w = math.sin(yaw / 2.0), math.cos(yaw / 2.0)
     return goal
@@ -189,6 +193,13 @@ class LocationMarkers(Node):
         self.get_logger().info(
             f'location_markers: {len(self._places)} place(s) from {self._path or "(none)"}; '
             'click an arrow with the RViz Interact tool to send the robot there')
+        # Per-map opt-in: saved stations use a straight dock/undock sequence.
+        from .station_docking import load_docking_config, StationDocking
+        docking_config = load_docking_config(self._path)
+        tree = self.declare_parameter('docking_behavior_tree', '').value
+        keep_heading = self.declare_parameter('station_transit_keep_heading', False).value
+        self._docking = (StationDocking(self, docking_config, tree, keep_transit_heading=keep_heading)
+                         if docking_config is not None else None)
 
     def _reload(self) -> None:
         try:
@@ -240,16 +251,24 @@ class LocationMarkers(Node):
 
     # ---- staged approach ----
 
-    def _robot_place(self) -> Optional[Place]:
+    def _robot_place(self, frame=None) -> Optional[Place]:
         try:
-            tf = self._tf_buffer.lookup_transform(self._frame, self._base_frame, Time()).transform
+            stamped = self._tf_buffer.lookup_transform(frame or self._frame, self._base_frame, Time())
         except TransformException:
             return None
+        age = (self.get_clock().now().nanoseconds -
+               (stamped.header.stamp.sec * 1_000_000_000 + stamped.header.stamp.nanosec)) / 1e9
+        if not -0.1 <= age <= 0.5:
+            return None
+        tf = stamped.transform
         q = tf.rotation
         return (tf.translation.x, tf.translation.y,
                 math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
 
     def _navigate(self, goal: Place) -> None:
+        if self._docking is not None:
+            self._docking.start(goal)
+            return
         self._seq += 1
         self._final = goal
         if self._approach <= 0.0 or not self._nav.server_is_ready():
@@ -299,16 +318,14 @@ class LocationMarkers(Node):
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info('staging reached: driving straight in')
             self._send(self._final, 'final')
-        elif status == GoalStatus.STATUS_ABORTED and getattr(wrapped.result, 'error_code', 0) != 0:
+        elif status == GoalStatus.STATUS_ABORTED and getattr(wrapped.result, "error_code", 0) != 0:
             # a real failure (no path to the staging pose, ...): try the goal itself
             self.get_logger().warning(
-                f'staging leg failed (error {wrapped.result.error_code}): '
+                f'staging leg failed (error {getattr(wrapped.result, "error_code", 0)}): '
                 'going to the goal directly')
             self._send(self._final, 'final')
         else:
-            # cancelled, or preempted by another goal (Nav2 aborts it with error 0): stop here.
-            # Humble's result has no error_code, so there a failure cannot be told from a
-            # preemption by another client and every abort stops the approach.
+            # cancelled, or preempted by another goal (Nav2 aborts it with error 0): stop here
             self.get_logger().info(f'staging leg ended (status {status}): approach stopped')
 
 
@@ -317,8 +334,7 @@ def main(args=None) -> None:
     node = LocationMarkers()
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
-        # Ctrl-C reaches the node as an external shutdown: a clean stop, not a crash.
+    except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()

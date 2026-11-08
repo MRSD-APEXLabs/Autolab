@@ -24,12 +24,12 @@ HOW IT WORKS, and why it is built this way:
     (/goal_pose_staged by default), so a goal from another computer takes exactly the path a
     goal clicked in RViz takes, staged approach (location_markers) included.  One goal path,
     one set of behaviours to trust.
-  * Status is NOT taken from our own action client.  It is read off the NavigateToPose action's
-    status and feedback topics, so /nav/state describes what the robot is ACTUALLY doing,
-    whoever asked for it - this node, RViz, a saved-place click or the joystick's cancel.
-  * A staged approach is two NavigateToPose goals in a row (staging leg, then straight in).  A
-    terminal state is therefore only reported after settle_time with no goal running, so the gap
-    between the two legs is not reported as "arrived".
+  * Status is not taken from an action client of this node. Station missions use
+    coordinator results; direct goals on other maps use NavigateToPose status and
+    feedback. This includes goals from RViz and joystick cancellation.
+  * With station docking enabled, full coordinator results own success/failure
+    across withdrawal, transit, alignment and parking. Child action success never
+    means docked. Non-docking maps retain the legacy settled action-status path.
 
 This node commands no velocity and touches no hardware.  The joystick stays above everything:
 LT overrides, B is the e-stop, X cancels.
@@ -124,6 +124,12 @@ def match_place(places: Dict[str, Place], name: str) -> Optional[str]:
     for key in places:
         if key.casefold() == folded:
             return key
+    # Keep Autolab's existing "ot2" commands working with the canonical
+    # "OT-2" station name. Do not guess if punctuation makes names ambiguous.
+    token = ''.join(c for c in folded if c.isalnum())
+    matches = [key for key in places if ''.join(c for c in key.casefold() if c.isalnum()) == token]
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
@@ -172,6 +178,11 @@ class NavApi(Node):
         self._cancel_topic = param(
             'cancel_topic', '/nav_cancel',
             'topic that cancels every navigation goal (point_to_goal does the cancelling)')
+        self._station_mode = param('station_docking', False,
+                                   'Use full station mission results instead of child Nav2 results.')
+        self._station_active = False
+        self._station_awaiting = False
+        self._station_child_ids = set()
         action_name = param('action_name', '/navigate_to_pose',
                             'NavigateToPose action watched for state and feedback')
         self._settle_time = float(param(
@@ -216,6 +227,8 @@ class NavApi(Node):
                        reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(
             self._feedback_type(), f'{action_name}/_action/feedback', self._on_feedback, 10)
+        if self._station_mode:
+            self.create_subscription(String, '/station_docking/result', self._on_station_result, latched)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -294,10 +307,14 @@ class NavApi(Node):
 
     def _dispatch(self, pose: PoseStamped) -> None:
         """Publish the goal where RViz publishes its own, and start waiting for Nav2."""
+        if self._station_mode and (self._station_active or self._station_awaiting):
+            self._publish_result('REJECTED busy; cancel the current station mission first')
+            return
         pose.header.stamp = self.get_clock().now().to_msg()
         self._goal = pose
         self._sent_at = self._now()
         self._pending = None
+        self._station_awaiting = self._station_mode
         self._goal_echo_pub.publish(pose)
         self._goal_pub.publish(pose)
         self._publish_state(SENDING)
@@ -357,10 +374,23 @@ class NavApi(Node):
         pose.pose.position.y = tf.translation.y
         pose.pose.orientation = tf.rotation
         self._pose_pub.publish(pose)
+        if self._station_active and self._goal is not None:
+            self._distance_pub.publish(Float32(data=math.hypot(
+                pose.pose.position.x-self._goal.pose.position.x,
+                pose.pose.position.y-self._goal.pose.position.y)))
 
     # ---- what Nav2 is doing ----
 
     def _on_status(self, msg: GoalStatusArray) -> None:
+        if self._station_mode:
+            if self._station_active or self._station_awaiting:
+                self._station_child_ids.update(bytes(s.goal_info.goal_id.uuid) for s in msg.status_list)
+                return
+            running = active_goals(msg)
+            terminal = newest_terminal(msg)
+            if ((running and all(i in self._station_child_ids for i in running)) or
+                    (not running and terminal is not None and terminal[0] in self._station_child_ids)):
+                return
         if active_goals(msg):
             self._sent_at = None
             self._pending = None
@@ -377,11 +407,53 @@ class NavApi(Node):
             self._pending = terminal
 
     def _on_feedback(self, msg) -> None:
+        if self._station_mode and (self._station_active or self._station_awaiting):
+            return  # this is a child staging goal, not the full station mission
         feedback = msg.feedback
         self._distance_pub.publish(Float32(data=float(feedback.distance_remaining)))
         remaining = feedback.estimated_time_remaining
         self._time_pub.publish(
             Float32(data=float(remaining.sec) + float(remaining.nanosec) * 1e-9))
+
+    def _on_station_result(self, msg: String) -> None:
+        try:
+            result = json.loads(msg.data)
+            state, done = result['state'], result['done']
+        except (ValueError, KeyError, TypeError):
+            return
+        message = str(result.get('message', ''))
+        if self._station_awaiting and message.startswith('busy;'):
+            self._station_awaiting = False
+            self._goal = None
+            self._publish_result('REJECTED busy; cancel the current station mission first')
+        if not done:
+            if state == 'idle':
+                if self._station_awaiting and message.startswith('request refused:'):
+                    self._station_awaiting = False
+                    self._sent_at = None
+                    self._publish_state(FAILED)
+                    self._publish_result('FAILED ' + message)
+                return
+            self._station_active, self._station_awaiting = True, False
+            self._sent_at = self._pending = self._idle_since = None
+            self._publish_state(NAVIGATING)
+            self._time_pub.publish(Float32(data=-1.0))  # no whole-mission ETA is available
+            distance = result.get('remaining_m')
+            if isinstance(distance, (float, int)) and math.isfinite(distance):
+                self._distance_pub.publish(Float32(data=float(distance)))
+            return
+        # Ignore a latched terminal result from a previous run until a live
+        # preparing/moving phase was observed. Nav2 staging success never counts.
+        if not self._station_active:
+            return
+        self._station_active = self._station_awaiting = False
+        self._sent_at = self._pending = self._idle_since = None
+        canceled = (message.startswith('stopped: cancelled') or
+                    any(word in message for word in ('manual takeover', 'e-stop')))
+        terminal = SUCCEEDED if result.get('success') is True else CANCELED if canceled else FAILED
+        self._publish_state(terminal)
+        self._publish_result(terminal)
+        self._goal = None
 
     def _tick(self) -> None:
         """Report a terminal state once Nav2 has been idle long enough to mean it."""

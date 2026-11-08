@@ -27,7 +27,9 @@
     <arg name="hardware" default="$(env NAVIGATION_HARDWARE false)"
          description="true ENABLES THE REAL DRIVETRAIN. false = phoenix6 simulator." />
     <arg name="map" default=""
-         description="map yaml; empty = navigation_bringup/maps/map.yaml" />
+         description="map yaml; empty = navigation_bringup/maps/best.yaml" />
+    <arg name="nav_speed" default="fast" />
+    <arg name="nav_motion" default="auto" />
     <arg name="rviz" default="false" description="RViz (off inside the autonomy bringup)" />
     <arg name="api_namespace" default="/"
          description="where the /nav API appears: / -> /nav/state, /robot_1 -> /robot_1/nav/state" />
@@ -36,6 +38,8 @@
         <include file="$(find-pkg-share navigation_bringup)/launch/navigation.launch.py">
             <arg name="hardware" value="$(var hardware)" />
             <arg name="map" value="$(var map)" />
+            <arg name="nav_speed" value="$(var nav_speed)" />
+            <arg name="nav_motion" value="$(var nav_motion)" />
             <arg name="rviz" value="$(var rviz)" />
             <arg name="api_namespace" value="$(var api_namespace)" />
         </include>
