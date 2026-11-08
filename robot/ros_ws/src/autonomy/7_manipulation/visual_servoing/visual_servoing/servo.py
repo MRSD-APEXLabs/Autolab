@@ -73,7 +73,9 @@ class GripperConfig:
     # probe_tilt: the wrist torque across the finger line says which closed fingertip touched alone
     ft_tilt_torque_axis: int = 0      # sensor torque component (0 tx, 1 ty, 2 tz): tx for fingers along flange y
     ft_tilt_torque_sign: int = 1      # t = sign * dT[axis] is < 0 while the fingertip on the + finger-axis side touches
-    ft_tilt_deadband_nm: float = 0.004  # |t| below this: both fingertips touch (bench jitter ~0.001 N m)
+    # |t| below this: both fingertips touch. Bench 2026-11-08 at ~3 N contact: one fingertip alone reads 0.037-0.10 N m
+    # (saturated: the size doesn't grow with the tilt error), both touching 0.006-0.017 N m.
+    ft_tilt_deadband_nm: float = 0.02
 
 
 @dataclass

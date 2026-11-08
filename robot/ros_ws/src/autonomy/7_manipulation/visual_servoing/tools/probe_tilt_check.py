@@ -417,7 +417,7 @@ def main():
     # tilt seek
     p.add_argument('--torque-axis', type=int, default=0, choices=(0, 1, 2), help='0 Tx, 1 Ty, 2 Tz')
     p.add_argument('--torque-sign', type=int, default=1, choices=(-1, 1))
-    p.add_argument('--torque-deadband', type=float, default=0.004, help='N m: |tilt torque| below = both touch')
+    p.add_argument('--torque-deadband', type=float, default=0.02, help='N m: |tilt torque| below = both touch')
     p.add_argument('--step', type=float, default=1.0, help='deg, first tilt step')
     p.add_argument('--min-step', type=float, default=0.25, help='deg; a bracket this narrow ends the seek')
     p.add_argument('--max-tilt', type=float, default=15.0, help='deg from straight down')

@@ -150,7 +150,7 @@
       # grasp.probe_tilt: torque across the finger line names the fingertip that touched alone (bench: tools/probe_tilt_check.py watch)
       ft_tilt_torque_axis: 0          # 0 tx, 1 ty, 2 tz: tx for fingers along flange y
       ft_tilt_torque_sign: 1          # t = sign * dT < 0 while the flange +y fingertip touches alone (bench 2026-11-08: seeks converge)
-      ft_tilt_deadband_nm: 0.004      # N m; |t| below this: both fingertips touch (bench jitter ~0.001 N m)
+      ft_tilt_deadband_nm: 0.02       # N m; |t| below: both touch (bench 2026-11-08 at ~3 N: both 0.006-0.017, one alone >= 0.037)
       # use_ft: once one pad touches, every gripper step also slides the arm towards the other pad (tracked
       # closing), instead of nudging away and touching again. A plate held 6 mm off-centre needed ~6 mm of slide.
       ft_track_mm_per_step: 0.5       # mm of slide per gripper step: one step (10) moves each jaw ~0.5 mm
