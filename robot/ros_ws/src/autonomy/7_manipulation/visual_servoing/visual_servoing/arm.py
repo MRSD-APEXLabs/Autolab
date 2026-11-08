@@ -30,8 +30,9 @@ class ArmError(RuntimeError):
 
 
 class XArm:
-    def __init__(self, ip, api_factory=None, read_only=False):
+    def __init__(self, ip, api_factory=None, read_only=False, report_type=None):
         self.ip = ip
+        self.report_type = report_type   # SDK report socket ('normal' | 'rich' | 'real'); None = SDK default
         self.read_only = bool(read_only)
         self._factory = api_factory
         self._arm = None
@@ -50,7 +51,8 @@ class XArm:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
         try:
-            self._arm = self._factory(self.ip, is_radian=False)
+            kwargs = {} if self.report_type is None else {'report_type': self.report_type}
+            self._arm = self._factory(self.ip, is_radian=False, **kwargs)
         except Exception as exc:   # the SDK raises a bare Exception when the socket doesn't connect
             raise ArmError(f'xArm connection to {self.ip} failed: {exc}') from exc
         if not self._arm.connected:

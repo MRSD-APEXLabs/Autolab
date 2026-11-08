@@ -39,7 +39,7 @@ Commands (`help` lists them):
 Everything that moves needs --execute, and nothing else may command the arm meanwhile (xarm_ros2, teleop, a servo
 run). Without --execute only status/ft/watch work. Each touch is appended to --log (CSV) when given.
 
-  python3 tools/probe_tilt_check.py --execute [--ip 192.168.1.236] [--log probe_tilt.csv]
+  python3 tools/probe_tilt_check.py --execute [--ip 192.168.1.236] [--log probe_tilt.csv] [--report-type real]
 
 Needs numpy and the xArm SDK; PyYAML to read the fingertip from config/visual_servo.yaml (else the CAD fingertip).
 """
@@ -375,6 +375,9 @@ def main():
     p.add_argument('--execute', action='store_true', help='allow arm and gripper motion')
     p.add_argument('--config', default=str(CONFIG), help='visual_servo.yaml for the fingertip (mount.*)')
     p.add_argument('--log', default=None, help='append every touch to this CSV')
+    p.add_argument('--report-type', default=None, choices=('normal', 'rich', 'real'),
+                   help='xArm SDK report socket the F/T is read from (default: SDK default). `real` should be '
+                        'the fast one; check with `watch` that values change every line')
     # probe (servo defaults: grasp.probe_*, gripper.ft_contact_*)
     p.add_argument('--probe-close', type=int, default=550)
     p.add_argument('--probe-depth', type=float, default=15.0, help='mm a touch may descend')
@@ -386,7 +389,7 @@ def main():
     p.add_argument('--torque-axis', type=int, default=0, choices=(0, 1, 2), help='0 Tx, 1 Ty, 2 Tz')
     p.add_argument('--torque-sign', type=int, default=1, choices=(-1, 1))
     p.add_argument('--torque-deadband', type=float, default=0.01, help='N m: |tilt torque| below = both touch')
-    p.add_argument('--step', type=float, default=2.0, help='deg, first tilt step')
+    p.add_argument('--step', type=float, default=1.0, help='deg, first tilt step')
     p.add_argument('--min-step', type=float, default=0.25, help='deg; a sign flip below this ends the seek')
     p.add_argument('--max-tilt', type=float, default=15.0, help='deg from straight down')
     p.add_argument('--max-iter', type=int, default=15)
@@ -406,7 +409,7 @@ def main():
 
     mount = load_mount(args.config)
     print(mount.describe())
-    arm = XArm(args.ip, read_only=not args.execute)
+    arm = XArm(args.ip, read_only=not args.execute, report_type=args.report_type)
     arm.connect()
     try:
         if args.execute:

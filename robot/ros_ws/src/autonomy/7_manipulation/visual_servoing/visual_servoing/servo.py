@@ -116,7 +116,7 @@ class ServoConfig:
     # sign flip halves the step. Balanced, or a flip below probe_tilt_min_step_deg: the grasp keeps that tilt (the
     # lift too). probe_tilt_max_deg, probe_tilt_max_touches or no touch: the level grasp from the first touch.
     probe_tilt: bool = False
-    probe_tilt_step_deg: float = 2.0
+    probe_tilt_step_deg: float = 1.0
     probe_tilt_min_step_deg: float = 0.25
     probe_tilt_max_deg: float = 15.0    # from straight down
     probe_tilt_max_touches: int = 15
