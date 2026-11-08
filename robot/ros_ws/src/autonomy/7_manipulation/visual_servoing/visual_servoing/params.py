@@ -46,6 +46,15 @@ def build_config(param):
         probe_lift=float(param('grasp.probe_lift', base.probe_lift)),
         probe_depth=float(param('grasp.probe_depth', base.probe_depth)),
         probe_grip_depth=float(param('grasp.probe_grip_depth', base.probe_grip_depth)),
+        probe_touch_speed=float(param('grasp.probe_touch_speed', base.probe_touch_speed)),
+        probe_slow_margin=float(param('grasp.probe_slow_margin', base.probe_slow_margin)),
+        probe_tilt=bool(param('grasp.probe_tilt', base.probe_tilt)),
+        probe_tilt_step_deg=float(param('grasp.probe_tilt_step_deg', base.probe_tilt_step_deg)),
+        probe_tilt_min_step_deg=float(param('grasp.probe_tilt_min_step_deg', base.probe_tilt_min_step_deg)),
+        probe_tilt_max_deg=float(param('grasp.probe_tilt_max_deg', base.probe_tilt_max_deg)),
+        probe_tilt_max_touches=int(param('grasp.probe_tilt_max_touches', base.probe_tilt_max_touches)),
+        probe_tilt_lift=float(param('grasp.probe_tilt_lift', base.probe_tilt_lift)),
+        probe_tilt_settle=float(param('grasp.probe_tilt_settle', base.probe_tilt_settle)),
         lift=float(param('grasp.lift', base.lift)),
         lift_speed=float(param('grasp.lift_speed', base.lift_speed)),
         max_retries=int(param('grasp.max_retries', base.max_retries)),
@@ -89,8 +98,13 @@ def build_config(param):
             ft_track_max_mm=float(param('gripper.ft_track_max_mm', grip.ft_track_max_mm)),
             ft_contact_n=float(param('gripper.ft_contact_n', grip.ft_contact_n)),
             ft_contact_count=int(param('gripper.ft_contact_count', grip.ft_contact_count)),
+            ft_probe_contact_n=float(param('gripper.ft_probe_contact_n', grip.ft_probe_contact_n)),
+            ft_report_type=str(param('gripper.ft_report_type', grip.ft_report_type)),
             ft_contact_backoff=float(param('gripper.ft_contact_backoff', grip.ft_contact_backoff)),
-            ft_hold_min_n=float(param('gripper.ft_hold_min_n', grip.ft_hold_min_n))),
+            ft_hold_min_n=float(param('gripper.ft_hold_min_n', grip.ft_hold_min_n)),
+            ft_tilt_torque_axis=int(param('gripper.ft_tilt_torque_axis', grip.ft_tilt_torque_axis)),
+            ft_tilt_torque_sign=int(param('gripper.ft_tilt_torque_sign', grip.ft_tilt_torque_sign)),
+            ft_tilt_deadband_nm=float(param('gripper.ft_tilt_deadband_nm', grip.ft_tilt_deadband_nm))),
     )
     if config.finger_axis not in ('x', 'y'):
         raise ValueError(f"servo.finger_axis must be 'x' or 'y', got {config.finger_axis!r}")
@@ -115,12 +129,17 @@ def build_config(param):
         raise ValueError('gripper.final_squeeze and gripper.final_squeeze_settle must be >= 0')
     if grip.ft_samples < 1 or grip.ft_finger_axis not in (0, 1, 2) or grip.ft_finger_sign not in (-1, 1):
         raise ValueError('gripper needs ft_samples >= 1, ft_finger_axis 0, 1 or 2 and ft_finger_sign +1 or -1')
-    ft_values = (grip.ft_lateral_deadband_n, grip.ft_contact_n, grip.ft_contact_backoff, grip.ft_hold_min_n,
+    ft_values = (grip.ft_lateral_deadband_n, grip.ft_contact_n, grip.ft_probe_contact_n, grip.ft_contact_backoff,
+                 grip.ft_hold_min_n,
                  grip.ft_track_mm_per_step, grip.ft_track_force_n, grip.ft_track_gain_mm_per_n, grip.ft_track_max_mm)
     if not all(np.isfinite(v) and v >= 0 for v in ft_values):
         raise ValueError('gripper F/T values (ft_lateral_deadband_n .. ft_track_max_mm) must be >= 0')
     if grip.ft_contact_count < 1:
         raise ValueError('gripper.ft_contact_count must be >= 1')
+    if grip.ft_report_type not in ('', 'normal', 'rich', 'real'):
+        raise ValueError("gripper.ft_report_type must be '', 'normal', 'rich' or 'real'")
+    if not (all(np.isfinite(v) and v > 0 for v in (config.probe_touch_speed, config.probe_slow_margin))):
+        raise ValueError('grasp.probe_touch_speed and grasp.probe_slow_margin must be > 0')
     if not 0 <= config.probe_close <= 1000:
         raise ValueError('grasp.probe_close must be a gripper value 0..1000')
     if not all(np.isfinite(v) and v > 0 for v in (config.probe_lift, config.probe_depth, config.probe_grip_depth)):
@@ -128,6 +147,16 @@ def build_config(param):
     if not (np.isfinite(config.probe_gripper_rate) and config.probe_gripper_rate > 0
             and np.isfinite(config.probe_gripper_margin) and config.probe_gripper_margin >= 0):
         raise ValueError('grasp.probe_gripper_rate must be > 0 and grasp.probe_gripper_margin >= 0')
+    if grip.ft_tilt_torque_axis not in (0, 1, 2) or grip.ft_tilt_torque_sign not in (-1, 1):
+        raise ValueError('gripper.ft_tilt_torque_axis must be 0, 1 or 2 and gripper.ft_tilt_torque_sign +1 or -1')
+    tilt_values = (config.probe_tilt_step_deg, config.probe_tilt_min_step_deg, config.probe_tilt_max_deg,
+                   config.probe_tilt_lift, grip.ft_tilt_deadband_nm)
+    if not (all(np.isfinite(v) and v > 0 for v in tilt_values) and np.isfinite(config.probe_tilt_settle)
+            and config.probe_tilt_settle >= 0 and config.probe_tilt_max_touches >= 1):
+        raise ValueError('grasp.probe_tilt_* and gripper.ft_tilt_deadband_nm must be > 0 (probe_tilt_settle >= 0, '
+                         'probe_tilt_max_touches >= 1)')
+    if config.probe_tilt_max_deg > 30.0:
+        raise ValueError('grasp.probe_tilt_max_deg must be <= 30')
     return config
 
 

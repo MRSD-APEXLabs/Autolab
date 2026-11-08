@@ -13,6 +13,7 @@
 #include <behavior_tree/behavior_tree.hpp>
 #include <behavior_tree_msgs/msg/lab_machine_command.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
 
 class LabMachineExecutive : public rclcpp::Node {
    public:
@@ -48,10 +49,13 @@ class LabMachineExecutive : public rclcpp::Node {
     std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
+    std::string anomaly_base_url_; // clog-detection service; empty disables recording
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::LabMachineCommand>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
+    // {"clip_id", "step"} per recorded aspirate; routine_executor attaches it to the run
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr anomaly_recording_pub_;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg);
@@ -69,5 +73,10 @@ class LabMachineExecutive : public rclcpp::Node {
     static bool http_post(const std::string& url,
                           const std::string& body,
                           const std::string& content_type);
+    // Same as http_post, but stores the response body in *response when non-null.
+    static bool http_post_capture(const std::string& url,
+                                  const std::string& body,
+                                  const std::string& content_type,
+                                  std::string* response);
     static std::string action_to_endpoint(const std::string& action);
 };

@@ -55,6 +55,10 @@ class RoutineExecutorNode(Node):
         self._status_subs: dict = {}  # step_name -> subscription
         self._setup_status_subscriptions(self._robot)
 
+        # Clog-detection clip_ids published by lab_machine_executive per aspirate
+        self._recording_sub = None
+        self._setup_recording_subscription(self._robot)
+
         # 1 Hz status publish + execution loop
         self.create_timer(1.0, self._tick)
 
@@ -77,6 +81,21 @@ class RoutineExecutorNode(Node):
             )
             self._status_subs[step_name] = sub
         self.get_logger().info(f'Subscribed to action status topics for robot: {robot}')
+
+    def _setup_recording_subscription(self, robot: str) -> None:
+        if self._recording_sub is not None:
+            self.destroy_subscription(self._recording_sub)
+        self._recording_sub = self.create_subscription(
+            String, f'/{robot}/behavior/anomaly_recording', self._on_recording, 10)
+
+    def _on_recording(self, msg: String) -> None:
+        try:
+            clip_id = json.loads(msg.data).get('clip_id')
+        except (json.JSONDecodeError, AttributeError) as e:
+            self.get_logger().warn(f'Malformed anomaly_recording message: {e}')
+            return
+        if self._sm.add_recording(clip_id):
+            self.get_logger().info(f'Attached clog-detection clip {clip_id} to this run')
 
     def _get_cmd_pub(self, robot: str, topic_suffix: str, msg_type):
         key = (robot, topic_suffix)
@@ -131,6 +150,7 @@ class RoutineExecutorNode(Node):
             self._status_subs = {}
             self._robot = robot
             self._setup_status_subscriptions(robot)
+            self._setup_recording_subscription(robot)
 
         self._sm = RoutineStateMachine(steps, max_retries=max_retries)
         self._listening = False

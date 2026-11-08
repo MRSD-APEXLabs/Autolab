@@ -21,16 +21,23 @@ LabMachineExecutive::LabMachineExecutive()
     this->declare_parameter<std::string>("ot2_host",         "192.168.1.100");
     this->declare_parameter<std::string>("shaker_base_url",  "http://192.168.1.101:8080");
     this->declare_parameter<std::string>("shaker_endpoint",  "/pwm");
+    // Clog-detection service (Anomaly-Detection/automation). Empty disables recording.
+    this->declare_parameter<std::string>("anomaly_base_url", "");
 
-    this->get_parameter("ot2_base_url",    ot2_base_url_);
-    this->get_parameter("ot2_host",        ot2_host_);
-    this->get_parameter("shaker_base_url", shaker_base_url_);
-    this->get_parameter("shaker_endpoint", shaker_endpoint_);
+    this->get_parameter("ot2_base_url",     ot2_base_url_);
+    this->get_parameter("ot2_host",         ot2_host_);
+    this->get_parameter("shaker_base_url",  shaker_base_url_);
+    this->get_parameter("shaker_endpoint",  shaker_endpoint_);
+    this->get_parameter("anomaly_base_url", anomaly_base_url_);
 
     RCLCPP_INFO(this->get_logger(), "OT-2 base URL: %s (robot host: %s)",
                 ot2_base_url_.c_str(), ot2_host_.c_str());
     RCLCPP_INFO(this->get_logger(), "Shaker base URL: %s%s",
                 shaker_base_url_.c_str(), shaker_endpoint_.c_str());
+    if (anomaly_base_url_.empty())
+        RCLCPP_INFO(this->get_logger(), "Aspirate recording disabled (anomaly_base_url empty)");
+    else
+        RCLCPP_INFO(this->get_logger(), "Aspirate recording via %s", anomaly_base_url_.c_str());
 
     // BT conditions
     command_lab_machine_condition_ = new bt::Condition("Command Lab Machine", this);
@@ -50,6 +57,9 @@ LabMachineExecutive::LabMachineExecutive()
     cmd_sub_ = this->create_subscription<behavior_tree_msgs::msg::LabMachineCommand>(
         "lab_machine_command", 10,
         std::bind(&LabMachineExecutive::command_callback, this, std::placeholders::_1));
+
+    anomaly_recording_pub_ = this->create_publisher<std_msgs::msg::String>(
+        "anomaly_recording", rclcpp::QoS(10).reliable());
 
     // Timer at 20 Hz to match behavior_executive cadence
     timer_ = rclcpp::create_timer(
@@ -108,9 +118,23 @@ static size_t discard_response(char*, size_t size, size_t nmemb, void*) {
     return size * nmemb;
 }
 
+// Append HTTP response body to a std::string
+static size_t collect_response(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    static_cast<std::string*>(userdata)->append(ptr, size * nmemb);
+    return size * nmemb;
+}
+
 bool LabMachineExecutive::http_post(const std::string& url,
                                     const std::string& body,
                                     const std::string& content_type)
+{
+    return http_post_capture(url, body, content_type, nullptr);
+}
+
+bool LabMachineExecutive::http_post_capture(const std::string& url,
+                                            const std::string& body,
+                                            const std::string& content_type,
+                                            std::string* response)
 {
     CURL* curl = curl_easy_init();
     if (!curl) return false;
@@ -125,7 +149,12 @@ bool LabMachineExecutive::http_post(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,  static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  discard_response);
+    if (response) {
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, collect_response);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA,     response);
+    } else {
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, discard_response);
+    }
 
     CURLcode res  = curl_easy_perform(curl);
     long http_code = 0;
@@ -366,7 +395,47 @@ bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step) {
     std::string url      = ot2_base_url_ + action_to_endpoint(action);
     std::string body_str = body.dump();
 
-    return http_post(url, body_str, "application/json");
+    // Record aspirate steps for clog detection. Recording failures are logged
+    // but never fail the pipetting step.
+    const bool record = (action == "aspirate") && !anomaly_base_url_.empty();
+    if (record) {
+        // May block up to ~9 s while the previous clip finishes its tail.
+        std::string response;
+        if (!http_post_capture(anomaly_base_url_ + "/recording/start",
+                               nlohmann::json{{"step", step.dump()}}.dump(),
+                               "application/json", &response)) {
+            RCLCPP_WARN(this->get_logger(), "Anomaly recording start failed — continuing");
+        } else {
+            // Publish the clip_id so routine_executor can attach it to this run.
+            try {
+                auto job = nlohmann::json::parse(response);
+                if (job.contains("clip_id") && job["clip_id"].is_string()) {
+                    std_msgs::msg::String msg;
+                    msg.data = nlohmann::json{{"clip_id", job["clip_id"]},
+                                              {"step", step}}.dump();
+                    anomaly_recording_pub_->publish(msg);
+                    RCLCPP_INFO(this->get_logger(), "Recording aspirate as clip %s",
+                                job["clip_id"].get<std::string>().c_str());
+                }
+            } catch (const std::exception& e) {
+                RCLCPP_WARN(this->get_logger(),
+                            "Unparseable recording/start response: %s", e.what());
+            }
+        }
+    }
+
+    bool ok = http_post(url, body_str, "application/json");
+
+    if (record) {
+        // stop: returns at once, service records the tail and queues analysis.
+        // abort: discard the clip when the aspirate itself failed.
+        const std::string endpoint = ok ? "/recording/stop" : "/recording/abort";
+        if (!http_post(anomaly_base_url_ + endpoint, "{}", "application/json"))
+            RCLCPP_WARN(this->get_logger(), "Anomaly recording %s failed",
+                        endpoint.c_str());
+    }
+
+    return ok;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

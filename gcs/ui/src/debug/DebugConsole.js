@@ -5,6 +5,7 @@ import PlanningPanel from './panels/PlanningPanel';
 import PerceptionPanel from './panels/PerceptionPanel';
 import ManipulationPanel from './panels/ManipulationPanel';
 import LabMachinePanel from './panels/LabMachinePanel';
+import AnomalyPanel from './panels/AnomalyPanel';
 
 function ConnectionBanner() {
   const { connected } = useMqttContext();
@@ -29,6 +30,7 @@ export default function DebugConsole() {
           <PerceptionPanel />
           <ManipulationPanel />
           <LabMachinePanel />
+          <AnomalyPanel />
         </main>
       </div>
     </MqttProvider>

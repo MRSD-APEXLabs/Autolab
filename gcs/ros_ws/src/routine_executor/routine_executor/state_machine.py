@@ -12,6 +12,7 @@ class RoutineStateMachine:
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = False  # True when a command needs to be published
+        self.recordings = []         # clog-detection clip_ids recorded during this run
 
     def start(self):
         if self.state in _ACTIVE:
@@ -71,6 +72,13 @@ class RoutineStateMachine:
         self.error = 'cancelled'
         self.needs_dispatch = False
 
+    def add_recording(self, clip_id: str) -> bool:
+        """Attach a clog-detection clip to this run. Only while active; no duplicates."""
+        if self.state not in _ACTIVE or not clip_id or clip_id in self.recordings:
+            return False
+        self.recordings.append(clip_id)
+        return True
+
     def acknowledge_dispatch(self):
         self.needs_dispatch = False
 
@@ -87,4 +95,5 @@ class RoutineStateMachine:
             'retry_count': self.retry_count,
             'max_retries': self.max_retries,
             'error': self.error,
+            'recordings': list(self.recordings),
         }
