@@ -30,9 +30,13 @@ class ArmError(RuntimeError):
 
 
 class XArm:
-    def __init__(self, ip, api_factory=None, read_only=False, report_type=None):
+    def __init__(self, ip, api_factory=None, read_only=False, ft_report_type=None):
         self.ip = ip
-        self.report_type = report_type   # SDK report socket ('normal' | 'rich' | 'real'); None = SDK default
+        # ft_report_type: SDK report socket for ft_force() ('normal' | 'rich' | 'real'); None = the main connection's.
+        # The 'real' socket updates fast but carries no tcp_offset and never marks the first report, so it gets a
+        # second, read-only connection and the main one keeps the default report.
+        self.ft_report_type = ft_report_type
+        self._ft_api = None
         self.read_only = bool(read_only)
         self._factory = api_factory
         self._arm = None
@@ -51,14 +55,22 @@ class XArm:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
         try:
-            kwargs = {} if self.report_type is None else {'report_type': self.report_type}
-            self._arm = self._factory(self.ip, is_radian=False, **kwargs)
+            self._arm = self._factory(self.ip, is_radian=False)
         except Exception as exc:   # the SDK raises a bare Exception when the socket doesn't connect
             raise ArmError(f'xArm connection to {self.ip} failed: {exc}') from exc
         if not self._arm.connected:
             self._arm = None
             raise ArmError(f'xArm connection to {self.ip} failed')
         self._wait_first_report()
+        if self.ft_report_type is not None:
+            try:
+                self._ft_api = self._factory(self.ip, is_radian=False, report_type=self.ft_report_type)
+            except Exception as exc:
+                self.disconnect()
+                raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed: {exc}') from exc
+            if not self._ft_api.connected:
+                self.disconnect()
+                raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed')
         offset = [float(v) for v in self._arm.tcp_offset]   # [x, y, z mm, roll, pitch, yaw deg]
         self.flange_T_tcp = xarm_pose_matrix(offset)
         log.info('xArm %s connected, TCP offset %s', self.ip, offset)
@@ -75,6 +87,13 @@ class XArm:
             time.sleep(0.02)
 
     def disconnect(self):
+        if self._ft_api is not None:
+            try:
+                self._ft_api.disconnect()
+            except Exception:
+                pass
+            finally:
+                self._ft_api = None
         if self._arm is not None:
             try:
                 self._arm.disconnect()
@@ -190,7 +209,8 @@ class XArm:
 
     def ft_force(self):
         """[fx, fy, fz (N), tx, ty, tz (N m)] since the last ft_zero, from the report socket; None if unavailable."""
-        values = getattr(self._require(), 'ft_ext_force', None)
+        arm = self._require()
+        values = getattr(self._ft_api if self._ft_api is not None else arm, 'ft_ext_force', None)
         if values is None or len(values) < 6:
             return None
         values = [float(v) for v in values[:6]]

@@ -100,3 +100,32 @@ def test_ft_setup_leaves_the_arm_ready_to_move(monkeypatch):
     arm.ft_zero()
     assert arm._arm.state == 0 and arm._arm.mode == 0
     arm.move_flange(np.eye(4), 30.0)    # code 9 here before the fix
+
+
+def test_ft_reads_come_from_a_separate_report_connection():
+    """SDK 1.18.4: the 'real' report socket carries the F/T fast but no tcp_offset and never sets
+    _first_report_over, so the main connection keeps the default report and a second one serves ft_force()."""
+    made = []
+
+    class RealAPI:
+        def __init__(self, ip, is_radian=False):
+            self.connected = True
+            self.ft_ext_force = [0.0, 0.0, -3.0, 0.1, 0.0, 0.0]
+
+        def disconnect(self):
+            self.connected = False
+
+    def factory(ip, is_radian=False, report_type=None):
+        api = RealAPI(ip) if report_type == 'real' else ReportingAPI(ip, delay=None)
+        if report_type is None:
+            api._report()
+        made.append((report_type, api))
+        return api
+
+    arm = XArm('192.0.2.1', api_factory=factory, read_only=True, ft_report_type='real')
+    arm.connect()
+    assert [t for t, _ in made] == [None, 'real']
+    assert arm.flange_T_tcp[2, 3] == pytest.approx(0.140)
+    assert arm.ft_force() == [0.0, 0.0, -3.0, 0.1, 0.0, 0.0]
+    arm.disconnect()
+    assert not any(api.connected for _, api in made)

@@ -376,8 +376,8 @@ def main():
     p.add_argument('--config', default=str(CONFIG), help='visual_servo.yaml for the fingertip (mount.*)')
     p.add_argument('--log', default=None, help='append every touch to this CSV')
     p.add_argument('--report-type', default=None, choices=('normal', 'rich', 'real'),
-                   help='xArm SDK report socket the F/T is read from (default: SDK default). `real` should be '
-                        'the fast one; check with `watch` that values change every line')
+                   help='xArm SDK report socket the F/T is read from, on a second read-only connection (default: '
+                        'the main connection). `real` is the fast one; check with `watch` that values change every line')
     # probe (servo defaults: grasp.probe_*, gripper.ft_contact_*)
     p.add_argument('--probe-close', type=int, default=550)
     p.add_argument('--probe-depth', type=float, default=15.0, help='mm a touch may descend')
@@ -409,7 +409,7 @@ def main():
 
     mount = load_mount(args.config)
     print(mount.describe())
-    arm = XArm(args.ip, read_only=not args.execute, report_type=args.report_type)
+    arm = XArm(args.ip, read_only=not args.execute, ft_report_type=args.report_type)
     arm.connect()
     try:
         if args.execute:
