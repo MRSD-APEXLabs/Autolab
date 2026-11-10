@@ -140,9 +140,6 @@ if ((HARDWARE)); then
     echo "Could not bring the CANivore network up: is it plugged in? (check: caniv -l)" >&2
     exit 1
   fi
-  # Opening the selected gamepad is required: an accessible keyboard event node
-  # does not prove that the Bluetooth controller is exposed to the container.
-  /usr/bin/python3 "$SRC_DIR/scripts/check_controller.py"
   cat << 'EOF2'
 
 ================================================================================================

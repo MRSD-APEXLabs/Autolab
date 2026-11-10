@@ -94,7 +94,7 @@ def test_pairing_memory_is_bounded_and_retains_newest_stamps():
     assert set(pairs.pending) == {40, 50}
 
 
-def test_sustained_timestamp_reset_still_expires_last_valid_frame(monkeypatch):
+def test_sustained_timestamp_reset_keeps_last_valid_frame(monkeypatch):
     import act_inference.ros_camera as module
     cam = RosDepthCamera()
     push_pair(cam, .01)
@@ -104,8 +104,7 @@ def test_sustained_timestamp_reset_still_expires_last_valid_frame(monkeypatch):
     cam._on_message(1, fake_image(np.ones((3, 4), np.uint16), '16UC1', reset_stamp))
     assert cam._latest is original
     monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: original.captured_monotonic + .4))
-    with pytest.raises(RuntimeError, match='stale'):
-        cam.latest()
+    assert cam.latest() is original
 
 
 @pytest.mark.parametrize('count', [1, 2])
@@ -119,14 +118,13 @@ def test_multiple_publishers_are_rejected(count):
         cam._check_publishers()
 
 
-def test_stale_frames_are_refused():
+def test_old_frames_are_used():
     cam = RosDepthCamera(max_age=0.25)
     now = time.time_ns() - 600_000_000
     stamp = (now // 10**9, now % 10**9)
     cam._on_message(0, fake_image(np.zeros((3, 4, 3), np.uint8), 'bgr8', stamp))
     cam._on_message(1, fake_image(np.ones((3, 4), np.uint16), '16UC1', stamp))
-    with pytest.raises(RuntimeError, match='stale'):
-        cam.latest()
+    assert cam.latest() is cam._latest      # no camera latency limit
 
 
 def test_live_topics_from_a_publisher_node():
@@ -171,10 +169,9 @@ def test_live_topics_from_a_publisher_node():
         time.sleep(0.3)
         assert cam.frames_received > 2 and 0.02 < cam.interval_s < 0.25
         cam.check_mode()
-        running.clear()          # publisher stalls: frames must go stale
+        running.clear()          # publisher stalls: the last frame is still returned (no latency limit)
         time.sleep(0.8)
-        with pytest.raises(RuntimeError, match='stale'):
-            cam.latest()
+        assert time.monotonic() - cam.latest().captured_monotonic > 0.5
     finally:
         cam.stop()
         executor.shutdown()
@@ -213,15 +210,6 @@ def test_back_to_back_receipts_use_capture_cadence():
     push_pair(cam, .35)
     assert cam.interval_s == pytest.approx(.2, abs=.005)
     assert time.monotonic() - cam.latest().captured_monotonic == pytest.approx(.35, abs=.02)
-
-
-def test_startup_still_times_out_for_permanently_stale_pairs():
-    cam = RosDepthCamera(max_age=.25, start_timeout=.04)
-    cam.calibration = {'rectified': True}
-    push_pair(cam, 1.4)
-    push_pair(cam, 1.2)
-    with pytest.raises(TimeoutError, match='Last stale frame: Camera frame stale'):
-        cam._wait_until_ready()
 
 
 def test_startup_does_not_mask_future_clock_mismatch():

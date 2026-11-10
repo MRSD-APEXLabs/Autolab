@@ -487,6 +487,28 @@ behavior_server:
     rotational_acc_lim: 1.0          # gentler ramp to the higher alignment speed
     enable_stamped_cmd_vel: false
 
+dock_behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 20.0
+    behavior_plugins: ["dock_spin"]
+    dock_spin:
+      plugin: "nav2_behaviors::Spin"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    # The downstream 0.12 m/s module-speed floor is ~0.334 rad/s in place.
+    # Keep the final command within this cap while retaining working stiction compensation.
+    max_rotational_vel: 0.35
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 0.2
+    enable_stamped_cmd_vel: false
+
 waypoint_follower:
   ros__parameters:
     loop_rate: 20

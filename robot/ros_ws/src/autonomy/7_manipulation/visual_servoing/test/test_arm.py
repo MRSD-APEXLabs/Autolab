@@ -127,5 +127,10 @@ def test_ft_reads_come_from_a_separate_report_connection():
     assert [t for t, _ in made] == [None, 'real']
     assert arm.flange_T_tcp[2, 3] == pytest.approx(0.140)
     assert arm.ft_force() == [0.0, 0.0, -3.0, 0.1, 0.0, 0.0]
+    # Between runs only the F/T connection is released (5-client controller limit); the next run reopens it.
+    arm.release_ft()
+    assert arm.connected and not made[1][1].connected
+    arm.connect()
+    assert [t for t, _ in made] == [None, 'real', 'real'] and made[2][1].connected
     arm.disconnect()
     assert not any(api.connected for _, api in made)

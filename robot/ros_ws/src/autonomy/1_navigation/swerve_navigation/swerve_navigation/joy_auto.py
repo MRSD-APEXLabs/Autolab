@@ -6,6 +6,7 @@ This module can also be used without ROS for device inspection and unit tests.
 """
 import ctypes as ct
 import math
+import os
 
 
 NEUTRAL_AXES = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
@@ -59,8 +60,19 @@ class Handover:
         return axes, buttons
 
 
+def use_inotify_without_udevd(environ=os.environ, exists=os.path.exists):
+    """Without a running udev daemon (the robot container), libudev disables its event monitor, so SDL's udev
+    backend never sees a controller connect after start-up, or reconnect after dropping out. Make SDL watch
+    /dev/input with inotify instead. Returns True if it switched; an explicit SDL_JOYSTICK_DISABLE_UDEV wins."""
+    if 'SDL_JOYSTICK_DISABLE_UDEV' in environ or exists('/run/udev/control'):
+        return False
+    environ['SDL_JOYSTICK_DISABLE_UDEV'] = '1'
+    return True
+
+
 class SDLControllers:
     def __init__(self):
+        use_inotify_without_udevd()   # before SDL_Init, which picks the hotplug backend
         self.sdl = ct.CDLL('libSDL2-2.0.so.0')
         functions = {
             'SDL_Init': (ct.c_int, [ct.c_uint]),

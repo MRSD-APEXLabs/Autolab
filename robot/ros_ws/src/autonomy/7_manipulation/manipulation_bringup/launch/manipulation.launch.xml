@@ -22,8 +22,9 @@
        description="act_inference source folder (not built; run from there)"/>
   <arg name="act_execute" default="true" description="true: command the arm; false: prediction only"/>
   <arg name="act_duration_sec" default="60.0" description="length of one ACT placing rollout"/>
-  <arg name="act_base_mode" default="policy"
-       description="place_base: policy (base ACT policy from home_offset) or scripted (fixed-pose move, no camera)"/>
+  <arg name="act_base_mode" default="scripted"
+       description="place_base: scripted (fixed pose seated by F/T touch and ridge, no camera) or policy (base ACT policy from home_offset)"/>
+  <arg name="act_base_debug" default="false" description="scripted place_base: log pose and F/T every tick (CSV + console)"/>
   <arg name="act_base_speed_mm_s" default="15.0" description="base placement translation speed in mm/s"/>
   <arg name="act_base_rotation_speed_deg_s" default="6.0" description="base placement rotation speed in degrees/s"/>
   <arg name="act_base_timeout_sec" default="180.0" description="base placement timeout, separate from ACT duration"/>
@@ -45,5 +46,5 @@
   </group>
 
   <executable if="$(var with_act)" cwd="$(var act_dir)" output="screen"
-              cmd="python3 $(var act_dir)/run_act_node.py --ros-args -p execute:=$(var act_execute) -p duration_sec:=$(var act_duration_sec) -p robot_ip:=$(var robot_ip) -p base_mode:=$(var act_base_mode) -p base_speed_mm_s:=$(var act_base_speed_mm_s) -p base_rotation_speed_deg_s:=$(var act_base_rotation_speed_deg_s) -p base_timeout_sec:=$(var act_base_timeout_sec)"/>
+              cmd="python3 $(var act_dir)/run_act_node.py --ros-args -p execute:=$(var act_execute) -p duration_sec:=$(var act_duration_sec) -p robot_ip:=$(var robot_ip) -p base_mode:=$(var act_base_mode) -p base_speed_mm_s:=$(var act_base_speed_mm_s) -p base_rotation_speed_deg_s:=$(var act_base_rotation_speed_deg_s) -p base_timeout_sec:=$(var act_base_timeout_sec) -p base_debug:=$(var act_base_debug)"/>
 </launch>

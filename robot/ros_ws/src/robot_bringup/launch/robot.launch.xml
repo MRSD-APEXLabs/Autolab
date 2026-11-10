@@ -3,6 +3,10 @@
 
   <arg name="sim" default="true" />
   <arg name="record_bag" default="false" />
+  <arg name="navigation" default="true"
+       description="real robot: also start navigation (autonomy/1_navigation/run.sh) as its own process" />
+  <arg name="navigation_hardware" default="true"
+       description="true: run.sh --hardware, THE SWERVE DRIVETRAIN IS ENABLED. false: phoenix6 simulator" />
 
   <!-- No robot namespace here: nodes keep their own (mostly root) names. Only the behavior layer, which the GCS
        commands, lives under /$(env ROBOT_NAME)/behavior (set in behavior.launch.xml). -->
@@ -43,6 +47,20 @@
       file="$(find-pkg-share $(env AUTONOMY_LAUNCH_PACKAGE))/launch/$(env AUTONOMY_LAUNCH_FILE)">
       <arg name="sim" value="$(var sim)" />
     </include>
+  </group>
+
+  <!-- Navigation (real robot): exactly what running autonomy/1_navigation/run.sh by hand does, as a child process.
+       run.sh keeps navigation on its own ROS domain (42), Fast DDS transport and tf2 fix overlay; navigation_executive
+       bridges /nav/* across. With hardware it brings the CANivore up; the Xbox pad (the e-stop) may be connected
+       later. Its yes flag replaces the typed YES, which a launch cannot answer. A failed CANivore bring-up leaves the
+       rest of the stack running. -->
+  <group unless="$(var sim)">
+    <group if="$(var navigation)">
+      <executable if="$(var navigation_hardware)" name="navigation" output="screen"
+                  cmd="/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/run.sh --hardware --yes" />
+      <executable unless="$(var navigation_hardware)" name="navigation" output="screen"
+                  cmd="/home/robot/AutoLab/robot/ros_ws/src/autonomy/1_navigation/run.sh" />
+    </group>
   </group>
 
   <!-- Logging -->

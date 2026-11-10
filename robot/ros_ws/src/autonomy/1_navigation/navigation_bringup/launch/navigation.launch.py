@@ -18,7 +18,7 @@ full workspace, nav_ws).  It starts:
                approach) and nav_api (the /nav topic interface for the rest of the system)
 
 Velocity chain -- NOTHING in Nav2 publishes /cmd_vel:
-  controller_server, behavior_server -> /cmd_vel_nav_raw -> velocity_smoother
+  controller_server, behavior_server, dock_behavior_server -> /cmd_vel_nav_raw -> velocity_smoother
   -> /cmd_vel_smoothed -> collision_monitor -> /cmd_vel_nav -> cmd_vel_mux -> /cmd_vel
 No docking_server / route_server: the stock docking_server publishes straight to /cmd_vel.
 
@@ -74,7 +74,7 @@ NAV2_PACKAGES = (
 # Brought up in this order, shut down in reverse. bt_navigator loads its tree on activation and
 # needs the action servers of the nodes listed before it.
 LOCALIZATION_NODES = ['map_server', 'amcl']
-NAVIGATION_NODES = ['controller_server', 'smoother_server', 'planner_server', 'behavior_server',
+NAVIGATION_NODES = ['controller_server', 'smoother_server', 'planner_server', 'behavior_server', 'dock_behavior_server',
                     'velocity_smoother', 'collision_monitor', 'bt_navigator', 'waypoint_follower']
 
 # Every node runs on wall time.
@@ -275,6 +275,8 @@ def _nodes(context):
         nav2_node('nav2_smoother', 'smoother_server', name='smoother_server'),
         nav2_node('nav2_planner', 'planner_server', name='planner_server'),
         nav2_node('nav2_behaviors', 'behavior_server', name='behavior_server',
+                  remappings=to_nav_raw),
+        nav2_node('nav2_behaviors', 'behavior_server', name='dock_behavior_server',
                   remappings=to_nav_raw),
         # cmd_vel is the smoother's INPUT; its output topic cmd_vel_smoothed is fixed in the node.
         nav2_node('nav2_velocity_smoother', 'velocity_smoother', name='velocity_smoother',

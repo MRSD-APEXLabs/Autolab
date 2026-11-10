@@ -383,6 +383,7 @@ class ServoRunner:
                 self.arm.hand_back()
             except Exception as exc:
                 log.warning('hand back (mode 1) failed: %s', exc)
+        self.arm.release_ft()   # free an SDK client slot for act_inference (5-client controller limit)
         if self.status().get('result') is None:
             self._set(result='stopped' if cfg.dry_run else 'done')
         self._set(phase='idle', running=False, finished=self.clock())

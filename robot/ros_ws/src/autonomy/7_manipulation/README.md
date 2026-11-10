@@ -36,8 +36,9 @@ Placing runs the ACT placing policy where it used to wait at the placement pose:
 
 The executive starts the ACT step with `/act_inference/start/<target>`: `target_machine` (`ot2`, `shaker`) for `place`,
 `base` for `place_base`. It succeeds only for the results in the executive's `act_success_results` (`done` by default).
-Each target runs its own placing policy, trained on SpaceMouse demos of that target (`act_inference/README.md`);
-`act_base_mode:=scripted` switches `place_base` back to the fixed-pose move.
+`ot2` and `shaker` run their own placing policy, trained on SpaceMouse demos of that target (`act_inference/README.md`).
+`base` (`act_base_mode:=scripted`, the default) places by touch instead: fixed pose, F/T touch-down, slide to the ridge;
+`act_base_mode:=policy` runs the base ACT policy.
 
 `manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
 counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,

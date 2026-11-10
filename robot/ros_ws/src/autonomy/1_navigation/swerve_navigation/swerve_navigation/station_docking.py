@@ -1,8 +1,9 @@
-"""Station arrival/departure through Nav2 actions, without terminal rotation.
+"""Station arrival/departure through Nav2 actions with bounded fine correction.
 
 The saved pose faces into the station. NavigateToPose is used only at the open
 staging pose. DockPath / BackUp request translation without an in-place turn.
-The hardware bridge can counter physical yaw drift only while translating.
+The bridge counters yaw drift while translating. Small stopped heading turns
+use a separate slow Spin action after checking the actual swept footprint.
 No direct /cmd_vel publisher: every action uses the existing smoother, collision
 monitor and teleop/e-stop mux. Configuration is opt-in per locations file.
 """
@@ -98,7 +99,7 @@ def docking_marker(state, name, goal, robot, tolerance, held, reason, frame, sta
     distance = math.hypot(robot[0]-goal[0], robot[1]-goal[1]) if robot and goal else None
     verified = state == 'arrived' and distance is not None and distance <= tolerance and held
     phases = {'idle': 'Ready', 'preparing': 'Preparing', 'staging': 'Moving to approach position',
-              'align': 'Aligning away from the table', 'stage_adjust': 'Moving to docking start',
+              'dock_align': 'Fine heading correction', 'align': 'Aligning away from the table', 'stage_adjust': 'Moving to docking start',
               'dock': 'Parking', 'undock': 'Backing out', 'settling': 'Checking stopped pose',
               'stopped': 'STOPPED - parking incomplete', 'undocked': 'Undocked',
               'arrived': 'Outside verified parking pose'}
@@ -198,11 +199,12 @@ class StationDocking:
             'staging': ActionClient(node, NavigateToPose, 'navigate_to_pose'),
             'dock': ActionClient(node, FollowPath, 'follow_path'),
             'stage_adjust': ActionClient(node, FollowPath, 'follow_path'),
+            'dock_align': ActionClient(node, Spin, 'dock_spin'),
             'align': ActionClient(node, Spin, 'spin'),
             'undock': ActionClient(node, BackUp, 'backup'),
         }
         self.cancel_clients = [node.create_client(CancelGoal, name + '/_action/cancel_goal')
-                               for name in ('navigate_to_pose', 'follow_path', 'backup', 'spin')]
+                               for name in ('navigate_to_pose', 'follow_path', 'backup', 'spin', 'dock_spin')]
         self.seq = 0
         self.state = 'idle'
         self.handle = None
@@ -291,7 +293,7 @@ class StationDocking:
             elif self.state == 'undock':
                 target = self.odom_endpoint[2]
             self.heading_target_pub.publish(Float64(data=float(target) if target is not None else math.nan))
-        self.rotation_lock.publish(Bool(data=self.state not in ('idle', 'staging', 'align', 'undocked')))
+        self.rotation_lock.publish(Bool(data=self.state not in ('idle', 'staging', 'align', 'dock_align', 'undocked')))
 
     def _local_map(self, msg):
         self.local_grid, self.local_time = msg, time.monotonic()
@@ -370,6 +372,7 @@ class StationDocking:
         self.seq += 1
         self.recovery_attempts = 0
         self.align_attempts = 0
+        self.correction_attempts = 0
         self.mission_deadline = time.monotonic() + 360.0
         # Quaternion round trips can change yaw by an ulp. Canonicalize named
         # goals so CLI/RViz requests reliably select docking, rather than transit.
@@ -479,11 +482,13 @@ class StationDocking:
             target_yaw = self.parked_odom[2]
         yaw_error = abs(wrap(odom[2]-target_yaw)) if target_yaw is not None else abs(wrap(robot[2]-self.goal[2]))
         if yaw_error > self.config.yaw_tolerance:
-            self._recover(f'final heading error {yaw_error:.3f} rad', self._retreat_for_retry)
+            error = wrap(target_yaw-odom[2]) if target_yaw is not None else wrap(self.goal[2]-robot[2])
+            if not self._try_heading_correction(error, self._parked):
+                self._recover(f'final heading error {yaw_error:.3f} rad', self._retreat_for_retry)
             return
         self.parked_station, self.parked_odom = self.goal, odom
         self.state = 'arrived'
-        self._report('parked; no terminal rotation')
+        self._report('parked; final pose verified')
 
     def _travel(self):
         if self.goal is None:
@@ -513,7 +518,8 @@ class StationDocking:
                 self._align()  # localization changed heading while still in the checked open staging area
                 return
         if abs(yaw) > self.config.approach_yaw_tolerance:
-            self._recover('approach heading needs realignment', self._retreat_for_retry)
+            if not self._try_heading_correction(-yaw, self._dock):
+                self._recover(f'approach heading error {abs(yaw):.3f} rad', self._retreat_for_retry)
             return
         if math.hypot(along, lateral) <= self.config.position_tolerance:
             self._parked()
@@ -572,7 +578,8 @@ class StationDocking:
                 else:
                     self.cancel('staging heading did not converge after 3 alignment attempts')
                 return
-            self._recover(f'approach heading error {yaw_error:.3f} rad', self._retreat_for_retry)
+            if not self._try_heading_correction(wrap(self.goal[2]-robot[2]), self._adjust_stage):
+                self._recover(f'approach heading error {yaw_error:.3f} rad', self._retreat_for_retry)
             return
         stage = staging_pose(self.goal, self.config.approach_distance)
         if math.hypot(robot[0] - stage[0], robot[1] - stage[1]) <= 0.04:
@@ -610,6 +617,7 @@ class StationDocking:
         self.deadline = time.monotonic() + (180.0 if leg == 'staging' else 60.0)
         message = ('navigate to open space' if leg == 'staging' else
                    'rotate only in the checked open staging area' if leg == 'align' else
+                   'slow bounded heading correction in checked clearance' if leg == 'dock_align' else
                    'translate while holding heading; no in-place turn')
         self._report(f'{leg}: {message}')
         future = self.clients[leg].send_goal_async(goal)
@@ -647,6 +655,9 @@ class StationDocking:
             self.cancel(f'{leg} result unavailable: {exc}')
             return
         if not ok:
+            if result.status == GoalStatus.STATUS_ABORTED and leg == 'dock_align':
+                self._recover('fine heading correction aborted', self._retreat_for_retry)
+                return
             # A preemption/cancel is an external stop, never a reason to restart.
             # Humble has no action error_code; ABORTED is still distinguishable.
             if result.status == GoalStatus.STATUS_ABORTED and leg in ('staging', 'stage_adjust', 'dock'):
@@ -687,6 +698,41 @@ class StationDocking:
         self._settle(callback, wait_actions=True, delay=1.0)
         self._report(f'recovering {self.recovery_attempts}/2: {reason}; waiting stopped before retry')
 
+    def _correction_clear(self, error):
+        robot = self.node._robot_place()
+        if robot is None:
+            return False
+        for grid in (self.global_grid, self.local_grid):
+            pose = self._in_grid(grid, robot)
+            if pose is None:
+                return False
+            count = max(1, math.ceil(abs(error)/.02))
+            for i in range(count+1):
+                if not footprint_clear(grid, (pose[0], pose[1], pose[2]+error*i/count),
+                                       self.config.footprint_half_size):
+                    return False
+        return True
+
+    def _try_heading_correction(self, error, callback):
+        # A small swept-angle check permits fine correction where a complete
+        # 360-degree turn would not fit. Native Spin collision checking and the
+        # collision monitor remain in the velocity chain throughout the turn.
+        if (not self.stopped or self.estop or not self._fresh() or
+                not math.isfinite(error) or abs(error) > MAX_STATION_YAW_ERROR or
+                getattr(self, 'correction_attempts', 0) >= 2 or not self._correction_clear(error)):
+            return False
+        odom = self.node._robot_place('odom')
+        if odom is None:
+            return False
+        self.correction_attempts = getattr(self, 'correction_attempts', 0)+1
+        self.correction_start_odom = odom[2]
+        self.correction_target_odom = odom[2]+error
+        self.after_correction = callback
+        goal = Spin.Goal(target_yaw=error)
+        goal.time_allowance.sec = 15
+        self._send('dock_align', goal)
+        return True
+
     def _retreat_for_retry(self):
         """Withdraw on the current body axis; realign only in checked open space."""
         robot = self.node._robot_place()
@@ -715,7 +761,9 @@ class StationDocking:
                 self.global_grid, robot, self.config.footprint_half_size, turning=True):
             self.cancel('withdrawal has not reached clear turning space')
             return
-        if leg == 'undock':
+        if leg == 'dock_align':
+            self.after_correction()
+        elif leg == 'undock':
             self._travel()
         elif leg == 'staging' and self.is_station:
             self._align()
@@ -770,6 +818,12 @@ class StationDocking:
             elif now - self.still_since >= (getattr(self, 'settle_delay', .5) if self.state == 'settling' else .5):
                 callback = self._begin if self.state == 'preparing' else self.after_settle
                 callback()
+        elif self.state == 'dock_align':
+            odom = self.node._robot_place('odom')
+            if odom is not None and abs(wrap(odom[2]-self.correction_start_odom)) > .30:
+                self.cancel('fine correction exceeded its turn limit')
+            elif odom is None or not self._correction_clear(wrap(self.correction_target_odom-odom[2])):
+                self.cancel('fine correction clearance lost; stopping turn')
         elif self.state in ('dock', 'undock', 'stage_adjust'):
             # AMCL can update map->odom while driving. Detect physical drift in
             # continuous odom, rather than interpreting a localization update as

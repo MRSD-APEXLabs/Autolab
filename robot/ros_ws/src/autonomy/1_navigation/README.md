@@ -111,6 +111,11 @@ export NAVIGATION_ENABLED=true     # and NAVIGATION_HARDWARE=true to let it driv
 
 `run.sh` starts navigation directly and ignores both variables.
 
+On the real robot, `robot_bringup`'s `robot.launch.xml` (`sim:=false`) runs `run.sh --hardware --yes` itself, as a
+child process, so the separate terminal is no longer needed: `navigation:=false` leaves it out and
+`navigation_hardware:=false` runs it on the phoenix6 simulator. Everything `run.sh` does still applies (domain 42,
+tf2 overlay, CANivore bring-up); only the typed YES is skipped. The Xbox pad may be connected later.
+
 ## Humble and Jazzy from one source
 
 Everything distro-specific is selected at launch time by `ROS_DISTRO`:
@@ -153,8 +158,17 @@ If you edit the Jazzy tree or the Nav2 parameters, keep the Humble copies in ste
 `best.locations.yaml` now uses a 0.30 m final docking leg and a separate 0.80 m
 staging/withdrawal distance. The robot aligns in checked open space at staging,
 translates with its heading held to the 30 cm approach point, then starts final
-parking with a fresh odometry heading anchor. Alignment and withdrawal stay at
-80 cm; shortening docking does not move an in-place turn toward the table.
+parking with a fresh odometry heading anchor. Large alignment turns and withdrawal
+stay at 80 cm. Small heading corrections are also allowed at the approach point
+and after the final docking leg, before reporting success.
+
+Fine corrections are limited to 0.25 rad (14.3 degrees) and 0.35 rad/s,
+with two correction attempts per request. The downstream module-speed compensation
+sets a practical in-place speed floor of about 0.334 rad/s; this remains enabled. A dedicated lifecycle-managed
+Nav2 behavior server supplies this slow Spin action independently of fast staging
+alignment. Both costmaps must clear the footprint throughout the requested angular
+sweep; clearance is checked again while turning. The rotation lock is released
+only for the correction action and restored during stopping/final verification.
 
 Final station verification allows 0.12 m position error and 0.12 rad (6.9 degrees)
 heading error. The controller aims for 0.10 m, leaving braking allowance. A stopped
@@ -164,8 +178,9 @@ and its terminal result is received. Final map/odometry agreement is still check
 The shared Humble progress checker counts 3 cm of translation within 20 seconds.
 For parking/approach translation, 8 seconds without 2 cm of displacement triggers
 a stopped retry before that deadline. Aborted staging actions replan to staging;
-small final position errors retry translation; heading errors withdraw along the
-current body axis and realign only in checked open space. Recovery waits for the
+small final position errors retry translation; heading errors first attempt a
+checked small correction, otherwise withdraw along the current body axis and
+realign in checked open space. Recovery waits for the
 previous action to terminate and the base to stop. The same public request stays
 `NAVIGATING` throughout recovery, with two retries total and a 360 second mission
 limit. `/station_docking/status` describes each retry.
@@ -176,12 +191,17 @@ monitoring or claim success outside the station limits. Stop navigation, run
 `./src/autonomy/1_navigation/build.sh` in the Humble container, then restart
 `./src/autonomy/1_navigation/run.sh --hardware` to load these changes.
 
-Validation (2026-11-10): 619 checks passed under Humble/Python 3.10; the docking,
+Validation (2026-11-10): 632 checks passed under Humble/Python 3.10; the docking,
 Humble compatibility and public API checks also passed under Jazzy. Tests cover
 the observed 9.1/10.4 cm stalls, heading recovery through withdrawal/re-alignment,
 retry exhaustion, cancellation during recovery, stale perception and blocked exits.
 The isolated Humble Nav2 simulation completed shaker -> home -> OT-2 -> undock
-with zero collisions and no failed requests. These are software/simulation checks;
+with an injected 0.16 rad physical approach disturbance. It used a local heading
+correction and completed with zero collisions and no failed requests. The measured
+fine-turn output peaked at 0.3343 rad/s, within the 0.35 rad/s limit, including
+downstream stiction compensation. Tests also cover post-docking heading correction,
+changing obstacles during a turn and the physical excursion limit.
+These are software/simulation checks;
 the running physical navigation stack was neither rebuilt nor restarted.
 
 ## Topic API
@@ -261,9 +281,10 @@ existing mux may then return to Nav2, as when LT is released.
 Docker's privileged-device snapshot can miss a Bluetooth pad connected after the
 container started. The controller may appear in `/sys/class/input` while its
 `/dev/input/event*` node is missing inside Docker. Keyboard event nodes alone do
-not prove the gamepad works. `run.sh --hardware` now opens the named controller
-with SDL before starting the drivetrain; `scripts/check_controller.py` performs
-that same read-only check without publishing ROS messages.
+not prove the gamepad works. `run.sh --hardware` does not require the pad at start: it may be connected
+after launch, and joy_auto selects it when it appears. Until then there is no pad e-stop.
+`scripts/check_controller.py` opens the named controller with SDL as a read-only check, without publishing
+ROS messages.
 
 The default robot Compose configuration now bind-mounts the live host `/dev/input`
 directory read-only for hotplug/reconnect. Containers created before that change

@@ -121,6 +121,9 @@ class FakeArm:
             return
         self._set_mode(1)
 
+    def release_ft(self):
+        self.ft_released = getattr(self, 'ft_released', 0) + 1
+
     def velocity(self, v_tcp, wz, duration):
         self._motion()
         if self.mode != MODE_VELOCITY:

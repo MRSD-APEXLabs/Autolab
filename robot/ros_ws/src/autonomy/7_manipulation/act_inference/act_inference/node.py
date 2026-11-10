@@ -14,9 +14,11 @@ its rectified image and depth from the zedx_nano_depth topics (camera_source ros
 up to `duration_sec` and closes the arm again. OT-2/shaker first align yaw to 90 degrees (their demos end
 there), then open the gripper and lift 100 mm after a successful policy run. Base first moves straight to
 `base_start_pose_mm_deg` (~80 mm above the bracket at yaw ~0, where its demos started) instead of aligning
-yaw, then runs its policy and lifts 60 mm. `base_mode:=scripted` restores the old base placement: approach
-10 mm above a fixed XYZ/RPY pose and descend, without camera or policy. All targets share one runner, stop
-service, and status topic. With execute:=false the arm is only read.
+yaw, then runs its policy and lifts 60 mm (`base_mode:=policy`). `base_mode:=scripted` (the default) places on
+the base without camera or policy: move to a fixed XYZ/RPY probing start, descend until the
+wrist F/T sensor feels the deck (Fz), slide along -X until it feels the ridge (Fx/Fy), then release and lift 60 mm;
+`base_debug:=true` logs every tick of it. All targets share one runner, stop service, and status topic. With
+execute:=false the arm is only read.
 """
 from dataclasses import replace
 from pathlib import Path
@@ -48,10 +50,14 @@ STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 MODELS = Path(__file__).resolve().parents[1] / 'models'
 TARGETS = ('ot2', 'shaker', 'base')
 DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
-                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261108c',
+                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261110',
                  'base': MODELS / 'xarm6_base_act_ft_20261108b'}
 DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
 BASE_LIFT_MM = 60.0
+# BasePlacementConfig F/T seating fields, exposed as base_<name> parameters.
+BASE_SEATING_PARAMS = {'probe_speed_mm_s': float, 'probe_depth_mm': float, 'touch_force_n': float, 'slide_speed_mm_s': float,
+                       'slide_max_mm': float, 'ridge_force_n': float, 'force_count': int, 'settle_sec': float,
+                       'baseline_sec': float, 'debug': bool, 'debug_dir': str}
 
 
 class ActInferenceNode(Node):
@@ -65,7 +71,7 @@ class ActInferenceNode(Node):
         self.ckpt_dirs = {target: Path(param('ckpt_dir' if target == 'ot2' else f'{target}_ckpt_dir',
                                              str(DEFAULT_CKPTS[target]))).expanduser() for target in TARGETS}
         self.ckpt_dir = self.ckpt_dirs['ot2']
-        self.base_mode = param('base_mode', 'policy')
+        self.base_mode = param('base_mode', 'scripted')
         if self.base_mode not in ('policy', 'scripted'):
             raise ValueError("base_mode must be 'policy' or 'scripted'")
         self.config = InferenceConfig(robot_ip=param('robot_ip', '192.168.1.236'),
@@ -113,7 +119,9 @@ class ActInferenceNode(Node):
             pose_mm_deg=tuple(param('base_pose_mm_deg', list(BasePlacementConfig().pose_mm_deg))),
             speed_mm_s=float(param('base_speed_mm_s', 15.0)),
             rotation_speed_deg_s=float(param('base_rotation_speed_deg_s', 6.0)),
-            timeout_sec=float(param('base_timeout_sec', 180.0)))
+            timeout_sec=float(param('base_timeout_sec', 180.0)),
+            **{name: kind(param(f'base_{name}', getattr(BasePlacementConfig, name)))
+               for name, kind in BASE_SEATING_PARAMS.items()})
         self.base_start = replace(self.base_placement, pose_mm_deg=tuple(
             float(v) for v in param('base_start_pose_mm_deg', list(BASE_POLICY_START_MM_DEG))))
         self._base_move_fn = base_move_fn

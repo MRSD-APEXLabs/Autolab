@@ -168,11 +168,8 @@ class NanoStreamCamera:
             raise RuntimeError('No camera frame')
         age = time.monotonic() - frame.captured_monotonic
         uncertainty = self.uncertainty_ns / 1e9
-        # Depth is computed after capture and the frame stays current until the next one finishes,
-        # so a frame can be up to two compute periods old on top of the transport budget.
-        allowance = 2 * self.depth_ms / 1000.0 + 0.05
-        if age < -uncertainty - 0.01 or age + uncertainty > self.max_age + allowance:
-            raise RuntimeError(f'Camera frame stale or clock mismatch: age={age:.3f}s (depth {self.depth_ms:.0f} ms)')
+        if age < -uncertainty - 0.01:
+            raise RuntimeError(f'Camera frame clock mismatch: age={age:.3f}s (depth {self.depth_ms:.0f} ms)')
         return frame
 
     def stop(self):

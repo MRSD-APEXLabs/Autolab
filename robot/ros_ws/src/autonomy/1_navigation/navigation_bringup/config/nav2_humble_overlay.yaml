@@ -15,6 +15,12 @@ behavior_server:
     wait:
       plugin: "nav2_behaviors/Wait"
 
+dock_behavior_server:
+  ros__parameters:
+    global_frame: odom
+    dock_spin:
+      plugin: "nav2_behaviors/Spin"
+
 collision_monitor:
   ros__parameters:
     # Humble: act when MORE than max_points are inside. Jazzy's min_points: 4 (act at 4 or more) == max_points: 3.

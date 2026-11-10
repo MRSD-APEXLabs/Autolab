@@ -126,7 +126,7 @@ def test_start_stop_and_status_over_ros(target):
         aligned.append('start pose')
         return 'done'
 
-    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261108c',
+    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261110',
                    'base': 'xarm6_base_act_ft_20261108b'}
 
     def rollout(config, rollout_config, policy, stop):
@@ -138,13 +138,14 @@ def test_start_stop_and_status_over_ros(target):
         return 'stopped'
 
     def base_move(config, placement, execute, stop):
-        pytest.fail('base_mode policy (the default) must not run the scripted base move')
+        pytest.fail('base_mode policy must not run the scripted base move')
 
     namespace = f'/test_act_node_{os.getpid()}'
     rclpy.init()
     node = ActInferenceNode(policy='policy', rollout_fn=rollout, base_move_fn=base_move,
                             yaw_align_fn=yaw_align, base_start_fn=base_start, namespace=namespace,
                             parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
+                                                 rclpy.parameter.Parameter('base_mode', value='policy'),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_client', namespace=namespace)
     assert node.ckpt_dir.name == 'xarm6_placing_act_ft_all_20261105b'

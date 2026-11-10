@@ -69,7 +69,8 @@ services:
         REAL_ROBOT: true
       tags:
         - *l4t_image
-    # we use tmux send-keys so that the session stays alive
+    # The stack is NOT auto-launched: the container only starts sshd and an empty
+    # `robot_bringup` tmux session. Launch the stack manually.
     ipc: host
     # `caniv -a -s` brings up the CANivore's SocketCAN interface (can0 on the
     # current hardware) — it is NOT automatic on boot/container start, and
@@ -81,7 +82,7 @@ services:
     # "CAN frame not received/too-stale" status-signal errors even once the
     # bus itself was up.
     command: >
-      bash -c "ssh service restart; tmux new -d -s robot_bringup && tmux send-keys -t robot_bringup  'sudo caniv -a -s; sleep 45; bws && sws &&  DATE=$(date | sed \"s/ /_/g\" | sed \"s/:/_/g\") ros2 launch ${ROBOT_LAUNCH_PACKAGE} ${ROBOT_LAUNCH_FILE} sim:="false" ' ENTER && sleep infinity"
+      bash -c "ssh service restart; tmux new -d -s robot_bringup && sleep infinity"
     runtime: nvidia
     # assumes network isolation via a physical router, so uses network_mode=host
     network_mode: host
