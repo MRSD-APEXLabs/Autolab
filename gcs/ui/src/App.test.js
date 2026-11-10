@@ -120,3 +120,38 @@ test('no retry while a routine is running', () => {
   emit('message', STATUS, routineStatus('running'));
   expect(screen.queryByRole('button', { name: /retry from step/i })).not.toBeInTheDocument();
 });
+
+test('an idle executor with no routine offers a way back home', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('idle', { steps: [], current_step_name: null }));
+  expect(screen.getByText(/no routine running/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /back to home/i }));
+  expect(screen.getByText(/SYSTEM READY/i)).toBeInTheDocument();
+  expect(window.sessionStorage.getItem('apex.view')).toBeNull();
+});
+
+test('an idle executor with no routine offers a new experiment', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('idle', { steps: [], current_step_name: null }));
+  fireEvent.click(screen.getByRole('button', { name: /new experiment/i }));
+  expect(screen.getByRole('textbox')).toBeInTheDocument();
+});
+
+test('an idle executor that still has steps shows the tracker, not the idle card', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('idle'));
+  expect(screen.getByText('0/1 Steps Completed')).toBeInTheDocument();
+  expect(screen.queryByText(/the routine executor is idle/i)).not.toBeInTheDocument();
+});
+
+test('an idle executor that still has steps offers new experiment and home', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('idle'));
+  expect(screen.getByRole('button', { name: /new experiment/i })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /back to home/i }));
+  expect(screen.getByText(/SYSTEM READY/i)).toBeInTheDocument();
+});

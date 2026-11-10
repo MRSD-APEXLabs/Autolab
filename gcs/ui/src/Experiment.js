@@ -80,7 +80,7 @@ function formatExecPayload(payload) {
   return JSON.stringify(payload);
 }
 
-export default function ExperimentSequence({ onNewExperiment }) {
+export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
   const [retryPending, setRetryPending] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -165,6 +165,28 @@ export default function ExperimentSequence({ onNewExperiment }) {
   const led = LED_STYLE[ledFor(state, currentStepName)];
   const { badge: stateBadge, text: stateText } = led;
   const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
+
+  // Ways out when the executor has nothing to run.
+  const idleActions = (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {onNewExperiment && (
+        <button
+          onClick={onNewExperiment}
+          className="text-sm px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700"
+        >
+          New experiment
+        </button>
+      )}
+      {onHome && (
+        <button
+          onClick={onHome}
+          className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100"
+        >
+          Back to home
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -278,6 +300,7 @@ export default function ExperimentSequence({ onNewExperiment }) {
             )}
             {state === "idle" && "No routine running"}
           </p>
+          {state === "idle" && idleActions}
         </div>
       )}
 
@@ -365,6 +388,17 @@ export default function ExperimentSequence({ onNewExperiment }) {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Idle Card: executor is idle with no routine loaded */}
+      {status && state === "idle" && totalSteps === 0 && (
+        <div className="bg-white rounded-2xl shadow p-6 text-gray-700">
+          <h3 className="font-semibold">No routine running</h3>
+          <p className="text-sm mt-1 text-gray-500">
+            The routine executor is idle. Start a new experiment or head back home.
+          </p>
+          {idleActions}
         </div>
       )}
 

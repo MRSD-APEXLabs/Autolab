@@ -94,6 +94,7 @@ export default function App() {
   useEffect(() => saveRoutine(routineJson), [routineJson]);
 
   const newExperiment = () => setStarted(true);
+  const goHome = () => setStarted(false);
 
   // On load, if a routine is already running (new tab, or a reload that lost storage), go straight to
   // its status. Only the first status message counts, so the user is never pulled off a page later.
@@ -200,9 +201,9 @@ export default function App() {
         </div>
       )}
 
-      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} />}
+      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} onHome={goHome} />}
 
-      {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} />}
+      {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} onHome={goHome} />}
 
       {started === true && (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center px-6 py-10">

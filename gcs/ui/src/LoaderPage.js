@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import ExperimentSequence from "./Experiment";
 
 
-export default function LoaderPage({ onNewExperiment }) {
+export default function LoaderPage({ onNewExperiment, onHome }) {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
@@ -10,7 +10,7 @@ export default function LoaderPage({ onNewExperiment }) {
     return () => clearTimeout(timer);
   }, []);
 if (done) {
-    return <ExperimentSequence onNewExperiment={onNewExperiment} />;
+    return <ExperimentSequence onNewExperiment={onNewExperiment} onHome={onHome} />;
 }
 
   return (
