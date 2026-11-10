@@ -14,12 +14,15 @@ const BLANK_SRC = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAE
 // request when an <img> changes src or leaves the DOM: the old stream keeps its connection (and the
 // last frame on screen), and the leaked connections fill the 6-per-host limit so the new camera's
 // request never starts. Blanking src on unmount closes the old stream explicitly.
-function MjpegImg(props) {
+// The effect owns src (not a JSX prop) so StrictMode's mount → cleanup → mount restores the stream
+// instead of leaving the blank GIF.
+function MjpegImg({ src, ...props }) {
   const ref = useRef(null);
   useEffect(() => {
     const img = ref.current;
-    return () => { if (img) img.src = BLANK_SRC; };
-  }, []);
+    img.src = src;
+    return () => { img.src = BLANK_SRC; };
+  }, [src]);
   // eslint-disable-next-line jsx-a11y/alt-text
   return <img ref={ref} {...props} />;
 }

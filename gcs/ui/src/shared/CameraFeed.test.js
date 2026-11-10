@@ -1,3 +1,4 @@
+import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import CameraFeed from './CameraFeed';
 import CameraPair from './CameraPair';
@@ -76,4 +77,10 @@ test('unmounting blanks the stream <img>', () => {
   const img = screen.getByRole('img');
   unmount();
   expect(img.getAttribute('src')).toMatch(/^data:/);
+});
+
+test('StrictMode remount keeps the stream URL (dev server double-runs effects)', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  render(<React.StrictMode><CameraFeed camera="zedx" kind="raw" title="Raw" /></React.StrictMode>);
+  expect(screen.getByRole('img').getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx.mjpg');
 });
