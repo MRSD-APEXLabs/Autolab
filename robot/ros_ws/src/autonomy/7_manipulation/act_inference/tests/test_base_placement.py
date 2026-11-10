@@ -187,3 +187,46 @@ def test_timeout_requires_measured_arrival_and_closes(monkeypatch):
 def test_invalid_configuration(changes):
     with pytest.raises(ValueError):
         bp.BasePlacementConfig(**changes)
+
+
+def start_placement():
+    return replace(bp.BasePlacementConfig(), pose_mm_deg=bp.BASE_POLICY_START_MM_DEG)
+
+
+def test_base_policy_start_pose_is_the_requested_get_position():
+    goal = start_placement().target_pose()
+    np.testing.assert_allclose(goal[:3], [.032055321, .271166351, .116803917])
+    np.testing.assert_allclose(Rotation.from_rotvec(goal[3:]).as_euler('xyz', degrees=True),
+                               [-179.675382, -1.57403, -0.737282], atol=1e-8)
+
+
+def test_base_policy_start_is_one_straight_move_from_home_offset(monkeypatch):
+    stop = ClockStop()
+    placement = start_placement()
+    home_offset = np.concatenate(([-.0206, .3438, .1853], Rotation.from_euler('xyz', [180, 0, 0], degrees=True).as_rotvec()))
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=home_offset)
+    assert bp.move_to_base_policy_start(InferenceConfig(), placement, execute=True, stop=stop) == 'done'
+    assert calls == ['connect', 'enable', 'close']
+    goal = placement.target_pose()
+    np.testing.assert_allclose(commands[-1][:3], goal[:3], atol=1e-9)
+    path = np.asarray(commands)[:, :3] - home_offset[:3]
+    direction = (goal[:3] - home_offset[:3]) / np.linalg.norm(goal[:3] - home_offset[:3])
+    assert np.abs(path - np.outer(path @ direction, direction)).max() < 1e-9   # straight line: no hover or detour
+    assert stop.now >= np.linalg.norm(goal[:3] - home_offset[:3]) / .015 + .3
+
+
+def test_base_policy_start_refuses_a_far_start(monkeypatch):
+    stop = ClockStop()
+    far = start_placement().target_pose()
+    far[0] += .25
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=far)
+    with pytest.raises(RuntimeError, match='250 mm away'):
+        bp.move_to_base_policy_start(InferenceConfig(), start_placement(), execute=True, stop=stop)
+    assert calls == ['connect', 'close'] and not commands
+
+
+def test_base_policy_start_prediction_only_never_enables(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    assert bp.move_to_base_policy_start(InferenceConfig(), start_placement(), stop=stop) == 'done'
+    assert calls == ['connect', 'close'] and not commands

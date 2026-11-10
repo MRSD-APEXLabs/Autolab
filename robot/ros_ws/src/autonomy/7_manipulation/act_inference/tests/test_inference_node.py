@@ -22,7 +22,7 @@ def test_base_release_and_60_mm_retreat_before_handback(move_result, retreat_res
         events.append('release_and_lift')
         if retreat_result == 'error': raise RuntimeError('retreat failed')
         return retreat_result
-    node = SimpleNamespace(config=None, base_placement=None, rollout=SimpleNamespace(execute=True),
+    node = SimpleNamespace(config=None, base_placement=None, rollout=SimpleNamespace(execute=True), base_mode='scripted',
                            runner=SimpleNamespace(status=lambda: dict(target='base'), _check_abort=lambda: None),
                            _base_move_fn=move, _post_placement_fn=retreat,
                            handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
@@ -45,28 +45,61 @@ def test_cancelled_yaw_does_not_start_policy():
     assert ActInferenceNode._run_policy(node, threading.Event()) == 'stopped'
 
 
+def test_cancelled_base_start_move_does_not_start_policy():
+    pytest.importorskip('rclpy')
+    from act_inference.node import ActInferenceNode
+    node = SimpleNamespace(_base_start_fn=lambda *args, **kwargs: 'stopped', base_start=None,
+                           config=None, rollout=SimpleNamespace(execute=True))
+    assert ActInferenceNode._run_policy(node, threading.Event(), 'base') == 'stopped'
+
+
+@pytest.mark.parametrize('target', ['ot2', 'shaker', 'base'])
 @pytest.mark.parametrize('outcome', ['done', 'stopped', 'error'])
-def test_policy_then_release_only_on_success(outcome):
+def test_policy_then_release_only_on_success(outcome, target):
     pytest.importorskip('rclpy')
     from act_inference.node import ActInferenceNode
     stages = []
 
-    def rollout(*args, **kwargs):
+    def rollout(config, rollout_config, policy, stop):
+        assert rollout_config == target + ' rollout' and policy == target + ' policy'
         stages.append('policy')
         if outcome == 'error':
             raise RuntimeError('policy failed')
         return outcome
 
-    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True), _policy=None,
+    def release(*args, **kwargs):
+        stages.append(f'release/lift {kwargs.get("lift_mm", 100.0):g}')
+        return 'done'
+
+    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True),
+                           rollouts={t: t + ' rollout' for t in ('ot2', 'shaker', 'base')},
+                           _policies={t: t + ' policy' for t in ('ot2', 'shaker', 'base')},
                            _yaw_align_fn=lambda *a, **kw: stages.append('yaw') or 'done',
-                           _rollout_fn=rollout,
-                           _post_placement_fn=lambda *a, **kw: stages.append('release/lift') or 'done')
+                           base_start='start pose',
+                           _base_start_fn=lambda config, pose, **kw: stages.append(pose) or 'done',
+                           _rollout_fn=rollout, _post_placement_fn=release)
     if outcome == 'error':
         with pytest.raises(RuntimeError, match='policy failed'):
-            ActInferenceNode._run_policy(node, threading.Event())
+            ActInferenceNode._run_policy(node, threading.Event(), target)
     else:
-        assert ActInferenceNode._run_policy(node, threading.Event()) == outcome
-    assert stages == (['yaw', 'policy', 'release/lift'] if outcome == 'done' else ['yaw', 'policy'])
+        assert ActInferenceNode._run_policy(node, threading.Event(), target) == outcome
+    # Base moves to its start pose (no 90 degree yaw alignment) and lifts 60 mm.
+    expected = (['start pose'] if target == 'base' else ['yaw']) + ['policy']
+    if outcome == 'done':
+        expected.append('release/lift 60' if target == 'base' else 'release/lift 100')
+    assert stages == expected
+
+
+@pytest.mark.parametrize('base_mode, switches_camera', [('policy', True), ('scripted', False)])
+def test_base_camera_only_for_the_policy(base_mode, switches_camera):
+    pytest.importorskip('rclpy')
+    from act_inference.node import ActInferenceNode
+    calls = []
+    node = SimpleNamespace(base_mode=base_mode, runner=SimpleNamespace(status=lambda: dict(target='base')),
+                           _verify_motion_ownership=lambda check: calls.append('ownership'),
+                           _prepare_camera=lambda check: calls.append('camera'))
+    ActInferenceNode._prepare_run(node, lambda: None)
+    assert calls == ['ownership'] + (['camera'] if switches_camera else [])
 
 
 @pytest.mark.parametrize('target', ['ot2', 'shaker', 'base', None])
@@ -83,38 +116,43 @@ def test_start_stop_and_status_over_ros(target):
 
     def yaw_align(config, execute, stop):
         assert target != 'base' and not execute
-        aligned.append(True)
+        aligned.append('yaw')
         return 'done'
 
+    def base_start(config, placement, execute, stop):
+        assert target == 'base' and not execute
+        assert placement.pose_mm_deg == (32.055321, 271.166351, 116.803917, -179.675382, -1.57403, -0.737282)
+        assert placement.speed_mm_s == 15 and placement.rotation_speed_deg_s == 6
+        aligned.append('start pose')
+        return 'done'
+
+    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261108c',
+                   'base': 'xarm6_base_act_ft_20261108b'}
+
     def rollout(config, rollout_config, policy, stop):
-        assert target != 'base'
-        assert aligned == [True]
+        assert aligned == (['start pose'] if target == 'base' else ['yaw'])
         assert policy == 'policy' and not rollout_config.execute
+        assert rollout_config.ckpt_dir.name == checkpoints[target or 'ot2']
+        assert rollout_config.workspace_radius == .15
         stop.wait(5)
         return 'stopped'
 
     def base_move(config, placement, execute, stop):
-        assert target == 'base' and not execute
-        assert placement.pose_mm_deg == (32.074207, 257.162689, 40.484722, -179.67395, -1.5738, -0.3)
-        stop.wait(5)
-        return 'stopped'
+        pytest.fail('base_mode policy (the default) must not run the scripted base move')
 
     namespace = f'/test_act_node_{os.getpid()}'
     rclpy.init()
     node = ActInferenceNode(policy='policy', rollout_fn=rollout, base_move_fn=base_move,
-                            yaw_align_fn=yaw_align, namespace=namespace,
+                            yaw_align_fn=yaw_align, base_start_fn=base_start, namespace=namespace,
                             parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_client', namespace=namespace)
     assert node.ckpt_dir.name == 'xarm6_placing_act_ft_all_20261105b'
+    assert {t: d.name for t, d in node.ckpt_dirs.items()} == checkpoints and node.base_mode == 'policy'
+    assert all(d.is_dir() for d in node.ckpt_dirs.values())
     assert node.rollout.duration_sec == 60 and node.rollout.enable_rotation
     assert node.rollout.workspace_radius == .15 and node.rollout.final_offset == (0., 0., 0.)
     assert node.config.motion.translation_speed == .01 and node.config.motion.rotation_speed == .15
-    if target == 'base':
-        class ForbiddenCameraClient:
-            def wait_for_service(self, **kwargs):
-                pytest.fail('base placement must not switch the camera')
-        node._select_client = ForbiddenCameraClient()
     statuses = []
     client_node.create_subscription(String, 'act_inference/status', lambda m: statuses.append(json.loads(m.data)),
                                     QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL))

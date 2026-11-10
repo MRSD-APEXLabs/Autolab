@@ -10,7 +10,10 @@ from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 from uf_ros_lib.moveit_configs_builder import MoveItConfigsBuilder
 from uf_ros_lib.uf_robot_utils import generate_ros2_control_params_temp_file
-from launch.actions import TimerAction
+from launch.actions import TimerAction, RegisterEventHandler, EmitEvent
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
+from launch.logging import get_logger
 from moveit_configs_utils import MoveItConfigsBuilder as BaseMoveItConfigsBuilder
 
 
@@ -215,13 +218,24 @@ def launch_setup(context, *args, **kwargs):
     )
 
     control_node = Node(
-        package='controller_manager',
-        executable='spawner',
+        package='xarm_controller',
+        executable='start_trajectory_controller.py',
         output='screen',
         arguments=[
             '{}{}_traj_controller'.format(prefix.perform(context), xarm_type),
             '--controller-manager', '{}/controller_manager'.format(ros_namespace)
         ],
+    )
+
+    def controller_started(event, context):
+        if event.returncode == 0:
+            return [move_to_pose_node]
+        reason = 'Trajectory controller startup failed; see start_trajectory_controller logs'
+        get_logger('launch').error(reason)
+        return [EmitEvent(event=Shutdown(reason=reason))]
+
+    controller_ready_handler = RegisterEventHandler(
+        OnProcessExit(target_action=control_node, on_exit=controller_started)
     )
 
     static_tf_node = Node(
@@ -239,10 +253,10 @@ def launch_setup(context, *args, **kwargs):
         robot_moveit_common_launch,
         joint_state_publisher_node,
         ros2_control_launch,
+        controller_ready_handler,
         control_node,
         # robot_driver_launch,
         static_tf_node,
-        move_to_pose_node,
     ]
 
 

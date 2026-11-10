@@ -68,6 +68,44 @@ def run_base_placement(config, placement, execute=False, stop=None):
         robot.close()
 
 
+BASE_POLICY_START_MM_DEG = (32.055321, 271.166351, 116.803917, -179.675382, -1.57403, -0.737282)
+
+
+def move_to_base_policy_start(config, placement, execute=False, stop=None, max_distance_mm=200.0):
+    """One straight move to `placement.pose_mm_deg` (the base policy's start pose, ~80 mm above the bracket), ending
+    after measured arrival (1 mm / 0.5 degrees for 0.3 s). Uses the base-placement speed and rotation limits.
+
+    Refuses to move from more than `max_distance_mm` away (place_base starts it from home_offset, ~113 mm away).
+    Prediction only reads the TCP and logs the destination.
+    """
+    stop = stop if stop is not None else threading.Event()
+    if stop.is_set():
+        return 'stopped'
+    motion = replace(config.motion, translation_speed=placement.speed_mm_s / 1000,
+                     rotation_speed=math.radians(placement.rotation_speed_deg_s))
+    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    try:
+        robot.connect()
+        initial = robot.initialize_target_pose()
+        goal = placement.target_pose()
+        goal[3:] = continuous_rotvec(goal[3:], initial[3:])
+        distance_mm = float(np.linalg.norm(goal[:3] - initial[:3])) * 1000
+        if stop.is_set():
+            return 'stopped'
+        print(f'Base policy start {"EXECUTE" if execute else "PREDICTION ONLY"}: '
+              f'goal_mm_rpy_deg={list(placement.pose_mm_deg)}, {distance_mm:.1f} mm away, '
+              f'speed={placement.speed_mm_s} mm/s, rotation={placement.rotation_speed_deg_s} deg/s', flush=True)
+        if distance_mm > max_distance_mm:
+            raise RuntimeError(f'Base policy start pose is {distance_mm:.0f} mm away (limit {max_distance_mm:.0f} mm); '
+                               'start place_base from home_offset')
+        if not execute:
+            return 'done'
+        robot.enable()
+        return _move_goals(robot, initial, (goal,), motion, stop, placement.timeout_sec, 'Base policy start')
+    finally:
+        robot.close()
+
+
 def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xyz_tolerance=None):
     """Follow ordered waypoints, requiring measured arrival before advancing."""
     target = initial.copy()

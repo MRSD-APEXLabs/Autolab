@@ -204,15 +204,15 @@ def test_standalone_execute_cannot_bypass_handoff():
 
 
 @pytest.mark.parametrize('result', ['done', 'stopped', 'error'])
-@pytest.mark.parametrize('target', ['ot2', 'base'])
-def test_restore_only_after_all_motion_succeeds(result, target):
+@pytest.mark.parametrize('target, base_mode', [('ot2', 'policy'), ('base', 'policy'), ('base', 'scripted')])
+def test_restore_only_after_all_motion_succeeds(result, target, base_mode):
     pytest.importorskip('rclpy')
     from act_inference.node import ActInferenceNode
     calls = []
     def run(*args, **kwargs):
         if result == 'error': raise RuntimeError('motion failed')
         return result
-    node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None, base_placement=None,
+    node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None, base_placement=None, base_mode=base_mode,
                            runner=SimpleNamespace(status=lambda: dict(target=target), _check_abort=check),
                            _run_policy=run, _base_move_fn=run, _post_placement_fn=run,
                            handoff=SimpleNamespace(finish=lambda check: calls.append('finish')))
@@ -223,8 +223,8 @@ def test_restore_only_after_all_motion_succeeds(result, target):
     assert calls == (['finish'] if result == 'done' else [])
 
 
-@pytest.mark.parametrize('target', ['ot2', 'base'])
-def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target):
+@pytest.mark.parametrize('target, base_mode', [('ot2', 'policy'), ('base', 'policy'), ('base', 'scripted')])
+def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target, base_mode):
     rclpy = pytest.importorskip('rclpy')
     from rclpy.executors import MultiThreadedExecutor
     from controller_manager_msgs.srv import ListControllers, SwitchController
@@ -299,9 +299,10 @@ def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target)
     server.create_service(SwitchController, '/controller_manager/switch_controller', switch)
     node = ActInferenceNode(policy='test', rollout_fn=motion('policy'), yaw_align_fn=motion('yaw'),
                             post_placement_fn=motion('open_lift'), base_move_fn=motion('base'),
-                            namespace='/test_handoff', parameter_overrides=[
+                            base_start_fn=motion('start_pose'), namespace='/test_handoff', parameter_overrides=[
                                 rclpy.parameter.Parameter('execute', value=True),
                                 rclpy.parameter.Parameter('select_service', value=''),
+                                rclpy.parameter.Parameter('base_mode', value=base_mode),
                                 rclpy.parameter.Parameter('driver_control_prefix', value=prefix),
                                 rclpy.parameter.Parameter('arm_controllers', value=['test_arm'])])
     node.handoff.ready = ready
@@ -318,7 +319,9 @@ def test_ros_handoff_services_wrap_entire_run_without_robot(monkeypatch, target)
             assert time.monotonic() < deadline
             time.sleep(.01)
         assert node.runner.status()['result'] == 'done', node.runner.status()
-        expected_motion = ['base', 'open_lift'] if target == 'base' else ['yaw', 'policy', 'open_lift']
+        expected_motion = {'ot2': ['yaw', 'policy', 'open_lift'],   # base policy: start pose instead of yaw
+                           'base': ['base', 'open_lift'] if base_mode == 'scripted'
+                           else ['start_pose', 'policy', 'open_lift']}[target]
         assert events == ['stop_ros', 'acquire'] + expected_motion + ['ready', 'release', 'start_ros']
     finally:
         executor.shutdown()

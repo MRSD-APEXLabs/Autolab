@@ -8,14 +8,17 @@ Interface (same contract as visual_servoing's visual_servo/*):
   act_inference/status    std_msgs/String JSON, 2 Hz and at the end of a run (transient local):
                           running, result (done | stopped | failed), message, phase, started, target
 
-The checkpoint is loaded and warmed up once, at startup. Each OT-2/shaker run switches the camera hub to the
-Nano (`select_service`), reads its rectified image and depth from the zedx_nano_depth topics
-(camera_source ros), connects to the arm, runs `duration_sec` and closes the arm again.
-OT-2/shaker first align yaw to 90 degrees, then open the gripper and lift 100 mm after a
-successful policy run. Base placement approaches 10 mm above its fixed
-XYZ/RPY pose before descending, without camera or policy inference. All targets share
-one runner, stop service, and status topic. With execute:=false the arm is only read.
+Each target has its own placing policy (`ckpt_dir` for OT-2, `shaker_ckpt_dir`, `base_ckpt_dir`); all are
+loaded and warmed up once, at startup. Each run switches the camera hub to the Nano (`select_service`), reads
+its rectified image and depth from the zedx_nano_depth topics (camera_source ros), connects to the arm, runs
+up to `duration_sec` and closes the arm again. OT-2/shaker first align yaw to 90 degrees (their demos end
+there), then open the gripper and lift 100 mm after a successful policy run. Base first moves straight to
+`base_start_pose_mm_deg` (~80 mm above the bracket at yaw ~0, where its demos started) instead of aligning
+yaw, then runs its policy and lifts 60 mm. `base_mode:=scripted` restores the old base placement: approach
+10 mm above a fixed XYZ/RPY pose and descend, without camera or policy. All targets share one runner, stop
+service, and status topic. With execute:=false the arm is only read.
 """
+from dataclasses import replace
 from pathlib import Path
 import json
 import logging
@@ -33,7 +36,8 @@ from std_srvs.srv import Trigger
 from controller_manager_msgs.srv import ListControllers, SwitchController
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
-from .base_placement import BasePlacementConfig, align_policy_yaw, run_base_placement
+from .base_placement import (BASE_POLICY_START_MM_DEG, BasePlacementConfig, align_policy_yaw,
+                             move_to_base_policy_start, run_base_placement)
 from .post_placement import release_and_lift
 from .rollout import load_policy, run_act_rollout, warm_up
 from .runner import ActRunner
@@ -41,16 +45,29 @@ from .ownership import DriverHandoff
 from .robot import XArm6Robot
 
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-DEFAULT_CKPT = Path(__file__).resolve().parents[1] / 'models' / 'xarm6_placing_act_ft_all_20261105b'
+MODELS = Path(__file__).resolve().parents[1] / 'models'
+TARGETS = ('ot2', 'shaker', 'base')
+DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
+                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261108c',
+                 'base': MODELS / 'xarm6_base_act_ft_20261108b'}
+DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
+BASE_LIFT_MM = 60.0
 
 
 class ActInferenceNode(Node):
     def __init__(self, policy=None, rollout_fn=run_act_rollout, base_move_fn=run_base_placement,
-                 yaw_align_fn=align_policy_yaw, post_placement_fn=release_and_lift, **kwargs):
-        """`policy` (a load_policy() result) and `rollout_fn` replace the checkpoint and the arm (tests)."""
+                 yaw_align_fn=align_policy_yaw, post_placement_fn=release_and_lift,
+                 base_start_fn=move_to_base_policy_start, **kwargs):
+        """`policy` (a load_policy() result, or a dict of them per target) and `rollout_fn` replace the
+        checkpoints and the arm (tests)."""
         super().__init__('act_inference', **kwargs)
         param = lambda name, default: self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
-        self.ckpt_dir = Path(param('ckpt_dir', str(DEFAULT_CKPT))).expanduser()
+        self.ckpt_dirs = {target: Path(param('ckpt_dir' if target == 'ot2' else f'{target}_ckpt_dir',
+                                             str(DEFAULT_CKPTS[target]))).expanduser() for target in TARGETS}
+        self.ckpt_dir = self.ckpt_dirs['ot2']
+        self.base_mode = param('base_mode', 'policy')
+        if self.base_mode not in ('policy', 'scripted'):
+            raise ValueError("base_mode must be 'policy' or 'scripted'")
         self.config = InferenceConfig(robot_ip=param('robot_ip', '192.168.1.236'),
                                       camera_source=param('camera_source', 'ros'),
                                       ros_namespace=param('ros_namespace', '/zedx_nano'),
@@ -83,6 +100,10 @@ class ActInferenceNode(Node):
                                      approach_distance=float(param('approach_distance', 0.012)),
                                      ensemble=int(param('ensemble', 5)),
                                      final_offset=tuple(float(v) / 1000 for v in param('final_offset_mm', [0.0, 0.0, 0.0])))
+        base_radius = float(param('base_workspace_radius', 0.15))   # the bracket is ~80 mm below the start pose
+        self.rollouts = {target: replace(self.rollout, ckpt_dir=self.ckpt_dirs[target],
+                                         **({'workspace_radius': base_radius} if target == 'base' else {}))
+                         for target in TARGETS}
         self.select_service = param('select_service', '/camera_hub/select_zedx_nano')
         self.select_timeout = float(param('select_timeout', 20.0))
         driver_prefix = str(param('driver_control_prefix', '/xarm/sdk_control')).rstrip('/')
@@ -93,17 +114,29 @@ class ActInferenceNode(Node):
             speed_mm_s=float(param('base_speed_mm_s', 15.0)),
             rotation_speed_deg_s=float(param('base_rotation_speed_deg_s', 6.0)),
             timeout_sec=float(param('base_timeout_sec', 180.0)))
+        self.base_start = replace(self.base_placement, pose_mm_deg=tuple(
+            float(v) for v in param('base_start_pose_mm_deg', list(BASE_POLICY_START_MM_DEG))))
         self._base_move_fn = base_move_fn
+        self._base_start_fn = base_start_fn
         self._yaw_align_fn = yaw_align_fn
         self._post_placement_fn = post_placement_fn
         self._handoff_robot = None
 
-        if policy is None:
-            t0 = time.monotonic()
-            policy = load_policy(self.ckpt_dir)
-            warm_up(policy, self.config.record_image_width)
-            self.get_logger().info(f'ACT checkpoint {self.ckpt_dir.name} ready in {time.monotonic() - t0:.1f} s')
-        self._policy = policy
+        needed = [t for t in TARGETS if t != 'base' or self.base_mode == 'policy']
+        if policy is not None:
+            self._policies = {t: policy[t] if isinstance(policy, dict) else policy for t in needed}
+        else:
+            loaded = {}   # one load per checkpoint folder, even if targets share it
+            for target in needed:
+                directory = self.ckpt_dirs[target].resolve()
+                if directory not in loaded:
+                    t0 = time.monotonic()
+                    loaded[directory] = load_policy(directory)
+                    warm_up(loaded[directory], self.config.record_image_width)
+                    self.get_logger().info(f'ACT checkpoint {directory.name} ready in {time.monotonic() - t0:.1f} s')
+            self._policies = {t: loaded[self.ckpt_dirs[t].resolve()] for t in needed}
+        self.get_logger().info('Placing policies: ' + ', '.join(f'{t}={self.ckpt_dirs[t].name}' for t in needed)
+                               + ('' if 'base' in needed else ', base=scripted pose'))
 
         self.runner = ActRunner(self._run, prepare=self._prepare_run, on_done=self._run_done)
         services = ReentrantCallbackGroup()
@@ -136,25 +169,33 @@ class ActInferenceNode(Node):
 
     # -- runs ----------------------------------------------------------------------------------------
     def _run(self, stop):
-        if self.runner.status()['target'] == 'base':
+        target = self.runner.status()['target']
+        if target == 'base' and self.base_mode == 'scripted':
             result = self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
             if result == 'done' and not stop.is_set():
-                result = self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, lift_mm=60.0)
+                result = self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop,
+                                                 lift_mm=BASE_LIFT_MM)
         else:
-            result = self._run_policy(stop)
+            result = self._run_policy(stop, target)
         if result == 'done' and not stop.is_set() and self.rollout.execute:
             self.handoff.finish(self.runner._check_abort)
         return 'stopped' if stop.is_set() else result
 
-    def _run_policy(self, stop):
-        if self._yaw_align_fn(self.config, execute=self.rollout.execute, stop=stop) == 'stopped' or stop.is_set():
+    def _run_policy(self, stop, target='ot2'):
+        # OT-2 / shaker demos end at yaw ~90 degrees; base demos start ~80 mm above the bracket at yaw ~0.
+        if target == 'base':
+            prepare = lambda: self._base_start_fn(self.config, self.base_start, execute=self.rollout.execute, stop=stop)
+        else:
+            prepare = lambda: self._yaw_align_fn(self.config, execute=self.rollout.execute, stop=stop)
+        if prepare() == 'stopped' or stop.is_set():
             return 'stopped'
-        result = self._rollout_fn(self.config, self.rollout, policy=self._policy, stop=stop)
+        result = self._rollout_fn(self.config, self.rollouts[target], policy=self._policies[target], stop=stop)
         if result != 'done':
             return result
         if stop.is_set():
             return 'stopped'
-        return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop)
+        lift = {'lift_mm': BASE_LIFT_MM} if target == 'base' else {}
+        return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, **lift)
 
     def _run_done(self, status):
         # one call site per severity: rclpy refuses a severity change at the same call site
@@ -178,7 +219,7 @@ class ActInferenceNode(Node):
 
     def _prepare_run(self, check_abort):
         self._verify_motion_ownership(check_abort)
-        if self.runner.status()['target'] != 'base':
+        if self.runner.status()['target'] != 'base' or self.base_mode == 'policy':
             self._prepare_camera(check_abort)
 
     def _verify_motion_ownership(self, check_abort):

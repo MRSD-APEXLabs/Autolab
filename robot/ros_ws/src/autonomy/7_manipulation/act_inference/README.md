@@ -1,13 +1,23 @@
 # F/T placing inference
 
-This folder includes the runtime and checkpoint used by
-`apple_server_manip/scripts/place_on_opentrons_ft.sh`. No teleop checkout is needed.
-`models/xarm6_placing_act_ft_all_20261105b/` contains `config.pkl`, `dataset_stats.pkl`, and
-`policy_best.ckpt` (11000 steps, all 103 finished demonstrations, no held-out split;
-near-seat frames weighted x4). Both the launcher and ROS node default to this checkpoint.
-The previous `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
+This folder includes the runtime and checkpoints used by `apple_server_manip/scripts/place_on_{opentrons,shaker,base}_ft.sh`.
+No teleop checkout is needed. One placing policy per target, each with `config.pkl`, `dataset_stats.pkl` and
+`policy_best.ckpt` (all finished SpaceMouse demonstrations of that target, no held-out split; near-seat frames
+weighted x4):
+
+| target | checkpoint | demos | held-out check (80:20 run, median end error) |
+|---|---|---|---|
+| `ot2` | `models/xarm6_placing_act_ft_all_20261105b/` | 103, 11000 steps | 1.34 mm |
+| `shaker` | `models/xarm6_shaker_act_ft_20261108c/` | 59 (about 8 base parking spots + 10 at two newer spots), 8000 steps | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
+| `base` | `models/xarm6_base_act_ft_20261108b/` | 43 (robot base deck bracket; 4 started at the base start pose), 4500 steps | 1.42 mm (x/y 0.74, height 0.84) for the 39-demo version |
+
+The ROS node and the wrapper scripts default to these. The previous OT-2 checkpoints
+`models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
 `models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
-`models/xarm_final_ckpt_placing/` checkpoints remain available by explicit path.
+`models/xarm_final_ckpt_placing/` remain available by explicit path.
+The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261108b/` (54 demonstrations, 7500 steps) and
+`models/xarm6_shaker_act_ft_20261108/` (49 demonstrations, 6500 steps) are kept too, and so is the previous base
+checkpoint `models/xarm6_base_act_ft_20261108/` (39 demonstrations, 4000 steps).
 
 The new policy uses wrist RGB, metric depth and validity, and the compensated external
 F/T wrench (N, Nm, SDK sensor coordinates). TCP pose is hidden from the model; measured
@@ -37,8 +47,9 @@ ros2 topic echo /act_inference/status
 ros2 service call /act_inference/stop std_srvs/srv/Trigger
 ```
 
-OT-2 and shaker run the same ACT placing policy. `/act_inference/start` remains an alias
-for `/act_inference/start/ot2`. Before either policy executes, the arm's base-frame Euler yaw
+Each target runs its own ACT placing policy (table above); all three are loaded and warmed up at
+startup. `/act_inference/start` remains an alias for `/act_inference/start/ot2`. Before the OT-2 or
+shaker policy executes, the arm's base-frame Euler yaw
 is aligned to **90 degrees** at **9 degrees/s**, holding its current XYZ, roll, and pitch.
 Alignment is skipped when yaw is already within 0.5 degrees. Measured arrival is confirmed
 before starting ACT; a stopped or failed alignment prevents the policy from starting.
@@ -59,7 +70,7 @@ by gripper release and a 100 mm vertical retreat. `done` is published only after
 finishes; it is not an independent placement measurement. Contact detection or cancellation returns `stopped`;
 sensor, inference, camera, workspace, and robot errors return `failed`.
 
-The node defaults now match the F/T placing script: the bundled F/T checkpoint,
+The node defaults now match the F/T placing scripts: the bundled F/T checkpoints,
 60 s maximum duration, 50 Hz control, translation 0.01 m/s, rotation enabled at
 0.15 rad/s, workspace radius 0.15 m, and no final offset. It preloads and warms the
 policy once, then creates a camera/robot session for each ACT run. It selects
@@ -74,7 +85,7 @@ on exit; it never zeroes the sensor or selects force-control mode.
 ros2 launch manipulation_bringup manipulation.launch.xml act_duration_sec:=60.0
 ```
 
-ROS parameters also expose `ckpt_dir`, `robot_ip`, `camera_source`, `ros_namespace`,
+ROS parameters also expose `ckpt_dir` (OT-2), `shaker_ckpt_dir`, `base_ckpt_dir`, `robot_ip`, `camera_source`, `ros_namespace`,
 `select_service` (empty skips switching), `select_timeout`, `control_hz`,
 `translation_speed`, `rotation_speed`, `max_tracking_error`, `enable_rotation`,
 `workspace_radius`, `duration_sec`, `query_interval`, `prediction_timeout`,
@@ -105,7 +116,24 @@ with a **60 mm** lift.
 
 ## Base placement
 
-`/act_inference/start/base` moves directly to the supplied `arm.get_position()` destination:
+`/act_inference/start/base` runs the base policy (`base_mode:=policy`, the default). The executive's
+`place_base` starts it from `plan_home_offset` (TCP about (-21, 344, 185) mm, yaw 0). Instead of the OT-2/shaker
+yaw alignment, the node first moves in one straight line to the base start pose, `arm.get_position()`
+
+```text
+XYZ (mm):                 [32.055321, 271.166351, 116.803917]
+roll/pitch/yaw (degrees): [-179.675382, -1.57403, -0.737282]   (base_start_pose_mm_deg)
+```
+
+about 80 mm above the bracket, where most base demos started, with the base-placement limits below
+(`base_speed_mm_s`, `base_rotation_speed_deg_s`, `base_timeout_sec`) and measured arrival (1 mm / 0.5 degrees
+for 0.3 s). It refuses to start that move from more than 200 mm away (home_offset is ~113 mm away). Then the
+policy runs like OT-2/shaker (Nano camera, the same motion limits, `base_workspace_radius` 0.15 m, arrival and
+contact checks), followed by release and a **60 mm** lift (below). A stopped or failed start move prevents the
+policy from starting.
+
+`base_mode:=scripted` (bringup: `act_base_mode:=scripted`) restores the previous fixed-pose placement without
+camera or policy. It moves directly to the supplied `arm.get_position()` destination:
 
 ```text
 XYZ (mm):       [32.074207, 257.162689, 40.484722]
@@ -121,7 +149,7 @@ Both stages use the same slow motion limits and share the timeout. After success
 arrival, the node opens the gripper, waits **4 seconds**, and lifts **60 mm along base +Z**,
 holding XY and orientation. The lift uses `translation_speed` (default **10 mm/s**).
 It skips camera switching, camera reads, F/T setup, and
-policy inference. The shared node still preloads its ACT checkpoint at startup.
+policy inference; in this mode the base checkpoint is not loaded.
 
 Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s.
 Execution reports `done` after placing, releasing, lifting, and driver handback succeed.
@@ -130,12 +158,13 @@ or the 180 s timeout report `failed`. The timeout is independent of ACT's `durat
 With `execute:=false`, base placement reads the TCP, logs the destination, and returns
 `done` without enabling or commanding the arm.
 
-Node parameters: `base_pose_mm_deg` (six XYZ/RPY values), `base_speed_mm_s` (15.0),
-`base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0).
-Bringup exposes speeds and timeout:
+Node parameters: `base_mode` (`policy` or `scripted`), `base_ckpt_dir`, `base_start_pose_mm_deg` (six XYZ/RPY
+values), `base_workspace_radius` (0.15 m) (policy mode); `base_pose_mm_deg` (six XYZ/RPY values), `base_speed_mm_s` (15.0),
+`base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0) (scripted mode).
+Bringup exposes the mode, speeds and timeout:
 
 ```bash
-ros2 launch manipulation_bringup manipulation.launch.xml \
+ros2 launch manipulation_bringup manipulation.launch.xml act_base_mode:=scripted \
   act_base_speed_mm_s:=15.0 act_base_rotation_speed_deg_s:=6.0 act_base_timeout_sec:=180.0
 ```
 
@@ -143,6 +172,8 @@ ros2 launch manipulation_bringup manipulation.launch.xml \
 
 ```bash
 ./place_on_opentrons_ft.sh                          # prediction only, direct Nano stream
+./place_on_shaker_ft.sh                             # shaker policy (start above the clamp, yaw ~90)
+./place_on_base_ft.sh                               # base policy (start at the base start pose by hand)
 # Execution uses run_act_node.py and the target services above.
 ./place_on_opentrons_ft.sh --camera-source ros      # use running camera/depth nodes
 python3 run_act_inference.py --help

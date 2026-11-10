@@ -30,9 +30,11 @@ def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
         np.testing.assert_array_equal(actual[key], expected[key])
 
 
-def test_bundled_ft_placing_checkpoint_without_hardware():
+@pytest.mark.parametrize('name', ['xarm6_placing_act_ft_all_20261105b',   # OT-2
+                                  'xarm6_shaker_act_ft_20261108c', 'xarm6_base_act_ft_20261108b'])
+def test_bundled_ft_placing_checkpoint_without_hardware(name):
     from act_inference.rollout import warm_up
-    directory = Path(__file__).resolve().parents[1] / 'models/xarm6_placing_act_ft_all_20261105b'
+    directory = Path(__file__).resolve().parents[1] / 'models' / name
     loaded = load_policy(directory)
     policy, stats, device = loaded
     assert policy.use_depth and policy.use_force_torque and policy.state_inputs == 'none'
