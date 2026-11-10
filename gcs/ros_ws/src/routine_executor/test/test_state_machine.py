@@ -340,3 +340,54 @@ def test_to_dict_has_recordings():
     sm = _running_sm()
     sm.add_recording('c1')
     assert sm.to_dict()['recordings'] == ['c1']
+
+
+def _fail_second_step(sm):
+    sm.start()
+    sm.on_success()
+    for _ in range(sm.max_retries):
+        sm.on_failure()
+
+
+def test_retry_resumes_failed_routine_at_failed_step():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick', 'target_machine': 'ot2'}])
+    _fail_second_step(sm)
+    assert sm.state == 'failed'
+    assert sm.retry() is True
+    assert sm.state == 'running'
+    assert sm.current_step_idx == 1
+    assert sm.retry_count == 0
+    assert sm.error is None
+    assert sm.needs_dispatch is True
+
+
+def test_retry_after_cancel_redispatches_cancelled_step():
+    sm = make_sm()
+    sm.start()
+    sm.on_success()
+    sm.cancel()
+    assert sm.retry() is True
+    assert sm.current_step_name() == 'place'
+
+
+def test_retry_keeps_recordings_of_the_run():
+    sm = make_sm()
+    sm.start()
+    sm.add_recording('clip_1')
+    sm.cancel()
+    sm.retry()
+    assert sm.recordings == ['clip_1']
+
+
+def test_retry_only_from_failed():
+    for setup in (lambda sm: None, lambda sm: sm.start(), lambda sm: (sm.start(), sm.pause())):
+        sm = make_sm()
+        setup(sm)
+        before = sm.state
+        assert sm.retry() is False
+        assert sm.state == before
+    sm = make_sm([{'name': 'pick_base'}])
+    sm.start()
+    sm.on_success()
+    assert sm.retry() is False
+    assert sm.state == 'success'

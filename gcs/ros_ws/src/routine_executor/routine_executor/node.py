@@ -44,6 +44,8 @@ class RoutineExecutorNode(Node):
                                  self._on_pause_cmd, 10)
         self.create_subscription(String, '/routine_executor/resume',
                                  self._on_resume_cmd, 10)
+        self.create_subscription(String, '/routine_executor/retry',
+                                 self._on_retry_cmd, 10)
 
         # Status output
         self._status_pub = self.create_publisher(String, '/routine_executor/status', 10)
@@ -183,6 +185,17 @@ class RoutineExecutorNode(Node):
             self.get_logger().info('Routine resumed')
         else:
             self.get_logger().warn(f'Resume received but state is {self._sm.state}')
+
+    def _on_retry_cmd(self, msg: String) -> None:
+        if self._sm.retry():
+            self._listening = False
+            self._seen_running = False
+            self.get_logger().info(
+                f'Retrying routine from step {self._sm.current_step_idx + 1} '
+                f'"{self._sm.current_step_name()}"'
+            )
+        else:
+            self.get_logger().warn(f'Retry received but state is {self._sm.state}')
 
     def _on_action_status(self, msg: Status, step_name: str) -> None:
         if self._sm.state not in ('running', 'paused'):

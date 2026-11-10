@@ -14,6 +14,24 @@ const STATUS_TOPIC = 'ros2/routine_executor/status';
 // Which page this tab is on, kept across reloads (Safari reloads background tabs it evicted).
 // 'loader' is stored as 'experiment' so a reload skips the 5 s loader.
 const VIEW_KEY = 'apex.view';
+// Last routine sent, so "New experiment" (and reloads) start from it instead of the default.
+const ROUTINE_KEY = 'apex.routine';
+
+function loadRoutine() {
+  try {
+    return window.sessionStorage.getItem(ROUTINE_KEY) ?? DEFAULT_ROUTINE;
+  } catch {
+    return DEFAULT_ROUTINE;
+  }
+}
+
+function saveRoutine(json) {
+  try {
+    window.sessionStorage.setItem(ROUTINE_KEY, json);
+  } catch {
+    // storage unavailable: the editor keeps it in memory only
+  }
+}
 
 function loadView() {
   try {
@@ -70,9 +88,12 @@ const DEFAULT_ROUTINE = JSON.stringify(
 export default function App() {
   // false = welcome, true = routine editor, 'loader' = starting, 'experiment' = live status
   const [started, setStarted] = useState(loadView);
-  const [routineJson, setRoutineJson] = useState(DEFAULT_ROUTINE);
+  const [routineJson, setRoutineJson] = useState(loadRoutine);
 
   useEffect(() => saveView(started), [started]);
+  useEffect(() => saveRoutine(routineJson), [routineJson]);
+
+  const newExperiment = () => setStarted(true);
 
   // On load, if a routine is already running (new tab, or a reload that lost storage), go straight to
   // its status. Only the first status message counts, so the user is never pulled off a page later.
@@ -179,9 +200,9 @@ export default function App() {
         </div>
       )}
 
-      {started === 'loader' && <LoaderPage />}
+      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} />}
 
-      {started === 'experiment' && <ExperimentSequence />}
+      {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} />}
 
       {started === true && (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center px-6 py-10">

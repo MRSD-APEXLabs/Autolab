@@ -7,6 +7,9 @@ const STATUS_TOPIC = "ros2/routine_executor/status";
 const CANCEL_TOPIC = "cmd/routine_executor/cancel";
 const PAUSE_TOPIC = "cmd/routine_executor/pause";
 const RESUME_TOPIC = "cmd/routine_executor/resume";
+const RETRY_TOPIC = "cmd/routine_executor/retry";
+// Give up on "Retrying…" if the executor never reports running (it publishes status at 1 Hz).
+const RETRY_PENDING_MS = 5000;
 
 // Same default robot as routine_executor/node.py. behavior.launch.xml pushes the
 // /<ROBOT_NAME>/behavior namespace, so executive topics live under it.
@@ -77,8 +80,9 @@ function formatExecPayload(payload) {
   return JSON.stringify(payload);
 }
 
-export default function ExperimentSequence() {
+export default function ExperimentSequence({ onNewExperiment }) {
   const [status, setStatus] = useState(null);
+  const [retryPending, setRetryPending] = useState(false);
   const [connected, setConnected] = useState(false);
   const [executorStatus, setExecutorStatus] = useState({});
   const clientRef = useRef(null);
@@ -94,6 +98,17 @@ export default function ExperimentSequence() {
   function handleResume() {
     clientRef.current?.publish(RESUME_TOPIC, '');
   }
+
+  function handleRetry() {
+    clientRef.current?.publish(RETRY_TOPIC, '');
+    setRetryPending(true);
+  }
+
+  useEffect(() => {
+    if (!retryPending) return undefined;
+    const timer = setTimeout(() => setRetryPending(false), RETRY_PENDING_MS);
+    return () => clearTimeout(timer);
+  }, [retryPending]);
 
   useEffect(() => {
     const client = mqtt.connect(BROKER_URL);
@@ -134,6 +149,14 @@ export default function ExperimentSequence() {
   const totalSteps = steps.length;
   const currentStepIdx = status?.current_step ?? 0;
   const state = status?.state ?? "idle";
+  const stepName = (step) => (typeof step === "string" ? step : step?.name ?? "");
+  const failedStepName = stepName(steps[currentStepIdx]);
+  const canRetry = state === "failed" && currentStepIdx < totalSteps;
+
+  // The executor left "failed": the retry went through.
+  useEffect(() => {
+    if (state !== "failed") setRetryPending(false);
+  }, [state]);
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
 
@@ -212,7 +235,7 @@ export default function ExperimentSequence() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            {steps.map((name, i) => {
+            {steps.map((step, i) => {
               let bg;
               if (state === "success") {
                 bg = "bg-green-500";
@@ -227,7 +250,7 @@ export default function ExperimentSequence() {
               return (
                 <div
                   key={i}
-                  title={name}
+                  title={stepName(step)}
                   className={`w-6 h-6 rounded-full ${bg} text-white flex items-center justify-center text-xs font-medium`}
                 >
                   {i + 1}
@@ -321,6 +344,27 @@ export default function ExperimentSequence() {
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
           <h3 className="font-semibold mb-1">Routine Failed</h3>
           <p className="text-sm">{status.error ?? "Unknown error"}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                disabled={!connected || retryPending}
+                className="text-sm px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {retryPending
+                  ? "Retrying…"
+                  : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
+              </button>
+            )}
+            {onNewExperiment && (
+              <button
+                onClick={onNewExperiment}
+                className="text-sm px-4 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-100"
+              >
+                New experiment
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -331,6 +375,14 @@ export default function ExperimentSequence() {
           <p className="text-sm mt-1">
             All {totalSteps} steps executed successfully.
           </p>
+          {onNewExperiment && (
+            <button
+              onClick={onNewExperiment}
+              className="mt-4 text-sm px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+            >
+              New experiment
+            </button>
+          )}
         </div>
       )}
     </div>

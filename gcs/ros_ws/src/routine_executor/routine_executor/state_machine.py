@@ -72,6 +72,19 @@ class RoutineStateMachine:
         self.error = 'cancelled'
         self.needs_dispatch = False
 
+    def retry(self) -> bool:
+        """Restart a failed (or cancelled) routine at the step it stopped on.
+
+        The retry budget starts fresh; completed steps are not rerun and recordings are kept.
+        """
+        if self.state != 'failed' or self.current_step_idx >= len(self.steps):
+            return False
+        self.state = 'running'
+        self.retry_count = 0
+        self.error = None
+        self.needs_dispatch = True
+        return True
+
     def add_recording(self, clip_id: str) -> bool:
         """Attach a clog-detection clip to this run. Only while active; no duplicates."""
         if self.state not in _ACTIVE or not clip_id or clip_id in self.recordings:

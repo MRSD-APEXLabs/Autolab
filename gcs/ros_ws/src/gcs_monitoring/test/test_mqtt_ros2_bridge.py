@@ -92,3 +92,8 @@ def test_build_shaker_command_wraps_pwm_and_wait_time():
 def test_build_shaker_command_defaults_wait_time_to_zero():
     msg = _build_shaker_command({'pwm': 100})
     assert json.loads(msg.parameters_json)['wait_time_s'] == 0
+
+
+def test_routine_executor_controls_are_relayed():
+    for cmd in ('start_routine_cmd', 'cancel', 'pause', 'resume', 'retry'):
+        assert STRING_CMD_TOPIC_MAP[f'cmd/routine_executor/{cmd}'] == f'/routine_executor/{cmd}'
