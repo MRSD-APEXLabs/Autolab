@@ -62,6 +62,7 @@ function routineState(payload) {
 const DEFAULT_ROUTINE = JSON.stringify(
   {
     steps: [
+      { name: 'go_to', target_machine: 'ot2' },
       { name: 'pick_base' },
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
@@ -72,11 +73,14 @@ const DEFAULT_ROUTINE = JSON.stringify(
                   ]}
       },
       { name: 'pick', target_machine: 'ot2' },
+      { name: 'go_to', target_machine: 'shaker' },
       { name: 'place', target_machine: 'shaker' },
       { name: 'shaker', pwm: 150 },
       { name: 'wait', 'time_s': 20 },
       { name: 'shaker', pwm: 0 },
       { name: 'pick', target_machine: 'shaker' },
+      { name: 'place_base' },
+      { name: 'go_to', target_machine: 'home' }
     ],
     max_retries: 3,
     robot: 'robot_1',
