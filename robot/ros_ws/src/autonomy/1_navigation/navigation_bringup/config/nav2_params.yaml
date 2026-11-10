@@ -107,11 +107,11 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      # At 0.4 m/s, turns and collision-monitor slowdown can consume most of a
-      # stock 0.5 m / 10 s window. Count smaller real translations as progress.
-      # Keep a translation check: endless spinning must still time out.
-      required_movement_radius: 0.15
-      movement_time_allowance: 15.0
+      # Humble shares one checker between transit and precision docking.
+      # A 15 cm radius incorrectly rejects useful centimetre-scale corrections.
+      # The station coordinator retries a stalled translation after 8 s.
+      required_movement_radius: 0.03
+      movement_time_allowance: 20.0
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
@@ -125,7 +125,7 @@ controller_server:
     dock_position_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: false
-      xy_goal_tolerance: 0.07      # 1 cm stopping allowance before the coordinator's 8 cm check
+      xy_goal_tolerance: 0.10      # 2 cm stopping allowance before station verification (12 cm)
       yaw_goal_tolerance: 3.141592653589793  # coordinator verifies the locked odom heading
     dock_alignment_checker:
       plugin: "nav2_controller::SimpleGoalChecker"

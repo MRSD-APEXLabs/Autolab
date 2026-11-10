@@ -32,20 +32,25 @@ from .yaw_bias import MAX_STATION_YAW_ERROR
 
 @dataclass(frozen=True)
 class DockConfig:
-    approach_distance: float = 0.8
+    approach_distance: float = 0.3
+    staging_distance: float = 0.8  # turns and withdrawal remain away from the table
     speed: float = 0.10
     lateral_tolerance: float = 0.05
-    yaw_tolerance: float = 0.08
-    approach_yaw_tolerance: float = 0.10  # small errors are trimmed while translating, not by spinning
-    position_tolerance: float = 0.08
+    yaw_tolerance: float = 0.12
+    approach_yaw_tolerance: float = 0.12  # never accept a heading that final verification rejects
+    position_tolerance: float = 0.12
     footprint_half_size: float = 0.35  # configured 0.34 m half-width + 0.01 m padding
 
     def __post_init__(self):
         for name, value in vars(self).items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f'docking {name} must be finite and positive')
-        if not 0.5 <= self.approach_distance <= 1.5:
-            raise ValueError('docking approach_distance must be in [0.5, 1.5] m')
+        if not 0.25 <= self.approach_distance <= self.staging_distance <= 1.5:
+            raise ValueError('docking distances must satisfy 0.25 <= approach <= staging <= 1.5 m')
+        if self.staging_distance < 0.5:
+            raise ValueError('docking staging_distance must be >= 0.5 m for turning clearance')
+        if self.position_tolerance > 0.15:
+            raise ValueError('docking position_tolerance must be <= 0.15 m')
         if self.speed > 0.10:
             raise ValueError('docking speed must be <= 0.10 m/s')
         if self.yaw_tolerance > 0.15 or self.lateral_tolerance > 0.10:
@@ -93,7 +98,7 @@ def docking_marker(state, name, goal, robot, tolerance, held, reason, frame, sta
     distance = math.hypot(robot[0]-goal[0], robot[1]-goal[1]) if robot and goal else None
     verified = state == 'arrived' and distance is not None and distance <= tolerance and held
     phases = {'idle': 'Ready', 'preparing': 'Preparing', 'staging': 'Moving to approach position',
-              'align': 'Aligning away from the table', 'stage_adjust': 'Aligning approach position',
+              'align': 'Aligning away from the table', 'stage_adjust': 'Moving to docking start',
               'dock': 'Parking', 'undock': 'Backing out', 'settling': 'Checking stopped pose',
               'stopped': 'STOPPED - parking incomplete', 'undocked': 'Undocked',
               'arrived': 'Outside verified parking pose'}
@@ -129,7 +134,7 @@ def departure_station(places, robot, config):
     candidates = []
     for station in places.values():
         along, lateral, yaw = line_errors(station, robot)
-        if (-config.approach_distance - config.position_tolerance <= along <=
+        if (-config.staging_distance - config.position_tolerance <= along <=
                 config.position_tolerance and abs(lateral) <= config.footprint_half_size and
                 abs(yaw) <= config.approach_yaw_tolerance):
             candidates.append((math.hypot(along, lateral), station))
@@ -363,6 +368,9 @@ class StationDocking:
             self._report('request refused: invalid station pose')
             return
         self.seq += 1
+        self.recovery_attempts = 0
+        self.align_attempts = 0
+        self.mission_deadline = time.monotonic() + 360.0
         # Quaternion round trips can change yaw by an ulp. Canonicalize named
         # goals so CLI/RViz requests reliably select docking, rather than transit.
         station = next((p for p in self.node._places.values() if goal is not None and
@@ -377,12 +385,13 @@ class StationDocking:
         self.cancels = [c.call_async(CancelGoal.Request()) for c in self.cancel_clients]
         self._report('stopping previous navigation before station maneuver')
 
-    def _settle(self, callback, wait_actions=False):
+    def _settle(self, callback, wait_actions=False, delay=0.5):
         self.state = 'settling'
         self.after_settle = callback
         self.settle_wait_actions = wait_actions
+        self.settle_delay = delay
         self.still_since = None
-        self.deadline = time.monotonic() + 5.0
+        self.deadline = time.monotonic() + 8.0
 
     def _begin(self):
         robot = self.node._robot_place()
@@ -402,11 +411,14 @@ class StationDocking:
             along, lateral, yaw = line_errors(source, robot)
             if (self.is_station and source == self.goal and
                     abs(lateral) <= self.config.lateral_tolerance):
-                self._dock()
+                if -along <= self.config.approach_distance + self.config.position_tolerance:
+                    self._dock()
+                else:
+                    self._adjust_stage()
                 return
             # Back out on the current body axis, preserving any initial lateral
             # offset. Reach the station's staging plane before allowing a turn.
-            distance = (self.config.approach_distance + along) / math.cos(yaw)
+            distance = (self.config.staging_distance + along) / math.cos(yaw)
             exit_pose = staging_pose(robot, max(0.0, distance))
             if distance > self.config.position_tolerance:
                 if not self._clear_line(robot, exit_pose):
@@ -436,7 +448,7 @@ class StationDocking:
         if odom is None:
             return None
         along, lateral, yaw = line_errors(self.parked_odom, odom)
-        if (-self.config.approach_distance - self.config.position_tolerance <= along <=
+        if (-self.config.staging_distance - self.config.position_tolerance <= along <=
                 self.config.position_tolerance and abs(lateral) <= self.config.lateral_tolerance and
                 abs(yaw) <= self.config.yaw_tolerance):
             return self.parked_station
@@ -451,20 +463,23 @@ class StationDocking:
         if not self.stopped or not all(math.isfinite(v) for p in (robot, odom, self.goal) for v in p):
             self.cancel('base not stopped or invalid final pose; not docked')
             return
-        distance = math.hypot(robot[0]-self.goal[0], robot[1]-self.goal[1])
-        if distance > self.config.position_tolerance:
-            self.cancel(f'final station verification failed: {distance:.3f} m remaining; not docked')
-            return
         if self.dock_goal_odom is not None and math.hypot(
                 odom[0]-self.dock_goal_odom[0], odom[1]-self.dock_goal_odom[1]) > .15:
             self.cancel('map/odometry disagree about station arrival; not docked')
+            return
+        distance = math.hypot(robot[0]-self.goal[0], robot[1]-self.goal[1])
+        if distance > self.config.position_tolerance:
+            if distance <= .20:
+                self._recover(f'final position {distance:.3f} m from station', self._dock)
+            else:
+                self.cancel(f'final station verification failed: {distance:.3f} m remaining; not docked')
             return
         target_yaw = self.odom_goal_yaw
         if target_yaw is None and self.parked_station == self.goal and self.parked_odom is not None:
             target_yaw = self.parked_odom[2]
         yaw_error = abs(wrap(odom[2]-target_yaw)) if target_yaw is not None else abs(wrap(robot[2]-self.goal[2]))
         if yaw_error > self.config.yaw_tolerance:
-            self.cancel('final station heading outside tolerance; not docked')
+            self._recover(f'final heading error {yaw_error:.3f} rad', self._retreat_for_retry)
             return
         self.parked_station, self.parked_odom = self.goal, odom
         self.state = 'arrived'
@@ -475,7 +490,7 @@ class StationDocking:
             self.state = 'undocked'
             self._report('undocked; stopped in the open staging area')
             return
-        target = (staging_pose(self.goal, self.config.approach_distance)
+        target = (staging_pose(self.goal, self.config.staging_distance)
                   if self.is_station else self.goal)
         robot = self.node._robot_place()
         if robot is None:
@@ -493,12 +508,12 @@ class StationDocking:
         robot = self.node._robot_place()
         along, lateral, yaw = line_errors(self.goal, robot)
         if abs(yaw) > self.config.approach_yaw_tolerance:
-            stage = staging_pose(self.goal, self.config.approach_distance)
+            stage = staging_pose(self.goal, self.config.staging_distance)
             if (math.hypot(robot[0]-stage[0], robot[1]-stage[1]) <= .18 and self.align_attempts < 3):
                 self._align()  # localization changed heading while still in the checked open staging area
                 return
         if abs(yaw) > self.config.approach_yaw_tolerance:
-            self.cancel('staging alignment outside tolerance; no correction turn at the station')
+            self._recover('approach heading needs realignment', self._retreat_for_retry)
             return
         if math.hypot(along, lateral) <= self.config.position_tolerance:
             self._parked()
@@ -531,7 +546,7 @@ class StationDocking:
 
     def _align(self):
         robot = self.node._robot_place()
-        stage = staging_pose(self.goal, self.config.approach_distance)
+        stage = staging_pose(self.goal, self.config.staging_distance)
         if (math.hypot(robot[0] - stage[0], robot[1] - stage[1]) > 0.18 or
                 not footprint_clear(self.global_grid, robot, self.config.footprint_half_size,
                                     turning=True)):
@@ -550,10 +565,14 @@ class StationDocking:
         robot = self.node._robot_place()
         yaw_error = abs(wrap(robot[2] - self.goal[2]))
         if yaw_error > self.config.approach_yaw_tolerance:
-            if self.align_attempts < 3:
-                self._align()  # retry only here, with the full turn disk checked again
+            stage = staging_pose(self.goal, self.config.staging_distance)
+            if math.hypot(robot[0]-stage[0], robot[1]-stage[1]) <= .18:
+                if self.align_attempts < 3:
+                    self._align()  # retry only here, with the full turn disk checked again
+                else:
+                    self.cancel('staging heading did not converge after 3 alignment attempts')
                 return
-            self.cancel(f'staging heading alignment outside tolerance ({yaw_error:.3f} rad)')
+            self._recover(f'approach heading error {yaw_error:.3f} rad', self._retreat_for_retry)
             return
         stage = staging_pose(self.goal, self.config.approach_distance)
         if math.hypot(robot[0] - stage[0], robot[1] - stage[1]) <= 0.04:
@@ -586,6 +605,8 @@ class StationDocking:
         self.state = leg
         self.handle = None
         self.close_since = None
+        self.progress_pose = self.node._robot_place('odom')
+        self.progress_time = time.monotonic()
         self.deadline = time.monotonic() + (180.0 if leg == 'staging' else 60.0)
         message = ('navigate to open space' if leg == 'staging' else
                    'rotate only in the checked open staging area' if leg == 'align' else
@@ -626,6 +647,17 @@ class StationDocking:
             self.cancel(f'{leg} result unavailable: {exc}')
             return
         if not ok:
+            # A preemption/cancel is an external stop, never a reason to restart.
+            # Humble has no action error_code; ABORTED is still distinguishable.
+            if result.status == GoalStatus.STATUS_ABORTED and leg in ('staging', 'stage_adjust', 'dock'):
+                if leg == 'dock':
+                    robot = self.node._robot_place()
+                    if robot is not None and math.hypot(robot[0]-self.goal[0], robot[1]-self.goal[1]) <= self.config.position_tolerance:
+                        self._settle(self._parked)
+                        return
+                resume = self._travel if leg == 'staging' else self._adjust_stage if leg == 'stage_adjust' else self._dock
+                self._recover(f'{leg} controller aborted', resume)
+                return
             detail = ''
             if leg in ('dock', 'stage_adjust'):
                 robot = self.node._robot_place()
@@ -634,6 +666,45 @@ class StationDocking:
             self.cancel(f'{leg} failed/cancelled (status {result.status}, error {getattr(result.result, "error_code", 0)}{detail})')
             return
         self._settle(partial(self._after_leg, leg))
+
+    def _recover(self, reason, callback):
+        """Keep the same public mission alive, with two stopped retries total.
+
+        Never recover operator cancellation, missing perception or an e-stop.
+        Invalidate old callbacks and wait for terminal actions before resuming.
+        """
+        if self.estop or not self._fresh() or self.node._robot_place() is None:
+            self.cancel(f'{reason}; recovery unavailable without fresh perception and released e-stop')
+            return
+        if getattr(self, 'recovery_attempts', 0) >= 2:
+            self.cancel(f'{reason}; automatic recovery exhausted (2 retries)')
+            return
+        self.recovery_attempts = getattr(self, 'recovery_attempts', 0) + 1
+        self.seq += 1
+        if self.handle is not None:
+            self.pending.append(self.handle.cancel_goal_async())
+        self.handle = None
+        self._settle(callback, wait_actions=True, delay=1.0)
+        self._report(f'recovering {self.recovery_attempts}/2: {reason}; waiting stopped before retry')
+
+    def _retreat_for_retry(self):
+        """Withdraw on the current body axis; realign only in checked open space."""
+        robot = self.node._robot_place()
+        along, _, yaw = line_errors(self.goal, robot)
+        if abs(yaw) > MAX_STATION_YAW_ERROR:
+            self.cancel(f'recovery heading error {abs(yaw):.3f} rad exceeds withdrawal range')
+            return
+        distance = max(0., (self.config.staging_distance + along) / math.cos(yaw))
+        exit_pose = staging_pose(robot, distance)
+        if (not self._clear_line(robot, exit_pose) or
+                not footprint_clear(self.global_grid, exit_pose, self.config.footprint_half_size, turning=True)):
+            self.cancel('recovery withdrawal corridor or turning area blocked')
+            return
+        if distance <= .02:
+            self._travel()
+            return
+        self.endpoint, self.line = exit_pose, self.goal
+        self._straight('undock', distance)
 
     def _after_leg(self, leg):
         robot = self.node._robot_place()
@@ -666,6 +737,9 @@ class StationDocking:
         if self.estop or not self._fresh() or robot is None:
             self.cancel('e-stop, stale odometry/costmap or missing/freshness-invalid TF')
             return
+        if now > getattr(self, 'mission_deadline', math.inf):
+            self.cancel('mission recovery time limit reached')
+            return
         if now > self.deadline:
             self.cancel('maneuver timed out')
             return
@@ -693,7 +767,7 @@ class StationDocking:
                 self.still_since = None
             elif self.still_since is None:
                 self.still_since = now
-            elif now - self.still_since >= 0.5:
+            elif now - self.still_since >= (getattr(self, 'settle_delay', .5) if self.state == 'settling' else .5):
                 callback = self._begin if self.state == 'preparing' else self.after_settle
                 callback()
         elif self.state in ('dock', 'undock', 'stage_adjust'):
@@ -711,6 +785,16 @@ class StationDocking:
                 self.cancel(f'heading deviation {yaw_error:.3f} rad exceeds moving correction range; '
                             'no in-place correction')
                 return
+            if self.state in ('dock', 'stage_adjust'):
+                previous = getattr(self, 'progress_pose', None)
+                if previous is None or math.hypot(odom[0]-previous[0], odom[1]-previous[1]) >= .02:
+                    self.progress_pose, self.progress_time = odom, now
+                elif now - self.progress_time >= 8.0 and self.handle is not None:
+                    # Recover before Nav2's 20 s progress deadline. An obstacle
+                    # still prevents motion; retries never bypass the costmaps.
+                    resume = self._dock if self.state == 'dock' else self._adjust_stage
+                    self._recover('translation stalled for 8 s', resume)
+                    return
             if self.state == 'dock':
                 close = (self.stopped and
                          math.hypot(robot[0] - self.goal[0], robot[1] - self.goal[1]) <=
@@ -722,8 +806,8 @@ class StationDocking:
                     self.close_since = now
                 elif now - self.close_since >= 1.0:
                     # Below the drive's useful minimum speed, FollowPath may
-                    # stall just outside its 7 cm target but inside our existing
-                    # 8 cm acceptance limit. Accept only a stopped base, after
+                    # stall outside the controller target but inside the station
+                    # acceptance limit. Accept only a stopped base, after
                     # cancellation is acknowledged and the action is terminal.
                     self.seq += 1
                     if self.handle is not None:

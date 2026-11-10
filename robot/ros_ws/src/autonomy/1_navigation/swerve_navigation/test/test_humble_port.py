@@ -19,11 +19,13 @@ def test_humble_empty_result_uses_action_status_without_error_code(leg, success)
     node._settle = lambda callback: events.append('settle')
     node.cancel = lambda reason: events.append('stop')
     node.node = NS(_robot_place=lambda: None)
+    node._recover = lambda *args: events.append('recover')
     result = Future()
     result.set_result(NS(status=GoalStatus.STATUS_SUCCEEDED if success else GoalStatus.STATUS_ABORTED,
                          result=NS()))
     node._result(1, leg, result)
-    assert events == ['settle' if success else 'stop']
+    expected = 'settle' if success else 'recover' if leg in ('staging', 'stage_adjust', 'dock') else 'stop'
+    assert events == [expected]
 
 
 def test_humble_overrides_preserve_frames_types_and_dock_clearance():

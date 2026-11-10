@@ -73,3 +73,14 @@ def test_explicit_undock_publishes_whole_mission_success():
     report(node, 'undock')
     report(node, 'undocked', success=True)
     assert node._state == SUCCEEDED
+
+
+def test_recoveries_keep_public_request_active_until_verified_arrival():
+    node = api()
+    report(node, 'preparing')
+    for state in ('staging', 'stage_adjust', 'dock', 'settling', 'undock',
+                  'staging', 'align', 'stage_adjust', 'dock'):
+        report(node, state, message='recovering 1/2' if state == 'settling' else 'moving')
+        assert node._state == NAVIGATING and not node.results
+    report(node, 'arrived', success=True)
+    assert node.results == [SUCCEEDED] and FAILED not in node.states

@@ -5,7 +5,11 @@ navigation:
   nav_motion: omni
 docking:
   enabled: true
-  approach_distance: 0.8
+  approach_distance: 0.3
+  staging_distance: 0.8
+  position_tolerance: 0.12
+  yaw_tolerance: 0.12
+  approach_yaw_tolerance: 0.12
   speed: 0.10
 locations:
   OT-2:

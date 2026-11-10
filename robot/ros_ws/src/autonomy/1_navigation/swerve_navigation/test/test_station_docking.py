@@ -113,7 +113,11 @@ def mission(monkeypatch):
     node._robot_place = lambda frame=None: node.robot
     node.get_clock = lambda: NS(now=lambda: NS(to_msg=lambda: None))
     m = docking.StationDocking.__new__(docking.StationDocking)
-    m.node, m.config, m.tree = node, docking.DockConfig(), '/staging.xml'
+    # Preserve the original strict geometry as regression coverage, while
+    # dedicated tests below exercise the shorter production approach/defaults.
+    m.node, m.config, m.tree = node, docking.DockConfig(
+        approach_distance=.8, position_tolerance=.08, yaw_tolerance=.08,
+        approach_yaw_tolerance=.10), '/staging.xml'
     m.keep_transit_heading = False
     m.clients = {leg: Client() for leg in ('dock', 'undock', 'staging', 'align', 'stage_adjust')}
     m.cancel_clients = [Client(), Client(), Client()]
@@ -211,7 +215,7 @@ def test_reported_29mm_0088rad_stage_error_trims_during_approach_without_spin(mi
     assert m.state == 'arrived'
 
 
-def test_minor_approach_allowance_does_not_relax_final_heading_verification(mission):
+def test_heading_outside_configured_final_tolerance_recovers_without_table_side_spin(mission):
     m = mission
     m.node.robot = (-2., -1., 0.)
     m.start(m.node._places['shaker'])
@@ -219,7 +223,12 @@ def test_minor_approach_allowance_does_not_relax_final_heading_verification(miss
     finish(m, 'staging', (0., 1.2, math.pi/2+.088))
     assert m.state == 'dock' and not m.clients['align'].requests
     finish(m, 'dock', (0., 2., math.pi/2+.088))
-    assert m.state == 'stopped'
+    assert m.state == 'settling'
+    assert m.recovery_attempts == 1
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'undock'
+    assert not m.clients['align'].requests
 
 
 @pytest.mark.parametrize('yaw', [.0801, .12, .20])
@@ -348,15 +357,20 @@ def test_late_goal_acceptance_is_cancelled_without_advancing(mission, reason):
     assert not m.clients['staging'].requests
 
 
-def test_staging_failure_does_not_send_parked_pose_as_fallback(mission):
+def test_staging_failure_replans_to_staging_without_parked_pose_fallback(mission):
     m = mission
     m.node.robot = (-2., -1., 0.)
     m.start(m.node._places['shaker'])
     m.test_settle()
     finish(m, 'staging', m.node.robot, status=GoalStatus.STATUS_ABORTED, error=1)
-    assert m.state == 'stopped'
+    assert m.state == 'settling'
     assert len(m.clients['staging'].requests) == 1
     assert not m.clients['dock'].requests
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'staging'
+    assert len(m.clients['staging'].requests) == 2
+    assert place_of(m.clients['staging'].requests[-1][0].pose)[:2] == pytest.approx((0., 1.2))
 
 
 @pytest.mark.parametrize('pose', [(0.1, 1.2, math.pi / 2), (0., 1.2, 1.8)])
@@ -585,7 +599,8 @@ def test_location_save_preserves_docking_settings(tmp_path):
 def test_best_map_enabled_and_staging_tree_has_no_terminal_station_goal_or_recovery():
     root = Path(__file__).resolve().parents[2]
     config = docking.load_docking_config(root / 'navigation_bringup/maps/best.locations.yaml')
-    assert config.approach_distance == 0.8
+    assert config.approach_distance == 0.3
+    assert config.staging_distance == 0.8
     bringup = root / 'navigation_bringup'
     tree = ET.parse(bringup / 'behavior_trees/navigate_to_station_staging.xml')
     assert not any(tree.iter('Spin')) and not any(tree.iter('BackUp'))
@@ -611,3 +626,218 @@ def test_docking_controller_cannot_command_rotation():
     smoother = params['velocity_smoother']['ros__parameters']
     assert dock['vy_max'] <= smoother['max_velocity'][1]
     assert -dock['vy_max'] >= smoother['min_velocity'][1]
+
+
+@pytest.mark.parametrize('distance', [.091, .104])
+def test_observed_stalls_are_accepted_only_after_stopped_verification(mission, distance):
+    m = mission
+    m.config = docking.DockConfig()
+    m.node.robot = (-2., -1., 0.)
+    m.start(m.node._places['shaker'])
+    m.test_settle()
+    finish(m, 'staging', (0., 1.2, math.pi/2))
+    assert m.state == 'stage_adjust'
+    finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
+    assert m.state == 'dock'
+    handle = Handle()
+    m.clients['dock'].requests[-1][1].set_result(handle)
+    m.node.robot = (0., 2.-distance, math.pi/2+.11)
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'settling' and handle.cancelled
+    m.test_settle()
+    assert m.state == 'settling'  # the old controller is still active
+    handle.result.set_result(NS(status=GoalStatus.STATUS_CANCELED, result=NS()))
+    m.test_settle()
+    assert m.state == 'arrived' and m.parked_station == m.goal
+
+
+def start_default_docking(m):
+    m.config = docking.DockConfig()
+    m.node.robot = (-2., -1., 0.)
+    m.start(m.node._places['shaker'])
+    m.test_settle()
+    finish(m, 'staging', (0., 1.2, math.pi/2))
+    finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
+    assert m.state == 'dock'
+
+
+def test_short_dock_keeps_alignment_and_withdrawal_farther_from_table(mission):
+    m = mission
+    m.config = docking.DockConfig()
+    m.keep_transit_heading = True
+    m.node.robot = (-2., -1., 0.)
+    m.start(m.node._places['shaker'])
+    m.test_settle()
+    assert place_of(m.clients['staging'].requests[-1][0].pose)[:2] == pytest.approx((0., 1.2))
+    finish(m, 'staging', (0., 1.2, 0.))
+    assert m.state == 'align'
+    finish(m, 'align', (0., 1.2, math.pi/2))
+    assert m.state == 'stage_adjust'
+    goal = m.clients['stage_adjust'].requests[-1][0]
+    assert goal.path.poses[-1].pose.position.y == pytest.approx(1.7)
+    finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
+    goal = m.clients['dock'].requests[-1][0]
+    assert goal.path.poses[0].pose.position.y == pytest.approx(1.7)
+    assert goal.path.poses[-1].pose.position.y == pytest.approx(2.)
+    finish(m, 'dock', m.goal)
+    m.start(None)
+    m.test_settle()
+    assert m.clients['undock'].requests[-1][0].target.x == pytest.approx(-.8)
+
+
+def test_translation_stall_recovers_before_nav2_deadline_and_waits_for_cancel(mission):
+    m = mission
+    start_default_docking(m)
+    handle = Handle()
+    m.clients['dock'].requests[-1][1].set_result(handle)
+    m.test_tick(8.1)
+    assert m.state == 'settling' and handle.cancelled and m.recovery_attempts == 1
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'settling'
+    handle.result.set_result(NS(status=GoalStatus.STATUS_CANCELED, result=NS()))
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'dock' and len(m.clients['dock'].requests) == 2
+    finish(m, 'dock', m.goal)
+    assert m.state == 'arrived'
+
+
+def test_final_heading_failure_withdraws_realigns_and_completes_same_request(mission):
+    m = mission
+    start_default_docking(m)
+    finish(m, 'dock', (0., 2., math.pi/2+.16))
+    assert m.state == 'settling' and m.recovery_attempts == 1
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'undock'
+    assert not m.clients['align'].requests
+    finish(m, 'undock', m.endpoint)
+    assert m.state == 'staging'
+    finish(m, 'staging', (0., 1.2, math.pi/2+.16))
+    assert m.state == 'align'
+    finish(m, 'align', (0., 1.2, math.pi/2))
+    finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
+    finish(m, 'dock', m.goal)
+    assert m.state == 'arrived' and m.recovery_attempts == 1
+
+
+def test_heading_recovery_cannot_back_into_an_obstacle(mission):
+    m = mission
+    start_default_docking(m)
+    finish(m, 'dock', (0., 2., math.pi/2+.16))
+    obstacle(m.local_grid, 0., 1.4)
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.state == 'stopped'
+    assert not m.clients['undock'].requests and not m.clients['align'].requests
+
+
+@pytest.mark.parametrize('reason', ['cancelled', 'manual takeover', 'e-stop'])
+def test_operator_stop_during_recovery_never_resumes(mission, reason):
+    m = mission
+    start_default_docking(m)
+    m._recover('test abort', m._dock)
+    m.cancel(reason)
+    m.test_tick(2.)
+    assert m.state == 'stopped' and len(m.clients['dock'].requests) == 1
+
+
+def test_aborted_near_goal_must_verify_heading_instead_of_claiming_success(mission):
+    m = mission
+    start_default_docking(m)
+    finish(m, 'dock', (0., 1.91, math.pi/2+.20), status=GoalStatus.STATUS_ABORTED)
+    m.test_settle()
+    assert m.state == 'settling' and m.recovery_attempts == 1
+    assert m.parked_station is None
+
+
+def test_externally_canceled_controller_is_never_retried(mission):
+    m = mission
+    start_default_docking(m)
+    finish(m, 'dock', m.node.robot, status=GoalStatus.STATUS_CANCELED)
+    assert m.state == 'stopped' and m.recovery_attempts == 0
+
+
+def test_recovery_budget_is_shared_between_legs_and_does_not_reset_on_replan(mission):
+    m = mission
+    start_default_docking(m)
+    for attempt in (1, 2):
+        finish(m, 'dock', m.node.robot, status=GoalStatus.STATUS_ABORTED)
+        assert m.state == 'settling' and m.recovery_attempts == attempt
+        m.test_tick()
+        m.test_tick(1.1)
+        assert m.state == 'dock'
+    finish(m, 'dock', m.node.robot, status=GoalStatus.STATUS_ABORTED)
+    assert m.state == 'stopped' and m.recovery_attempts == 2
+    assert 'exhausted' in m.reports[-1]
+
+
+def test_recovery_never_reanchors_a_large_map_odom_disagreement(mission):
+    m = mission
+    start_default_docking(m)
+    m.node.robot = (0., 1.87, math.pi/2)
+    m.node._robot_place = lambda frame=None: (0., 1.7, math.pi/2) if frame == 'odom' else m.node.robot
+    m._parked()
+    assert m.state == 'stopped' and m.recovery_attempts == 0
+    assert 'map/odometry disagree' in m.reports[-1]
+
+
+def test_docking_config_rejects_turning_too_near_table_and_excessive_tolerance():
+    for settings in ({'approach_distance': .2}, {'staging_distance': .4},
+                     {'position_tolerance': .3}, {'yaw_tolerance': .2}):
+        with pytest.raises(ValueError):
+            docking.DockConfig(**settings)
+
+
+def test_centimetre_corrections_count_as_progress_on_humble():
+    root = Path(__file__).resolve().parents[2]
+    params = yaml.safe_load((root / 'navigation_bringup/config/nav2_params.yaml').read_text())
+    checker = params['controller_server']['ros__parameters']['progress_checker']
+    assert checker['required_movement_radius'] == .03
+    assert checker['movement_time_allowance'] > 8.
+
+
+def test_stale_perception_during_recovery_stops_without_retry(mission):
+    m = mission
+    start_default_docking(m)
+    m._recover('test abort', m._dock)
+    m.local_time -= 2.
+    m._tick()
+    assert m.state == 'stopped' and len(m.clients['dock'].requests) == 1
+
+
+def test_small_real_movements_reset_stall_timer(mission):
+    m = mission
+    start_default_docking(m)
+    handle = Handle()
+    m.clients['dock'].requests[-1][1].set_result(handle)
+    m.node.robot = (0., 1.725, math.pi/2)
+    m.test_tick(7.)
+    m.test_tick(2.)
+    assert m.state == 'dock' and not handle.cancelled and m.recovery_attempts == 0
+
+
+def test_same_station_request_from_farther_out_still_uses_short_final_dock(mission):
+    m = mission
+    m.config = docking.DockConfig()
+    m.node.robot = (0., 1.2, math.pi/2)
+    m.start(m.node._places['shaker'])
+    m.test_settle()
+    assert m.state == 'stage_adjust'
+    finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
+    assert m.state == 'dock'
+
+
+def test_mission_deadline_is_not_extended_by_recovery(mission):
+    m = mission
+    start_default_docking(m)
+    deadline = m.mission_deadline
+    m._recover('test abort', m._travel)
+    m.test_tick()
+    m.test_tick(1.1)
+    assert m.mission_deadline == deadline
+    m.mission_deadline = 0.
+    m.test_tick()
+    assert m.state == 'stopped' and 'time limit' in m.reports[-1]
