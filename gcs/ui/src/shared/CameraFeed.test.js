@@ -58,3 +58,22 @@ test('switching camera swaps the stream URL', () => {
   expect(screen.getAllByRole('img').map((i) => i.getAttribute('src'))).toEqual([
     'http://localhost:8002/stream/annotated/zedx_nano.mjpg', 'http://localhost:8002/stream/raw/zedx_nano.mjpg']);
 });
+
+test('switching camera mounts a new <img> and blanks the old one so Safari drops its MJPEG connection', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  const { rerender } = render(<CameraFeed camera="zedx" kind="raw" title="Raw" />);
+  const oldImg = screen.getByRole('img');
+  rerender(<CameraFeed camera="zedx_nano" kind="raw" title="Raw" />);
+  const newImg = screen.getByRole('img');
+  expect(newImg).not.toBe(oldImg);
+  expect(newImg.getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx_nano.mjpg');
+  expect(oldImg.getAttribute('src')).toMatch(/^data:/);
+});
+
+test('unmounting blanks the stream <img>', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  const { unmount } = render(<CameraFeed camera="zedx" kind="raw" title="Raw" />);
+  const img = screen.getByRole('img');
+  unmount();
+  expect(img.getAttribute('src')).toMatch(/^data:/);
+});

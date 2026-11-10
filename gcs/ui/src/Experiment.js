@@ -8,12 +8,19 @@ const CANCEL_TOPIC = "cmd/routine_executor/cancel";
 const PAUSE_TOPIC = "cmd/routine_executor/pause";
 const RESUME_TOPIC = "cmd/routine_executor/resume";
 
-// Mirror of step_config.py display_topics.
+// Same default robot as routine_executor/node.py. behavior.launch.xml pushes the
+// /<ROBOT_NAME>/behavior namespace, so executive topics live under it.
+const ROBOT = "robot_1";
+
 // Keys are step names; values are absolute ROS2 topic paths.
-// MQTT topic = "ros2" + ros2_path  (e.g. /behavior/manipulation_phase → ros2/behavior/manipulation_phase)
+// MQTT topic = "ros2" + ros2_path  (e.g. /robot_1/behavior/manipulation_phase → ros2/robot_1/behavior/manipulation_phase)
+// manipulation_phase is published every executive tick; /planning_state only on planner transitions.
+const MANIP_TOPICS = [`/${ROBOT}/behavior/manipulation_phase`, "/planning_state"];
 const STEP_DISPLAY_TOPICS = {
-  pick_base: ["/behavior/manipulation_phase", "/planning_status"],
-  place_base: ["/behavior/manipulation_phase", "/planning_status"],
+  pick: MANIP_TOPICS,
+  place: MANIP_TOPICS,
+  pick_base: MANIP_TOPICS,
+  place_base: MANIP_TOPICS,
 };
 
 const ALL_DISPLAY_MQTT_TOPICS = [
@@ -24,13 +31,43 @@ const ALL_DISPLAY_MQTT_TOPICS = [
   ),
 ];
 
-const STATE_STYLE = {
-  idle:    { label: "Idle",    badge: "bg-gray-200 text-gray-600",     text: "text-gray-500" },
-  running: { label: "Running", badge: "bg-orange-100 text-orange-600", text: "text-orange-600" },
-  paused:  { label: "Paused",  badge: "bg-yellow-100 text-yellow-700", text: "text-yellow-600" },
-  success: { label: "Done",    badge: "bg-green-100 text-green-700",   text: "text-green-600" },
-  failed:  { label: "Failed",  badge: "bg-red-100 text-red-600",       text: "text-red-600" },
+const STATE_LABEL = {
+  idle: "Idle",
+  running: "Running",
+  paused: "Paused",
+  success: "Done",
+  failed: "Failed",
 };
+
+// Colors mirror the underglow LEDs (6_behavior/led_status README "State → LED").
+const LED_STYLE = {
+  I: { name: "Idle",    badge: "bg-teal-100 text-teal-700",     text: "text-teal-600",   dot: "bg-teal-500" },
+  M: { name: "Moving",  badge: "bg-cyan-100 text-cyan-700",     text: "text-cyan-600",   dot: "bg-cyan-500" },
+  A: { name: "Arm",     badge: "bg-purple-100 text-purple-700", text: "text-purple-600", dot: "bg-purple-500" },
+  W: { name: "Waiting", badge: "bg-amber-100 text-amber-700",   text: "text-amber-600",  dot: "bg-amber-500" },
+  E: { name: "Fault",   badge: "bg-red-100 text-red-600",       text: "text-red-600",    dot: "bg-red-500" },
+  R: { name: "Ready",   badge: "bg-green-100 text-green-700",   text: "text-green-600",  dot: "bg-green-500" },
+};
+
+// Step type → LED group (led_status/node.py GROUPS). Steps with no watched BT action (wait) leave the LED idle.
+const STEP_LED = {
+  go_to: "M",
+  home: "M",
+  go_to_pose: "M",
+  pick: "A",
+  place: "A",
+  pick_base: "A",
+  place_base: "A",
+  ot2: "W",
+  shaker: "W",
+};
+
+function ledFor(state, stepName) {
+  if (state === "success") return "R";
+  if (state === "failed") return "E";
+  if (state === "running" || state === "paused") return STEP_LED[stepName] ?? "I";
+  return "I";
+}
 
 function formatExecPayload(payload) {
   if (payload === null || payload === undefined) return "—";
@@ -97,12 +134,13 @@ export default function ExperimentSequence() {
   const totalSteps = steps.length;
   const currentStepIdx = status?.current_step ?? 0;
   const state = status?.state ?? "idle";
-  const { label: stateLabel, badge: stateBadge, text: stateText } =
-    STATE_STYLE[state] ?? STATE_STYLE.idle;
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
 
   const currentStepName = status?.current_step_name ?? null;
+  const stateLabel = STATE_LABEL[state] ?? STATE_LABEL.idle;
+  const led = LED_STYLE[ledFor(state, currentStepName)];
+  const { badge: stateBadge, text: stateText } = led;
   const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
 
   return (
@@ -180,12 +218,8 @@ export default function ExperimentSequence() {
                 bg = "bg-green-500";
               } else if (i < currentStepIdx) {
                 bg = "bg-green-500";
-              } else if (i === currentStepIdx && state === "paused") {
-                bg = "bg-yellow-500";
-              } else if (i === currentStepIdx && state === "running") {
-                bg = "bg-orange-500";
-              } else if (i === currentStepIdx && state === "failed") {
-                bg = "bg-red-500";
+              } else if (i === currentStepIdx && state !== "idle") {
+                bg = led.dot;
               } else {
                 bg = "bg-gray-300";
               }
@@ -206,7 +240,7 @@ export default function ExperimentSequence() {
             {(state === "running" || state === "paused") && status.current_step_name && (
               <>
                 {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
-                <span className={`font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-600"}`}>
+                <span className={`font-medium ${stateText}`}>
                   {status.current_step_name}
                 </span>
               </>
@@ -234,8 +268,9 @@ export default function ExperimentSequence() {
             <h3 className="text-lg font-semibold">
               Step {currentStepIdx + 1} of {totalSteps}
             </h3>
-            <span className={`text-sm font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-500"}`}>
-              {state === "paused" ? "Paused" : "Running"}
+            <span className={`flex items-center gap-2 text-sm font-medium ${stateText}`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${led.dot}`} />
+              {state === "paused" ? "Paused" : "Running"} · {led.name}
             </span>
           </div>
 
