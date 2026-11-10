@@ -1,17 +1,68 @@
 // import logo from './logo.svg';
 import './App.css';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import mqtt from 'mqtt';
 import LoaderPage from "./LoaderPage";
+import ExperimentSequence from './Experiment';
 import CameraPanel from './CameraPanel';
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
+const STATUS_TOPIC = 'ros2/routine_executor/status';
+
+// Which page this tab is on, kept across reloads (Safari reloads background tabs it evicted).
+// 'loader' is stored as 'experiment' so a reload skips the 5 s loader.
+const VIEW_KEY = 'apex.view';
+// Last routine sent, so "New experiment" (and reloads) start from it instead of the default.
+const ROUTINE_KEY = 'apex.routine';
+
+function loadRoutine() {
+  try {
+    return window.sessionStorage.getItem(ROUTINE_KEY) ?? DEFAULT_ROUTINE;
+  } catch {
+    return DEFAULT_ROUTINE;
+  }
+}
+
+function saveRoutine(json) {
+  try {
+    window.sessionStorage.setItem(ROUTINE_KEY, json);
+  } catch {
+    // storage unavailable: the editor keeps it in memory only
+  }
+}
+
+function loadView() {
+  try {
+    return window.sessionStorage.getItem(VIEW_KEY) === 'experiment' ? 'experiment' : false;
+  } catch {
+    return false;
+  }
+}
+
+function saveView(started) {
+  try {
+    if (started === 'loader' || started === 'experiment') {
+      window.sessionStorage.setItem(VIEW_KEY, 'experiment');
+    } else {
+      window.sessionStorage.removeItem(VIEW_KEY);
+    }
+  } catch {
+    // storage unavailable (private mode): reloads fall back to the executor status check
+  }
+}
+
+function routineState(payload) {
+  const outer = JSON.parse(payload.toString());
+  const status = typeof outer?.data === 'string' ? JSON.parse(outer.data) : outer;
+  return status?.state;
+}
 
 const DEFAULT_ROUTINE = JSON.stringify(
   {
     steps: [
+      { name: 'go_to', target_machine: 'ot2' },
       { name: 'pick_base' },
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
@@ -22,11 +73,14 @@ const DEFAULT_ROUTINE = JSON.stringify(
                   ]}
       },
       { name: 'pick', target_machine: 'ot2' },
+      { name: 'go_to', target_machine: 'shaker' },
       { name: 'place', target_machine: 'shaker' },
       { name: 'shaker', pwm: 150 },
       { name: 'wait', 'time_s': 20 },
       { name: 'shaker', pwm: 0 },
       { name: 'pick', target_machine: 'shaker' },
+      { name: 'place_base' },
+      { name: 'go_to', target_machine: 'home' }
     ],
     max_retries: 3,
     robot: 'robot_1',
@@ -36,8 +90,37 @@ const DEFAULT_ROUTINE = JSON.stringify(
 );
 
 export default function App() {
-  const [started, setStarted] = useState(false);
-  const [routineJson, setRoutineJson] = useState(DEFAULT_ROUTINE);
+  // false = welcome, true = routine editor, 'loader' = starting, 'experiment' = live status
+  const [started, setStarted] = useState(loadView);
+  const [routineJson, setRoutineJson] = useState(loadRoutine);
+
+  useEffect(() => saveView(started), [started]);
+  useEffect(() => saveRoutine(routineJson), [routineJson]);
+
+  const newExperiment = () => setStarted(true);
+  const goHome = () => setStarted(false);
+
+  // On load, if a routine is already running (new tab, or a reload that lost storage), go straight to
+  // its status. Only the first status message counts, so the user is never pulled off a page later.
+  useEffect(() => {
+    if (loadView()) return undefined;
+    const client = mqtt.connect(BROKER_URL);
+    client.on('connect', () => client.subscribe(STATUS_TOPIC));
+    client.on('message', (topic, payload) => {
+      if (topic !== STATUS_TOPIC) return;
+      let state;
+      try {
+        state = routineState(payload);
+      } catch {
+        return;
+      }
+      if (state === 'running' || state === 'paused') {
+        setStarted((current) => (current === false ? 'experiment' : current));
+      }
+      client.end();
+    });
+    return () => client.end();
+  }, []);
 
   function handleContinue() {
     const client = mqtt.connect(BROKER_URL);
@@ -122,9 +205,11 @@ export default function App() {
         </div>
       )}
 
-      {started === 'loader' && <LoaderPage />}
+      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} onHome={goHome} />}
 
-      {started && started !== 'loader' && (
+      {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} onHome={goHome} />}
+
+      {started === true && (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center px-6 py-10">
           <header className="w-full max-w-4xl flex justify-between items-center mb-8">
             <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>

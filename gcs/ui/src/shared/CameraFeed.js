@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { streamUrl } from './cameras';
 import useStreamStale from './useStreamStale';
 
@@ -6,6 +6,26 @@ const STALE_TEXT = {
   annotated: 'No frames: is perception / depth running?',
   raw: 'No frames: is the depth node running?',
 };
+
+// 1x1 transparent GIF. Pointing a stream <img> here aborts its MJPEG request.
+const BLANK_SRC = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+
+// One <img> per stream URL (keyed by src). Safari doesn't reliably abort a multipart/x-mixed-replace
+// request when an <img> changes src or leaves the DOM: the old stream keeps its connection (and the
+// last frame on screen), and the leaked connections fill the 6-per-host limit so the new camera's
+// request never starts. Blanking src on unmount closes the old stream explicitly.
+// The effect owns src (not a JSX prop) so StrictMode's mount → cleanup → mount restores the stream
+// instead of leaving the blank GIF.
+function MjpegImg({ src, ...props }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const img = ref.current;
+    img.src = src;
+    return () => { img.src = BLANK_SRC; };
+  }, [src]);
+  // eslint-disable-next-line jsx-a11y/alt-text
+  return <img ref={ref} {...props} />;
+}
 
 // One MJPEG tile from image_stream_server. Unmounting the <img> closes the stream on the server.
 export default function CameraFeed({ camera, kind, title, hubReachable = true, compact = false }) {
@@ -43,7 +63,8 @@ export default function CameraFeed({ camera, kind, title, hubReachable = true, c
             )}
           </div>
         ) : (
-          <img
+          <MjpegImg
+            key={src}
             src={src}
             alt={`${title} ${camera}`}
             onError={() => setFailed(true)}

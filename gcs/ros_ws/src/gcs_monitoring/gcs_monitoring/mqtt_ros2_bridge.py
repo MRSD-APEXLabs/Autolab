@@ -52,6 +52,9 @@ MQTT_PORT = int(os.environ.get('MQTT_PORT', '1883'))
 STRING_CMD_TOPIC_MAP = {
     'cmd/routine_executor/start_routine_cmd': '/routine_executor/start_routine_cmd',
     'cmd/routine_executor/cancel': '/routine_executor/cancel',
+    'cmd/routine_executor/pause': '/routine_executor/pause',
+    'cmd/routine_executor/resume': '/routine_executor/resume',
+    'cmd/routine_executor/retry': '/routine_executor/retry',
     'cmd/planning/command': '/planning_command',
     'cmd/navigation/go_to_location': '/robot_1/behavior/go_to_location_command',
 }

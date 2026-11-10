@@ -7,13 +7,23 @@ const STATUS_TOPIC = "ros2/routine_executor/status";
 const CANCEL_TOPIC = "cmd/routine_executor/cancel";
 const PAUSE_TOPIC = "cmd/routine_executor/pause";
 const RESUME_TOPIC = "cmd/routine_executor/resume";
+const RETRY_TOPIC = "cmd/routine_executor/retry";
+// Give up on "Retrying…" if the executor never reports running (it publishes status at 1 Hz).
+const RETRY_PENDING_MS = 5000;
 
-// Mirror of step_config.py display_topics.
+// Same default robot as routine_executor/node.py. behavior.launch.xml pushes the
+// /<ROBOT_NAME>/behavior namespace, so executive topics live under it.
+const ROBOT = "robot_1";
+
 // Keys are step names; values are absolute ROS2 topic paths.
-// MQTT topic = "ros2" + ros2_path  (e.g. /behavior/manipulation_phase → ros2/behavior/manipulation_phase)
+// MQTT topic = "ros2" + ros2_path  (e.g. /robot_1/behavior/manipulation_phase → ros2/robot_1/behavior/manipulation_phase)
+// manipulation_phase is published every executive tick; /planning_state only on planner transitions.
+const MANIP_TOPICS = [`/${ROBOT}/behavior/manipulation_phase`, "/planning_state"];
 const STEP_DISPLAY_TOPICS = {
-  pick_base: ["/behavior/manipulation_phase", "/planning_status"],
-  place_base: ["/behavior/manipulation_phase", "/planning_status"],
+  pick: MANIP_TOPICS,
+  place: MANIP_TOPICS,
+  pick_base: MANIP_TOPICS,
+  place_base: MANIP_TOPICS,
 };
 
 const ALL_DISPLAY_MQTT_TOPICS = [
@@ -24,13 +34,43 @@ const ALL_DISPLAY_MQTT_TOPICS = [
   ),
 ];
 
-const STATE_STYLE = {
-  idle:    { label: "Idle",    badge: "bg-gray-200 text-gray-600",     text: "text-gray-500" },
-  running: { label: "Running", badge: "bg-orange-100 text-orange-600", text: "text-orange-600" },
-  paused:  { label: "Paused",  badge: "bg-yellow-100 text-yellow-700", text: "text-yellow-600" },
-  success: { label: "Done",    badge: "bg-green-100 text-green-700",   text: "text-green-600" },
-  failed:  { label: "Failed",  badge: "bg-red-100 text-red-600",       text: "text-red-600" },
+const STATE_LABEL = {
+  idle: "Idle",
+  running: "Running",
+  paused: "Paused",
+  success: "Done",
+  failed: "Failed",
 };
+
+// Colors mirror the underglow LEDs (6_behavior/led_status README "State → LED").
+const LED_STYLE = {
+  I: { name: "Idle",    badge: "bg-teal-100 text-teal-700",     text: "text-teal-600",   dot: "bg-teal-500" },
+  M: { name: "Moving",  badge: "bg-cyan-100 text-cyan-700",     text: "text-cyan-600",   dot: "bg-cyan-500" },
+  A: { name: "Arm",     badge: "bg-purple-100 text-purple-700", text: "text-purple-600", dot: "bg-purple-500" },
+  W: { name: "Waiting", badge: "bg-amber-100 text-amber-700",   text: "text-amber-600",  dot: "bg-amber-500" },
+  E: { name: "Fault",   badge: "bg-red-100 text-red-600",       text: "text-red-600",    dot: "bg-red-500" },
+  R: { name: "Ready",   badge: "bg-green-100 text-green-700",   text: "text-green-600",  dot: "bg-green-500" },
+};
+
+// Step type → LED group (led_status/node.py GROUPS). Steps with no watched BT action (wait) leave the LED idle.
+const STEP_LED = {
+  go_to: "M",
+  home: "M",
+  go_to_pose: "M",
+  pick: "A",
+  place: "A",
+  pick_base: "A",
+  place_base: "A",
+  ot2: "W",
+  shaker: "W",
+};
+
+function ledFor(state, stepName) {
+  if (state === "success") return "R";
+  if (state === "failed") return "E";
+  if (state === "running" || state === "paused") return STEP_LED[stepName] ?? "I";
+  return "I";
+}
 
 function formatExecPayload(payload) {
   if (payload === null || payload === undefined) return "—";
@@ -40,8 +80,9 @@ function formatExecPayload(payload) {
   return JSON.stringify(payload);
 }
 
-export default function ExperimentSequence() {
+export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
+  const [retryPending, setRetryPending] = useState(false);
   const [connected, setConnected] = useState(false);
   const [executorStatus, setExecutorStatus] = useState({});
   const clientRef = useRef(null);
@@ -57,6 +98,17 @@ export default function ExperimentSequence() {
   function handleResume() {
     clientRef.current?.publish(RESUME_TOPIC, '');
   }
+
+  function handleRetry() {
+    clientRef.current?.publish(RETRY_TOPIC, '');
+    setRetryPending(true);
+  }
+
+  useEffect(() => {
+    if (!retryPending) return undefined;
+    const timer = setTimeout(() => setRetryPending(false), RETRY_PENDING_MS);
+    return () => clearTimeout(timer);
+  }, [retryPending]);
 
   useEffect(() => {
     const client = mqtt.connect(BROKER_URL);
@@ -97,13 +149,44 @@ export default function ExperimentSequence() {
   const totalSteps = steps.length;
   const currentStepIdx = status?.current_step ?? 0;
   const state = status?.state ?? "idle";
-  const { label: stateLabel, badge: stateBadge, text: stateText } =
-    STATE_STYLE[state] ?? STATE_STYLE.idle;
+  const stepName = (step) => (typeof step === "string" ? step : step?.name ?? "");
+  const failedStepName = stepName(steps[currentStepIdx]);
+  const canRetry = state === "failed" && currentStepIdx < totalSteps;
+
+  // The executor left "failed": the retry went through.
+  useEffect(() => {
+    if (state !== "failed") setRetryPending(false);
+  }, [state]);
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
 
   const currentStepName = status?.current_step_name ?? null;
+  const stateLabel = STATE_LABEL[state] ?? STATE_LABEL.idle;
+  const led = LED_STYLE[ledFor(state, currentStepName)];
+  const { badge: stateBadge, text: stateText } = led;
   const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
+
+  // Ways out when the executor has nothing to run.
+  const idleActions = (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {onNewExperiment && (
+        <button
+          onClick={onNewExperiment}
+          className="text-sm px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700"
+        >
+          New experiment
+        </button>
+      )}
+      {onHome && (
+        <button
+          onClick={onHome}
+          className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100"
+        >
+          Back to home
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -174,18 +257,14 @@ export default function ExperimentSequence() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            {steps.map((name, i) => {
+            {steps.map((step, i) => {
               let bg;
               if (state === "success") {
                 bg = "bg-green-500";
               } else if (i < currentStepIdx) {
                 bg = "bg-green-500";
-              } else if (i === currentStepIdx && state === "paused") {
-                bg = "bg-yellow-500";
-              } else if (i === currentStepIdx && state === "running") {
-                bg = "bg-orange-500";
-              } else if (i === currentStepIdx && state === "failed") {
-                bg = "bg-red-500";
+              } else if (i === currentStepIdx && state !== "idle") {
+                bg = led.dot;
               } else {
                 bg = "bg-gray-300";
               }
@@ -193,7 +272,7 @@ export default function ExperimentSequence() {
               return (
                 <div
                   key={i}
-                  title={name}
+                  title={stepName(step)}
                   className={`w-6 h-6 rounded-full ${bg} text-white flex items-center justify-center text-xs font-medium`}
                 >
                   {i + 1}
@@ -206,7 +285,7 @@ export default function ExperimentSequence() {
             {(state === "running" || state === "paused") && status.current_step_name && (
               <>
                 {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
-                <span className={`font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-600"}`}>
+                <span className={`font-medium ${stateText}`}>
                   {status.current_step_name}
                 </span>
               </>
@@ -221,6 +300,7 @@ export default function ExperimentSequence() {
             )}
             {state === "idle" && "No routine running"}
           </p>
+          {state === "idle" && idleActions}
         </div>
       )}
 
@@ -234,8 +314,9 @@ export default function ExperimentSequence() {
             <h3 className="text-lg font-semibold">
               Step {currentStepIdx + 1} of {totalSteps}
             </h3>
-            <span className={`text-sm font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-500"}`}>
-              {state === "paused" ? "Paused" : "Running"}
+            <span className={`flex items-center gap-2 text-sm font-medium ${stateText}`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${led.dot}`} />
+              {state === "paused" ? "Paused" : "Running"} · {led.name}
             </span>
           </div>
 
@@ -286,6 +367,38 @@ export default function ExperimentSequence() {
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
           <h3 className="font-semibold mb-1">Routine Failed</h3>
           <p className="text-sm">{status.error ?? "Unknown error"}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                disabled={!connected || retryPending}
+                className="text-sm px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {retryPending
+                  ? "Retrying…"
+                  : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
+              </button>
+            )}
+            {onNewExperiment && (
+              <button
+                onClick={onNewExperiment}
+                className="text-sm px-4 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-100"
+              >
+                New experiment
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Idle Card: executor is idle with no routine loaded */}
+      {status && state === "idle" && totalSteps === 0 && (
+        <div className="bg-white rounded-2xl shadow p-6 text-gray-700">
+          <h3 className="font-semibold">No routine running</h3>
+          <p className="text-sm mt-1 text-gray-500">
+            The routine executor is idle. Start a new experiment or head back home.
+          </p>
+          {idleActions}
         </div>
       )}
 
@@ -296,6 +409,14 @@ export default function ExperimentSequence() {
           <p className="text-sm mt-1">
             All {totalSteps} steps executed successfully.
           </p>
+          {onNewExperiment && (
+            <button
+              onClick={onNewExperiment}
+              className="mt-4 text-sm px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+            >
+              New experiment
+            </button>
+          )}
         </div>
       )}
     </div>

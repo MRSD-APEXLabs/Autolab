@@ -1,3 +1,4 @@
+import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import CameraFeed from './CameraFeed';
 import CameraPair from './CameraPair';
@@ -57,4 +58,29 @@ test('switching camera swaps the stream URL', () => {
   rerender(<CameraPair camera="zedx_nano" />);
   expect(screen.getAllByRole('img').map((i) => i.getAttribute('src'))).toEqual([
     'http://localhost:8002/stream/annotated/zedx_nano.mjpg', 'http://localhost:8002/stream/raw/zedx_nano.mjpg']);
+});
+
+test('switching camera mounts a new <img> and blanks the old one so Safari drops its MJPEG connection', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  const { rerender } = render(<CameraFeed camera="zedx" kind="raw" title="Raw" />);
+  const oldImg = screen.getByRole('img');
+  rerender(<CameraFeed camera="zedx_nano" kind="raw" title="Raw" />);
+  const newImg = screen.getByRole('img');
+  expect(newImg).not.toBe(oldImg);
+  expect(newImg.getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx_nano.mjpg');
+  expect(oldImg.getAttribute('src')).toMatch(/^data:/);
+});
+
+test('unmounting blanks the stream <img>', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  const { unmount } = render(<CameraFeed camera="zedx" kind="raw" title="Raw" />);
+  const img = screen.getByRole('img');
+  unmount();
+  expect(img.getAttribute('src')).toMatch(/^data:/);
+});
+
+test('StrictMode remount keeps the stream URL (dev server double-runs effects)', () => {
+  global.fetch.mockReturnValue(health('raw/zedx', 0.2));
+  render(<React.StrictMode><CameraFeed camera="zedx" kind="raw" title="Raw" /></React.StrictMode>);
+  expect(screen.getByRole('img').getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx.mjpg');
 });
