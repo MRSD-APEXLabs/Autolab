@@ -137,10 +137,13 @@ class PlateFilter:
     Positions are averaged with weight `alpha`; the axis direction is averaged as a doubled angle, so a
     flip of the box's axis by 180 deg doesn't cancel. An observation more than `gate` m from the estimate
     is dropped; `reset_after` such observations in a row replace the estimate (the plate did move).
+    Axis changes above `orientation_gate` radians (modulo 180 deg, in the base frame) are excluded
+    from orientation averaging; position and size still update. Resetting also reacquires orientation.
     """
 
-    def __init__(self, alpha=0.3, gate=0.03, reset_after=5):
+    def __init__(self, alpha=0.3, gate=0.03, reset_after=5, orientation_gate=np.radians(20.0)):
         self.alpha, self.gate, self.reset_after = float(alpha), float(gate), int(reset_after)
+        self.orientation_gate = float(orientation_gate)
         self.reset()
 
     def reset(self):
@@ -181,7 +184,11 @@ class PlateFilter:
         else:
             a = self.alpha
             self.center = (1.0 - a) * self.center + a * estimate.center
-            self._axis2 = (1.0 - a) * self._axis2 + a * doubled
+            # A 90-degree long/short-axis swap is opposite in doubled-angle space: don't blend it.
+            previous = np.arctan2(self._axis2[1], self._axis2[0])
+            observed = np.arctan2(doubled[1], doubled[0])
+            if abs(wrap_pi(observed - previous)) / 2.0 <= self.orientation_gate:
+                self._axis2 = (1.0 - a) * self._axis2 + a * doubled
             self.size = tuple((1.0 - a) * np.asarray(self.size) + a * np.asarray(estimate.size))
         self.count += 1
         self.last_stamp = estimate.stamp

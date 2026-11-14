@@ -50,7 +50,7 @@ STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 MODELS = Path(__file__).resolve().parents[1] / 'models'
 TARGETS = ('ot2', 'shaker', 'base')
 DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
-                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261110',
+                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261113',
                  'base': MODELS / 'xarm6_base_act_ft_20261108b'}
 DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
 BASE_LIFT_MM = 60.0

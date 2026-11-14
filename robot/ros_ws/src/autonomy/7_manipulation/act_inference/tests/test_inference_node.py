@@ -126,7 +126,7 @@ def test_start_stop_and_status_over_ros(target):
         aligned.append('start pose')
         return 'done'
 
-    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261110',
+    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261113',
                    'base': 'xarm6_base_act_ft_20261108b'}
 
     def rollout(config, rollout_config, policy, stop):

@@ -55,6 +55,7 @@
       weak_size_tolerance: 0.12       # and both sides within this fraction of plate_size (clutter drops YOLO's score)
       filter_alpha: 0.3
       filter_gate: 0.03
+      filter_orientation_gate_deg: 20.0  # reject axis jumps before averaging; position still updates
 
     gains:
       k_xy: 1.0                       # 1/s

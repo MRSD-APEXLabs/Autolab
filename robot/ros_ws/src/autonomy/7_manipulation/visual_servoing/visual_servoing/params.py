@@ -34,6 +34,7 @@ def build_config(param):
         weak_size_tolerance=float(param('servo.weak_size_tolerance', base.weak_size_tolerance)),
         filter_alpha=float(param('servo.filter_alpha', base.filter_alpha)),
         filter_gate=float(param('servo.filter_gate', base.filter_gate)),
+        filter_orientation_gate_deg=float(param('servo.filter_orientation_gate_deg', base.filter_orientation_gate_deg)),
         grasp=bool(param('grasp.enable', base.grasp)),
         grasp_depth=float(param('grasp.depth', base.grasp_depth)),
         approach_speed=float(param('grasp.approach_speed', base.approach_speed)),

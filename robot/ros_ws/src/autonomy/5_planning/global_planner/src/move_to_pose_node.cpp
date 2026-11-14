@@ -407,18 +407,36 @@ bool reactivate_xarm(rclcpp::Node::SharedPtr node)
 // Change PLANNER to switch the planner at every call site.
 enum class Planner { RRT_CONNECT, INFORMED_RRTSTAR, PRM };
 static constexpr Planner PLANNER = Planner::INFORMED_RRTSTAR;// RRT_CONNECT or INFORMED_RRTSTAR / PRM
+static constexpr int MAX_PLANNING_ATTEMPTS = 3;  // total attempts, including the initial search
 
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> run_planner(
     moveit::planning_interface::MoveGroupInterface &arm_group,
     rclcpp::Node::SharedPtr node,
     const std::vector<double> &q_goal)
 {
-    switch (PLANNER) {
-        case Planner::INFORMED_RRTSTAR: return irrtstar_plan(arm_group, node, q_goal);
-        case Planner::PRM:              return prm_plan(arm_group, node, q_goal);
-        case Planner::RRT_CONNECT:
-        default:                        return crrt_plan(arm_group, node, q_goal);
+    // Retry only the search. Publishing and execution remain outside this loop so a failed
+    // execution can never trigger another movement through the planning retry mechanism.
+    for (int attempt = 1; attempt <= MAX_PLANNING_ATTEMPTS && rclcpp::ok(); ++attempt) {
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Attempt %d/%d",
+                    attempt, MAX_PLANNING_ATTEMPTS);
+        auto plan = [&]() {
+            switch (PLANNER) {
+                case Planner::INFORMED_RRTSTAR: return irrtstar_plan(arm_group, node, q_goal);
+                case Planner::PRM:              return prm_plan(arm_group, node, q_goal);
+                case Planner::RRT_CONNECT:
+                default:                        return crrt_plan(arm_group, node, q_goal);
+            }
+        }();
+        if (plan) {
+            return plan;
+        }
+        if (attempt < MAX_PLANNING_ATTEMPTS && rclcpp::ok()) {
+            RCLCPP_WARN(node->get_logger(),
+                        "[Path Planning] Attempt %d/%d failed; replanning.",
+                        attempt, MAX_PLANNING_ATTEMPTS);
+        }
     }
+    return std::nullopt;
 }
 
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan> plan_and_publish_rrt(

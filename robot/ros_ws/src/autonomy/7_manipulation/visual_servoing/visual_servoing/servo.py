@@ -101,6 +101,7 @@ class ServoConfig:
     weak_size_tolerance: float = 0.12   # both sides within this fraction of plate_size
     filter_alpha: float = 0.3
     filter_gate: float = 0.03           # m
+    filter_orientation_gate_deg: float = 20.0  # reject larger base-frame axis changes, modulo 180 deg
     grasp: bool = True                  # False: stop at the hover pose
     grasp_depth: float = -0.002         # m below the top face (0.005 hit the tray on the arm: 7 mm higher held)
     approach_speed: float = 30.0        # mm/s, hover to `final_segment` above the grasp height
@@ -164,7 +165,8 @@ class ServoRunner:
         self.prepare = prepare
         self.clock, self.sleep = clock, sleep
         self.history = PoseHistory()
-        self.plate = PlateFilter(config.filter_alpha, config.filter_gate)
+        self.plate = PlateFilter(config.filter_alpha, config.filter_gate,
+                                 orientation_gate=np.radians(config.filter_orientation_gate_deg))
         self._lock = threading.Lock()
         self._pending = []          # detections waiting for the control loop: (stamp, detections, intrinsics)
         self._abort = threading.Event()

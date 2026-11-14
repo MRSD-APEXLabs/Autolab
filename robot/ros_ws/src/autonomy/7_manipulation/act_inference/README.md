@@ -8,15 +8,16 @@ weighted x4):
 | target | checkpoint | demos | held-out check (80:20 run, median end error) |
 |---|---|---|---|
 | `ot2` | `models/xarm6_placing_act_ft_all_20261105b/` | 103, 11000 steps | 1.34 mm |
-| `shaker` | `models/xarm6_shaker_act_ft_20261110/` | 66 (about 8 base parking spots + 17 at three newer spots), 9000 steps | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
+| `shaker` | `models/xarm6_shaker_act_ft_20261113/` | 77 (about 8 base parking spots + 28 at newer spots), 10500 steps | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
 | `base` | `models/xarm6_base_act_ft_20261108b/` | 43 (robot base deck bracket; 4 started at the base start pose), 4500 steps | 1.42 mm (x/y 0.74, height 0.84) for the 39-demo version |
 
 The ROS node and the wrapper scripts default to these. The previous OT-2 checkpoints
 `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
 `models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
 `models/xarm_final_ckpt_placing/` remain available by explicit path.
-The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261108c/` (59 demonstrations, 8000 steps),
-`models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and `models/xarm6_shaker_act_ft_20261108/` (49, 6500 steps) are kept too, and so is the previous base
+The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261110/` (66 demonstrations, 9000 steps),
+`models/xarm6_shaker_act_ft_20261108c/` (59, 8000 steps), `models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and
+`models/xarm6_shaker_act_ft_20261108/` (49, 6500 steps) are kept too, and so is the previous base
 checkpoint `models/xarm6_base_act_ft_20261108/` (39 demonstrations, 4000 steps).
 
 The new policy uses wrist RGB, metric depth and validity, and the compensated external

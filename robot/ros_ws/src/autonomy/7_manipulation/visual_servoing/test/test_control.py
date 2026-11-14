@@ -76,6 +76,33 @@ def test_plate_filter_averages_axes_and_gates_outliers():
     assert axial_error_deg(axis_angle_deg(f.short_axis), 0.0) < 0.1
 
 
+@pytest.mark.parametrize('initial', [0.0, 89.0, -89.0, 175.0])
+def test_plate_filter_rejects_axis_swaps_without_freezing_position(initial):
+    f = PlateFilter(alpha=0.5)
+    f.update(estimate(CENTER, initial))
+    moved = CENTER + [0.002, 0, 0]
+    for stamp in range(1, 11):
+        assert f.update(estimate(moved, initial + 90, float(stamp)))
+        assert axial_error_deg(axis_angle_deg(f.short_axis), initial) < 1e-6
+    assert np.allclose(f.center, moved, atol=1e-5)
+    assert f.count == 11 and f.last_stamp == 10.0
+    # Normal jitter and the equivalent axis across the 180-degree wrap still blend.
+    f.update(estimate(moved, initial + 180 + 10, 11.0))
+    assert axial_error_deg(axis_angle_deg(f.short_axis), initial + 5) < 1e-6
+    f.reset()
+    f.update(estimate(moved, initial + 90, 12.0))
+    assert axial_error_deg(axis_angle_deg(f.short_axis), initial + 90) < 1e-6
+
+
+def test_plate_filter_orientation_gate_is_configurable():
+    f = PlateFilter(alpha=0.5, orientation_gate=np.radians(15))
+    f.update(estimate(CENTER, 0))
+    f.update(estimate(CENTER, 16))
+    assert axial_error_deg(axis_angle_deg(f.short_axis), 0) < 1e-6
+    f.update(estimate(CENTER, 14))
+    assert axial_error_deg(axis_angle_deg(f.short_axis), 7) < 1e-6
+
+
 def test_grasp_yaw_lines_the_fingers_up_with_the_short_side():
     for short_deg in (0, 30, 90, 135, -170):
         for current in (-170, -45, 0, 60, 179):
