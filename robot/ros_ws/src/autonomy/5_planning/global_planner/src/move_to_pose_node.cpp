@@ -19,6 +19,9 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <unordered_set>
+#include <array>
 #include <std_srvs/srv/empty.hpp>   // TEMP: cloud refresh
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <visualization_msgs/msg/marker.hpp>
@@ -74,6 +77,10 @@ static constexpr double WELLPLATE_STALE_SEC = 1.0;
 static constexpr int WELLPLATE_WAIT_TIMEOUT_SEC = 10;
 static constexpr int WELLPLATE_WAIT_STEP_MS = 100;
 static constexpr int CLOUD_REFRESH_TIMEOUT_SEC = 3;   // TEMP: cloud refresh
+static constexpr double CLOUD_INFLATION_RADIUS = 0.02;   // m: every obstacle point also fills points this far around it
+// end_effector_p4_1 world yaw at the plan_april_<id> / plan_wellplate goals: the default (pi) turned 90 deg
+// about world z, i.e. xArm TCP yaw +90 deg in the base frame, where the OT-2/shaker ACT policies start.
+static constexpr double APPROACH_YAW = -M_PI / 2.0;
 
 
 
@@ -125,7 +132,8 @@ namespace defaults
         rclcpp::Node::SharedPtr node,
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub,
         const geometry_msgs::msg::Point &target_position,
-        double offset)
+        double offset,
+        double yaw = M_PI)
     {
         geometry_msgs::msg::Pose p;
 
@@ -156,9 +164,9 @@ namespace defaults
         p.position.y = world_point.point.y;
         p.position.z = world_point.point.z + offset; // height offset for pre-grasp
 
-        // Orientation: gripper pointing down
+        // Orientation: gripper pointing down, turned to `yaw` about world z
         tf2::Quaternion q;
-        q.setRPY(0.0, 0.0, M_PI);
+        q.setRPY(0.0, 0.0, yaw);
         q.normalize();
         p.orientation = tf2::toMsg(q);
 
@@ -637,6 +645,52 @@ void publish_target_marker(
 }
 
 
+// Inflate the obstacle cloud by `radius`: each point is kept and also copied `radius` away in all
+// 26 axis and diagonal directions, so the octomap fills the voxels next to every obstacle too.
+// One point per radius/2 cube is kept, which bounds the size of the published cloud.
+static sensor_msgs::msg::PointCloud2 inflate_cloud(const sensor_msgs::msg::PointCloud2& in, double radius)
+{
+    const double cell = radius / 2.0;
+    std::unordered_set<int64_t> filled;
+    std::vector<std::array<float, 3>> pts;
+    auto add = [&](float x, float y, float z) {
+        const int64_t ix = static_cast<int64_t>(std::floor(x / cell)) & 0x1FFFFF;
+        const int64_t iy = static_cast<int64_t>(std::floor(y / cell)) & 0x1FFFFF;
+        const int64_t iz = static_cast<int64_t>(std::floor(z / cell)) & 0x1FFFFF;
+        if (filled.insert((ix << 42) | (iy << 21) | iz).second)
+            pts.push_back({x, y, z});
+    };
+
+    for (sensor_msgs::PointCloud2ConstIterator<float> x(in, "x"), y(in, "y"), z(in, "z"); x != x.end(); ++x, ++y, ++z)
+        if (std::isfinite(*x) && std::isfinite(*y) && std::isfinite(*z))
+            add(*x, *y, *z);
+
+    const size_t n_obstacle = pts.size();
+    for (size_t i = 0; i < n_obstacle; ++i) {
+        const auto p = pts[i];
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    const double s = radius / std::sqrt(dx * dx + dy * dy + dz * dz);
+                    add(p[0] + dx * s, p[1] + dy * s, p[2] + dz * s);
+                }
+    }
+
+    sensor_msgs::msg::PointCloud2 out;
+    out.header = in.header;
+    sensor_msgs::PointCloud2Modifier mod(out);
+    mod.setPointCloud2FieldsByString(1, "xyz");
+    mod.resize(pts.size());
+    out.is_dense = true;
+    sensor_msgs::PointCloud2Iterator<float> ox(out, "x"), oy(out, "y"), oz(out, "z");
+    for (const auto& p : pts) {
+        *ox = p[0]; *oy = p[1]; *oz = p[2];
+        ++ox; ++oy; ++oz;
+    }
+    return out;
+}
+
 static std::mutex cmd_mutex;
 static std::string received_command = "idle";
 
@@ -836,7 +890,8 @@ int main(int argc, char *argv[])
                 return ls->getWorld()->getObject("<octomap>");
             };
             const auto old_map = planner_octomap();
-            frozen_cloud_pub->publish(*cloud);
+            const auto inflated = inflate_cloud(*cloud, CLOUD_INFLATION_RADIUS);
+            frozen_cloud_pub->publish(inflated);
             bool planner_has_new_map = false;
             for (int elapsed_ms = 0; elapsed_ms < CLOUD_REFRESH_TIMEOUT_SEC * 1000 && !planner_has_new_map; elapsed_ms += 100)
             {
@@ -850,15 +905,18 @@ int main(int argc, char *argv[])
                 continue;
             }
             cloud_frozen = true;
-            RCLCPP_INFO(node->get_logger(), "Refreshed obstacle cloud; planner has the new octomap.");
+            RCLCPP_INFO(node->get_logger(), "Refreshed obstacle cloud (%u -> %u points, inflated %.0f mm); planner has the new octomap.",
+                        cloud->width * cloud->height, inflated.width, CLOUD_INFLATION_RADIUS * 1000.0);
         }
         else if (!cloud_frozen && cmd.rfind("plan_", 0) == 0)
         {
             if (auto cloud = std::atomic_load(&latest_obstacle_cloud))
             {
-                frozen_cloud_pub->publish(*cloud);
+                const auto inflated = inflate_cloud(*cloud, CLOUD_INFLATION_RADIUS);
+                frozen_cloud_pub->publish(inflated);
                 cloud_frozen = true;
-                RCLCPP_INFO(node->get_logger(), "Froze obstacle cloud for the octomap.");
+                RCLCPP_INFO(node->get_logger(), "Froze obstacle cloud for the octomap (%u -> %u points, inflated %.0f mm).",
+                            cloud->width * cloud->height, inflated.width, CLOUD_INFLATION_RADIUS * 1000.0);
                 // Give move_group time to fold it into the octomap before planning.
                 rclcpp::sleep_for(std::chrono::seconds(1));
             }
@@ -919,7 +977,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.25));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, apriltag_point, 0.25, APPROACH_YAW));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
             publish_target_marker(node, target_position);
@@ -974,7 +1032,7 @@ int main(int argc, char *argv[])
 
             // Resolve final task parameters (live > default)
             const geometry_msgs::msg::Pose target_position =
-                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.25));
+                live_target_pose.value_or(defaults::target_pose_func(node, marker_pub, wellplate_point, 0.25, APPROACH_YAW));
             const std::string task_type =
                 live_task_type.value_or(defaults::TASK_TYPE);
 
@@ -998,6 +1056,10 @@ int main(int argc, char *argv[])
             publish_target_marker(node, pregrasp_pose);
 
             publish_state("PLANNING");
+            // plan_wellplate is only sent for a pick, so the gripper is empty: wellplate_link (the held
+            // plate modelled on Finger_left_2) is not there and may overlap the octomap.
+            crrt_internal::ScopedSceneFreeze scene_freeze(node);
+            crrt_internal::frozen_scene()->getAllowedCollisionMatrixNonConst().setEntry("wellplate_link", "<octomap>", true);
             auto rrt_plan_opt = plan_and_publish_rrt(
                 task_type, pregrasp_pose,
                 arm_group, node, planning_state_pub);

@@ -244,6 +244,18 @@ for a typed `YES` before arming the drivetrain. Extra launch arguments pass thro
 `map:=/path/to/other.yaml`, `rviz:=true`, `x:=1.0 y:=0.5 yaw:=1.57`, `api_namespace:=/robot_1`,
 `nav_motion:=omni`, `approach_distance:=0`.
 
+### Resuming the pose after a restart
+
+The base is too heavy to move while the stack is down, so navigation assumes it has not moved.
+During `--hardware` runs, `nav_api` saves the robot's map pose (map -> base_footprint) to
+`robot/ros_ws/nav_state/last_pose.yaml` at most once a second, when it has changed. The next
+start uses it as the AMCL initial pose when `x:=`, `y:=` and `yaw:=` are all left out, so no
+"2D Pose Estimate" is needed. The file lives in the bind-mounted repo, so killing or recreating
+the container keeps it. The saved pose only applies to the map it was saved for. Without a saved
+pose, the start pose is 0, 0, 0 as before. Dry runs read the pose but never save it. The launch log
+line `AMCL initial pose ... from ...` shows which source was used. If the robot was moved, pass
+`x:= y:= yaw:=` or use "2D Pose Estimate"; the corrected pose is then saved.
+
 In the Humble robot container, RViz defaults to off even though the launch-file default is on;
 run `rviz_docker.sh` from the host. On Jazzy, or when `rviz:=true` is explicit, the launch-file
 setting is used unchanged.

@@ -346,3 +346,45 @@ def test_base_policy_start_prediction_only_never_enables(monkeypatch):
     _, calls, commands = setup_robot(monkeypatch, stop)
     assert bp.move_to_base_policy_start(InferenceConfig(), start_placement(), stop=stop) == 'done'
     assert calls == ['connect', 'close'] and not commands
+
+
+@pytest.mark.parametrize('axis', range(3))
+@pytest.mark.parametrize('sign', [1., -1.])
+def test_jog_moves_along_one_base_axis_holding_orientation(monkeypatch, axis, sign):
+    stop = ClockStop()
+    initial = np.r_[[.1, .2, .3], Rotation.from_euler('xyz', [-179., -1.5, 90.], degrees=True).as_rotvec()]
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=initial)
+    offset = np.zeros(3)
+    offset[axis] = sign * .01
+    assert bp.jog_base_xyz(InferenceConfig(), offset, 10., execute=True, stop=stop) == 'done'
+    assert calls == ['connect', 'enable', 'close']
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[-1, :3], initial[:3] + offset, atol=1e-10)
+    others = [i for i in range(3) if i != axis]
+    np.testing.assert_allclose(goals[:, others], np.tile(initial[others], (len(goals), 1)), atol=1e-10)
+    np.testing.assert_allclose(goals[:, 3:], np.tile(initial[3:], (len(goals), 1)), atol=1e-10)
+    steps = np.linalg.norm(np.diff(np.vstack([initial[:3], goals[:, :3]]), axis=0), axis=1)
+    assert steps.max() <= .010 / InferenceConfig().motion.loop_hz + 1e-10
+
+
+def test_jog_prediction_only_does_not_command(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    assert bp.jog_base_xyz(InferenceConfig(), (0., 0., .01), 10., execute=False, stop=stop) == 'done'
+    assert calls == ['connect', 'close'] and not commands
+
+
+def test_jog_cancellation(monkeypatch):
+    stop = ClockStop(cancel_at=.06)
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    assert bp.jog_base_xyz(InferenceConfig(), (0., 0., .01), 10., execute=True, stop=stop) == 'stopped'
+    assert calls[-1] == 'close'
+
+
+@pytest.mark.parametrize('offset,speed', [((0., 0.), 10.), ((0., np.nan, 0.), 10.), ((0., 0., .01), 0.)])
+def test_jog_rejects_bad_requests_before_connecting(monkeypatch, offset, speed):
+    stop = ClockStop()
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.jog_base_xyz(InferenceConfig(), offset, speed, execute=True, stop=stop)
+    assert not calls

@@ -7,6 +7,11 @@ Interface (same contract as visual_servoing's visual_servo/*):
   act_inference/stop      std_srvs/Trigger: end the rollout; the arm stops where it is
   act_inference/status    std_msgs/String JSON, 2 Hz and at the end of a run (transient local):
                           running, result (done | stopped | failed), message, phase, started, target
+  act_inference/jog/{x,y,z}_{plus,minus} std_srvs/Trigger: move the TCP `jog_step_mm` (10) along that xArm
+                          base-frame axis at `jog_speed_mm_s` (10), holding orientation, with the same
+                          ROS-controller/SDK handoff as a placement; answers when the jog has ended (target
+                          jog_<axis>_<direction> in the status). Refused while a run is active, the planner is
+                          planning/executing (/planning_state) or the visual servo runs (/visual_servo/status).
 
 Each target has its own placing policy (`ckpt_dir` for OT-2, `shaker_ckpt_dir`, `base_ckpt_dir`); all are
 loaded and warmed up once, at startup. Each run switches the camera hub to the Nano (`select_service`), reads
@@ -38,7 +43,7 @@ from std_srvs.srv import Trigger
 from controller_manager_msgs.srv import ListControllers, SwitchController
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
-from .base_placement import (BASE_POLICY_START_MM_DEG, BasePlacementConfig, align_policy_yaw,
+from .base_placement import (BASE_POLICY_START_MM_DEG, BasePlacementConfig, align_policy_yaw, jog_base_xyz,
                              move_to_base_policy_start, run_base_placement)
 from .post_placement import release_and_lift
 from .rollout import load_policy, run_act_rollout, warm_up
@@ -63,7 +68,7 @@ BASE_SEATING_PARAMS = {'probe_speed_mm_s': float, 'probe_depth_mm': float, 'touc
 class ActInferenceNode(Node):
     def __init__(self, policy=None, rollout_fn=run_act_rollout, base_move_fn=run_base_placement,
                  yaw_align_fn=align_policy_yaw, post_placement_fn=release_and_lift,
-                 base_start_fn=move_to_base_policy_start, **kwargs):
+                 base_start_fn=move_to_base_policy_start, jog_fn=jog_base_xyz, **kwargs):
         """`policy` (a load_policy() result, or a dict of them per target) and `rollout_fn` replace the
         checkpoints and the arm (tests)."""
         super().__init__('act_inference', **kwargs)
@@ -128,6 +133,11 @@ class ActInferenceNode(Node):
         self._base_start_fn = base_start_fn
         self._yaw_align_fn = yaw_align_fn
         self._post_placement_fn = post_placement_fn
+        self._jog_fn = jog_fn
+        self.jog_step_mm = float(param('jog_step_mm', 10.0))
+        self.jog_speed_mm_s = float(param('jog_speed_mm_s', 10.0))
+        self._planning_state = None
+        self._servo_running = False
         self._handoff_robot = None
 
         needed = [t for t in TARGETS if t != 'base' or self.base_mode == 'policy']
@@ -155,6 +165,16 @@ class ActInferenceNode(Node):
                                 lambda request, response, target=target: self._on_start(request, response, target),
                                 callback_group=services)
         self.create_service(Trigger, 'act_inference/stop', self._on_stop, callback_group=services)
+        for index, axis in enumerate('xyz'):
+            for sign, direction in ((1.0, 'plus'), (-1.0, 'minus')):
+                offset = tuple(sign * self.jog_step_mm / 1000 if i == index else 0.0 for i in range(3))
+                self.create_service(Trigger, f'act_inference/jog/{axis}_{direction}',
+                                    lambda request, response, name=f'jog_{axis}_{direction}', offset=offset:
+                                        self._on_jog(request, response, name, offset),
+                                    callback_group=services)
+        self.create_subscription(String, '/planning_state', self._on_planning_state, 10, callback_group=services)
+        self.create_subscription(String, '/visual_servo/status', self._on_servo_status, STATUS_QOS,
+                                 callback_group=services)
         self._select_client = (self.create_client(Trigger, self.select_service, callback_group=services)
                                if self.select_service else None)
         self._driver_clients = {name: self.create_client(Trigger, f'{driver_prefix}/{name}', callback_group=services)
@@ -205,9 +225,49 @@ class ActInferenceNode(Node):
         lift = {'lift_mm': BASE_LIFT_MM} if target == 'base' else {}
         return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, **lift)
 
+    def _jog(self, stop, offset):
+        result = self._jog_fn(self.config, offset, self.jog_speed_mm_s, execute=self.rollout.execute, stop=stop)
+        if result == 'done' and not stop.is_set() and self.rollout.execute:
+            self.handoff.finish(self.runner._check_abort)
+        return 'stopped' if stop.is_set() else result
+
+    def _on_jog(self, request, response, name, offset):
+        busy = self._arm_busy()
+        if busy:
+            response.success, response.message = False, f'not jogging: {busy}'
+            return response
+        response.success, response.message = self.runner.start(
+            target=name, run=lambda stop: self._jog(stop, offset), prepare=self._verify_motion_ownership)
+        if not response.success:
+            return response
+        self._publish_status()
+        started = self.runner.status()['started']
+        while (status := self.runner.status())['running'] and status['started'] == started:
+            time.sleep(.05)
+        response.success = status['result'] == 'done'
+        response.message = (f'{name}: moved {self.jog_step_mm:g} mm' if response.success
+                            else f'{name} {status["result"]}: {status["message"]}')
+        return response
+
+    def _arm_busy(self):
+        """Why another node is driving the arm now, or '' (a node that has exited does not count)."""
+        names = self.get_node_names()
+        if self._planning_state in ('PLANNING', 'EXECUTING') and 'move_to_pose_node' in names:
+            return f'the planner is {self._planning_state.lower()}'
+        if self._servo_running and 'visual_servo' in names:
+            return 'the visual servo is running'
+        return ''
+
+    def _on_planning_state(self, msg):
+        self._planning_state = msg.data
+
+    def _on_servo_status(self, msg):
+        self._servo_running = bool(json.loads(msg.data).get('running'))
+
     def _run_done(self, status):
         # one call site per severity: rclpy refuses a severity change at the same call site
-        text = f'Placement {status["target"]} ended: {status["result"]} {status["message"]}'
+        kind = 'Jog' if str(status['target']).startswith('jog_') else 'Placement'
+        text = f'{kind} {status["target"]} ended: {status["result"]} {status["message"]}'
         if status['result'] == 'done':
             self.get_logger().info(text)
         else:

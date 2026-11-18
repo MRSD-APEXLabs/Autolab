@@ -192,3 +192,80 @@ def test_start_stop_and_status_over_ros(target):
         node.destroy_node()
         client_node.destroy_node()
         rclpy.shutdown()
+
+
+@pytest.mark.parametrize('result,handback', [('done', True), ('stopped', False)])
+def test_jog_hands_back_only_after_a_completed_move(result, handback):
+    from act_inference.node import ActInferenceNode
+    events = []
+
+    def jog(config, offset, speed, execute, stop):
+        events.append(('jog', offset, speed, execute))
+        return result
+
+    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True), jog_speed_mm_s=10., _jog_fn=jog,
+                           runner=SimpleNamespace(_check_abort=lambda: None),
+                           handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
+    assert ActInferenceNode._jog(node, threading.Event(), (0., 0., .01)) == result
+    assert events == [('jog', (0., 0., .01), 10., True)] + (['handback'] if handback else [])
+
+
+@pytest.mark.parametrize('state,servo,alive,busy', [
+    ('PLANNING', False, {'move_to_pose_node'}, 'the planner is planning'),
+    ('EXECUTING', False, {'move_to_pose_node'}, 'the planner is executing'),
+    ('EXECUTING', False, set(), ''),
+    ('SUCCESS', False, {'move_to_pose_node'}, ''),
+    (None, True, {'visual_servo'}, 'the visual servo is running'),
+    (None, True, set(), ''),
+])
+def test_jog_refused_while_another_node_drives_the_arm(state, servo, alive, busy):
+    from act_inference.node import ActInferenceNode
+    starts = []
+    node = SimpleNamespace(_planning_state=state, _servo_running=servo, get_node_names=lambda: list(alive),
+                           _verify_motion_ownership=None,
+                           runner=SimpleNamespace(start=lambda **kwargs: starts.append(kwargs) or (False, 'x')))
+    node._arm_busy = lambda: ActInferenceNode._arm_busy(node)
+    response = ActInferenceNode._on_jog(node, None, SimpleNamespace(), 'jog_z_plus', (0., 0., .01))
+    assert ActInferenceNode._arm_busy(node) == busy
+    assert (response.success, response.message) == (False, f'not jogging: {busy}' if busy else 'x')
+    assert len(starts) == (0 if busy else 1)
+
+
+def test_jog_services_over_ros():
+    rclpy = pytest.importorskip('rclpy')
+    from rclpy.executors import MultiThreadedExecutor
+    from std_srvs.srv import Trigger
+
+    from act_inference.node import ActInferenceNode
+
+    jogs = []
+
+    def jog(config, offset, speed, execute, stop):
+        assert not execute and speed == 10.
+        jogs.append(offset)
+        return 'done'
+
+    namespace = f'/test_act_jog_{os.getpid()}'
+    rclpy.init()
+    node = ActInferenceNode(policy='policy', jog_fn=jog, namespace=namespace,
+                            parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
+                                                 rclpy.parameter.Parameter('select_service', value='')])
+    client_node = rclpy.create_node('act_jog_client', namespace=namespace)
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    executor.add_node(client_node)
+    threading.Thread(target=executor.spin, daemon=True).start()
+    try:
+        for name, offset in (('x_plus', (.01, 0., 0.)), ('y_minus', (0., -.01, 0.)), ('z_plus', (0., 0., .01))):
+            client = client_node.create_client(Trigger, f'act_inference/jog/{name}')
+            assert client.wait_for_service(timeout_sec=5)
+            response = client.call(Trigger.Request())
+            assert response.success and response.message == f'jog_{name}: moved 10 mm', response.message
+            assert jogs[-1] == offset
+            status = node.runner.status()
+            assert status['target'] == f'jog_{name}' and status['result'] == 'done' and not status['running']
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        client_node.destroy_node()
+        rclpy.shutdown()

@@ -10,7 +10,8 @@
 #   --yes          skip the typed confirmation (--hardware only)
 #   launch args    passed to navigation.launch.py, e.g.
 #                    map:=/path/to/other.yaml       another map (default: best)
-#                    x:=1.0 y:=0.5 yaw:=1.57        initial pose in the map
+#                    x:=1.0 y:=0.5 yaw:=1.57        initial pose in the map (default: where the
+#                                                   last --hardware run left the robot)
 #                    rviz:=false                    headless
 #                    api_namespace:=/robot_1        publish the API as /robot_1/nav/...
 #                    nav_speed:=normal              restore the previous smooth transit speeds
@@ -33,7 +34,7 @@ for arg in "$@"; do
     --hardware) HARDWARE=1 ;;
     --yes) ASSUME_YES=1 ;;
     -h | --help)
-      sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     hardware:=*)
@@ -75,6 +76,13 @@ if [[ "$NAV_DISTRO" == humble ]]; then
     echo "NAVIGATION_DOMAIN_ID must be a non-negative integer: $ROS_DOMAIN_ID" >&2
     exit 2
   }
+fi
+
+# Hardware runs keep the latest map pose here and every start resumes from it unless x:= y:= yaw:=
+# are given: the base is too heavy to move while the stack is down. robot/ros_ws is the
+# bind-mounted repo, so the file survives the container being killed or recreated.
+if ! printf '%s\n' "${LAUNCH_ARGS[@]}" | grep -q '^pose_file:='; then
+  LAUNCH_ARGS+=("pose_file:=$NAV_WS/nav_state/last_pose.yaml")
 fi
 
 if [[ ! -f "$NAV_WS/install/navigation_bringup/share/navigation_bringup/package.xml" ]]; then
@@ -155,7 +163,8 @@ if ((HARDWARE)); then
 
   THE ROBOT IS BLIND behind it and to its right (~136 deg shadowed by its own structure): it
   drives nose-first, and nobody should walk up to it from the rear/right while it moves.
-  Put it where MAPPING STARTED, or pass x:= y:= yaw:=, or use "2D Pose Estimate" in RViz, and
+  It starts localised where the last hardware run left it (nav_state/last_pose.yaml). If the
+  robot was moved since, pass x:= y:= yaw:= or use "2D Pose Estimate" in RViz. Either way,
   check that the live scan lies on the map walls BEFORE the first goal.
 ================================================================================================
 EOF2

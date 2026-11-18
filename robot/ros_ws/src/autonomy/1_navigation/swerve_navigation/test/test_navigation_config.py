@@ -157,3 +157,37 @@ def test_omni_position_corrections_are_not_penalized_for_strafing():
     assert controller['PathAngleCritic']['enabled'] is False
     assert controller['PreferForwardCritic']['enabled'] is False
     assert controller['vy_max'] > 0.
+
+
+def _launch_module():
+    spec = importlib.util.spec_from_file_location('navigation_launch', BRINGUP / 'launch/navigation.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_saved_pose_round_trip_only_for_its_map(tmp_path):
+    from swerve_navigation.nav_api import save_pose
+    module = _launch_module()
+    pose_file = str(tmp_path / 'nav_state/last_pose.yaml')
+    best, other = str(BRINGUP / 'maps/best.yaml'), str(BRINGUP / 'maps/map.yaml')
+    assert module.initial_pose('', '', '', pose_file, best) == (
+        (0.0, 0.0, 0.0), 'map origin (no saved pose for this map)')
+    save_pose(pose_file, best, 1.25, -0.5, 3.0)
+    assert module.initial_pose('', '', '', pose_file, best) == ((1.25, -0.5, 3.0), f'saved pose {pose_file}')
+    assert module.load_saved_pose(pose_file, other) is None
+    # any explicit argument wins; the ones left out are 0
+    assert module.initial_pose('2.0', '', '', pose_file, best) == ((2.0, 0.0, 0.0), 'launch arguments')
+    assert module.initial_pose('0', '0', '0', pose_file, best) == ((0.0, 0.0, 0.0), 'launch arguments')
+    assert module.initial_pose('', '', '', '', best)[0] == (0.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize('text', ['', 'not: [valid', 'x: 1.0\n', 'map: {m}\nx: nan\ny: 0\nyaw: 0\n',
+                                  'map: {m}\nx: a\ny: 0\nyaw: 0\n', '- just a list\n'])
+def test_unreadable_saved_pose_falls_back_to_the_map_origin(tmp_path, text):
+    module = _launch_module()
+    best = str(BRINGUP / 'maps/best.yaml')
+    path = tmp_path / 'last_pose.yaml'
+    path.write_text(text.format(m=best))
+    assert module.initial_pose('', '', '', str(path), best) == (
+        (0.0, 0.0, 0.0), 'map origin (no saved pose for this map)')

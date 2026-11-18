@@ -429,3 +429,35 @@ def align_policy_yaw(config, execute=False, stop=None):
                            hold_xyz_tolerance=.002)
     finally:
         robot.close()
+
+
+def jog_base_xyz(config, offset_m, speed_mm_s, execute=False, stop=None):
+    """Move the TCP by `offset_m` (x, y, z metres, xArm base frame) in a straight line at `speed_mm_s`,
+    holding its orientation."""
+    stop = stop if stop is not None else threading.Event()
+    offset = np.asarray(offset_m, dtype=float)
+    if offset.shape != (3,) or not np.isfinite(offset).all():
+        raise ValueError('Jog offset must be a finite (x, y, z) in metres')
+    if not math.isfinite(speed_mm_s) or speed_mm_s <= 0:
+        raise ValueError('Jog speed must be positive')
+    if stop.is_set():
+        return 'stopped'
+    motion = replace(config.motion, translation_speed=speed_mm_s / 1000)
+    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    try:
+        robot.connect()
+        initial = robot.initialize_target_pose()
+        goal = initial.copy()
+        goal[:3] += offset
+        if stop.is_set():
+            return 'stopped'
+        print(f'Jog {"EXECUTE" if execute else "PREDICTION ONLY"}: base-frame offset mm='
+              f'{(offset * 1000).round(1).tolist()} at {speed_mm_s:g} mm/s; '
+              f'TCP mm={(initial[:3] * 1000).round(3).tolist()} -> {(goal[:3] * 1000).round(3).tolist()}', flush=True)
+        if not execute:
+            return 'done'
+        robot.enable()
+        timeout = float(np.linalg.norm(offset)) * 1000 / speed_mm_s + 10.0
+        return _move_goals(robot, initial, (goal,), motion, stop, timeout, 'Jog')
+    finally:
+        robot.close()
