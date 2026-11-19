@@ -49,6 +49,14 @@ services:
               count: 1
               capabilities: [ gpu ]
     volumes:
+      # Keep Bluetooth/USB gamepads visible when they connect after container startup.
+      # Privileged mode alone only populates an initial snapshot of device nodes.
+      - type: bind
+        source: /dev/input
+        target: /dev/input
+        read_only: true
+        bind:
+          create_host_path: false
       # display stuff
       - $HOME/.Xauthority:/.Xauthority
       - /tmp/.X11-unix:/tmp/.X11-unix

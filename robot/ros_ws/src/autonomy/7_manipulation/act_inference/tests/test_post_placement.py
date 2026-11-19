@@ -9,7 +9,7 @@ from act_inference.robot import XArm6Robot
 from test_base_placement import ClockStop, setup_robot
 
 
-def setup_release(monkeypatch, stop, open_error=False):
+def setup_release(monkeypatch, stop, open_error=False, open_wait=4.):
     _, calls, commands = setup_robot(monkeypatch, stop)
     base_robot = bp.XArm6Robot
 
@@ -21,7 +21,7 @@ def setup_release(monkeypatch, stop, open_error=False):
                 raise RuntimeError('gripper failed')
 
         def servo(self, target, period, measured):
-            assert 'open' in calls and stop.now >= 4.
+            assert 'open' in calls and stop.now >= open_wait
             super().servo(target, period, measured)
 
     monkeypatch.setattr(pp, 'XArm6Robot', Robot)
@@ -42,6 +42,71 @@ def test_open_then_lift_without_changing_xy_orientation(monkeypatch, lift_mm):
     np.testing.assert_allclose(np.asarray(commands)[:, :2], np.tile(initial[:2], (len(commands), 1)))
     np.testing.assert_allclose(np.asarray(commands)[:, 3:], np.tile(commands[0][3:], (len(commands), 1)))
     assert stop.now >= 4. + lift_mm / 1000 / .01 + .3
+
+
+def test_lift_at_the_given_speed(monkeypatch):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    config = InferenceConfig(motion=MotionConfig(translation_speed=.01))
+    assert pp.release_and_lift(config, execute=True, stop=stop, lift_mm=60., speed_mm_s=40.) == 'done'
+    assert calls == ['connect', 'open', 'enable', 'close']
+    assert np.diff(np.asarray(commands)[:, 2]).max() == pytest.approx(.04 / 50)
+    assert 4. + .06 / .04 + .3 <= stop.now < 4. + .06 / .01
+
+
+def test_ramped_lift_speeds_up_and_slows_down(monkeypatch):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    config = InferenceConfig(motion=MotionConfig(translation_speed=.01))
+    assert pp.release_and_lift(config, execute=True, stop=stop, lift_mm=60., speed_mm_s=150.,
+                               accel_mm_s2=500.) == 'done'
+    assert calls == ['connect', 'open', 'enable', 'close']
+    start_z = bp.BasePlacementConfig().target_pose()[2]
+    steps = np.diff(np.r_[start_z, np.asarray(commands)[:, 2]])
+    steps = steps[steps > 0]
+    ramp = .5 * (1 / 50) ** 2
+    assert steps.max() == pytest.approx(.15 / 50)
+    assert steps[0] == pytest.approx(ramp) and np.diff(steps).max() <= ramp + 1e-10 and steps[-1] <= 2 * ramp
+    # 60 mm at 150 mm/s plus 0.3 s of ramps, then the 0.3 s measured arrival: well under the 1.5 s at 40 mm/s
+    assert 4. + .06 / .15 + .3 + .3 - .05 <= stop.now < 4. + .06 / .15 + .3 + .3 + .1
+
+
+def test_base_lift_waits_its_open_time_on_fast_reports(monkeypatch):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop, open_wait=1.5)
+    config = InferenceConfig(motion=MotionConfig(translation_speed=.01))
+    assert pp.release_and_lift(config, execute=True, stop=stop, lift_mm=60., speed_mm_s=150., accel_mm_s2=500.,
+                               open_wait_sec=1.5, report_type='real', arrival_sec=.1) == 'done'
+    assert calls == ['connect', 'open', 'enable', 'close'] and bp.XArm6Robot.report_types[-1] == 'real'
+    # 1.5 s open wait, 60 mm at 150 mm/s plus 0.3 s of ramps, then the 0.1 s measured arrival
+    assert 1.5 + .06 / .15 + .3 + .1 - .05 <= stop.now < 1.5 + .06 / .15 + .3 + .1 + .1
+
+
+@pytest.mark.parametrize('open_wait_sec', [-1., float('nan')])
+def test_bad_open_wait_is_refused_before_connecting(monkeypatch, open_wait_sec):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    with pytest.raises(ValueError, match='open_wait_sec'):
+        pp.release_and_lift(InferenceConfig(), execute=True, stop=stop, open_wait_sec=open_wait_sec)
+    assert not calls and not commands
+
+
+@pytest.mark.parametrize('accel_mm_s2', [0., -5., float('nan')])
+def test_bad_lift_accel_is_refused_before_connecting(monkeypatch, accel_mm_s2):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    with pytest.raises(ValueError, match='accel_mm_s2'):
+        pp.release_and_lift(InferenceConfig(), execute=True, stop=stop, accel_mm_s2=accel_mm_s2)
+    assert not calls and not commands
+
+
+@pytest.mark.parametrize('speed_mm_s', [0., -5., float('nan')])
+def test_bad_lift_speed_is_refused_before_connecting(monkeypatch, speed_mm_s):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    with pytest.raises(ValueError, match='speed_mm_s'):
+        pp.release_and_lift(InferenceConfig(), execute=True, stop=stop, speed_mm_s=speed_mm_s)
+    assert not calls and not commands
 
 
 @pytest.mark.parametrize('cancel_at', [1., 4.1])

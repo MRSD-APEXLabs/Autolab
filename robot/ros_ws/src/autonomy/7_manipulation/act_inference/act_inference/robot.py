@@ -24,10 +24,13 @@ def continuous_rotvec(vector, reference):
 
 
 class XArm6Robot:
-    def __init__(self, robot_ip, motion, dry_run=False, api_factory=None, read_only=False):
+    def __init__(self, robot_ip, motion, dry_run=False, api_factory=None, read_only=False, report_type='rich'):
+        """report_type 'rich' reports pose/state at 5 Hz; 'real' at 100 Hz (it carries no error code: faults show
+        as a stopped state and as failed servo commands)."""
         self.robot_ip, self.motion, self.dry_run = robot_ip, motion, dry_run
         self._factory, self._arm = api_factory, None
         self.read_only = read_only
+        self.report_type = report_type
         self._target = np.zeros(6)
         self._reference = None
         self._enabled = False
@@ -45,7 +48,8 @@ class XArm6Robot:
         if code != 0:
             raise RuntimeError(f'xArm {operation} failed: code {code}')
 
-    def connect(self):
+    def connect(self, check_health=True):
+        """check_health=False connects to a faulted arm too (to read or clear its errors)."""
         if self.dry_run:
             return
         if self._arm is not None and self._arm.connected:
@@ -54,7 +58,7 @@ class XArm6Robot:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
         try:
-            self._arm = self._factory(self.robot_ip, is_radian=True, enable_report=True, report_type='rich')
+            self._arm = self._factory(self.robot_ip, is_radian=True, enable_report=True, report_type=self.report_type)
         except Exception as exc:   # the SDK raises a bare Exception when the socket does not connect
             raise RuntimeError(f'xArm connection to {self.robot_ip} failed: {exc}') from exc
         if not self._arm.connected:
@@ -64,7 +68,8 @@ class XArm6Robot:
         self._report_event.clear()
         with self._report_lock:
             self._report = None
-        self.check_health()
+        if check_health:
+            self.check_health()
         # The SDK already receives pose, joints and health on its report socket. Polling
         # six getters per 20 ms tick starves the servo command socket with round trips.
         if not self._arm.register_report_callback(self._on_report, report_mtable=False,
@@ -106,7 +111,8 @@ class XArm6Robot:
         # Controller states (the SDK's wait_move logic): 0 motion state (just after set_state(0)),
         # 1 in motion, 2 standby ("sleeping"), 3 paused, 4 stopped, 5 mode/configuration changed, 6 deceleration stop.
         if errors[0]:
-            raise RuntimeError(f'xArm fault: errors={errors}, state={state}; clear it in xArm Studio')
+            raise RuntimeError(f'xArm fault: errors={errors}, state={state}; clear it with Back on the gamepad, '
+                               'Clear errors in the GCS (act_inference/clear_errors) or xArm Studio')
         if self.read_only:
             return  # pose monitoring while stopped does not require motion readiness
         if self._enabled:
@@ -200,6 +206,15 @@ class XArm6Robot:
         self._reference = pose[3:].copy()
         return pose, np.asarray(joints[:6], dtype=float)
 
+    def forward_kinematics(self, joints):
+        """The controller's TCP pose (xyz m + rotation vector, like observation()) at `joints` (rad)."""
+        code, pose = self._arm.get_forward_kinematics(list(joints), input_is_radian=True, return_is_radian=True)
+        self._check(code, 'get_forward_kinematics')
+        pose = np.asarray(pose, dtype=float)
+        if pose.shape != (6,) or not np.isfinite(pose).all():
+            raise RuntimeError('Invalid forward kinematics from xArm')
+        return np.r_[pose[:3] / 1000, Rotation.from_euler('xyz', pose[3:]).as_rotvec()]
+
     def initialize_target_pose(self):
         self._target = self.observation()[0].copy()
         if self._reporting and not self._enabled:
@@ -246,6 +261,40 @@ class XArm6Robot:
                 time.sleep(.005)
             self.check_health()
         self._last_servo_time = None
+
+    def error_state(self):
+        """(error code, warning code, controller state), queried from the controller."""
+        if self.dry_run:
+            return 0, 0, 0
+        code, errors = self._arm.get_err_warn_code()
+        self._check(code, 'get_err_warn_code')
+        code, state = self._arm.get_state()
+        self._check(code, 'get_state')
+        return int(errors[0]), int(errors[1]), int(state)
+
+    def clear_errors(self):
+        """Clear the controller's error and warning, enable the motors and set servo mode 1 / state 0 (what the
+        ROS driver needs). No pose is commanded: the arm holds where it is. Raises if it does not become ready."""
+        if self.read_only:
+            raise RuntimeError('Read-only robot cannot clear errors')
+        if self.dry_run:
+            return
+        for operation, args in [('clean_error', ()), ('clean_warn', ()), ('motion_enable', (True,)),
+                                ('set_mode', (1,)), ('set_state', (0,))]:
+            code = getattr(self._arm, operation)(*args)
+            if code != 0:
+                error, warning, state = self.error_state()
+                raise RuntimeError(f'xArm {operation} failed: code {code} (error C{error}, warning {warning}, '
+                                   f'state {state}); is the emergency stop released?')
+        deadline = time.monotonic() + 2.0
+        while True:
+            error, warning, state = self.error_state()
+            if error == 0 and state in (0, 1, 2):
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f'xArm not ready after clearing: error C{error}, warning {warning}, '
+                                   f'state {state}; is the emergency stop released?')
+            time.sleep(.05)
 
     def servo(self, target, period, measured=None):
         if self.read_only:

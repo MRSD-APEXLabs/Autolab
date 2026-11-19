@@ -14,6 +14,8 @@ Everything the rest of the system needs in order to USE navigation is a plain RO
                    /nav/distance_remaining  std_msgs/Float32  [m]   (Nav2 feedback)
                    /nav/time_remaining      std_msgs/Float32  [s]   (Nav2 feedback)
   where is it      /nav/pose             geometry_msgs/PoseStamped  base_frame in map, from TF
+                   (with pose_file set, also kept in that file, so the next start of navigation
+                    resumes at the same place: the base does not move while the stack is down)
   what can it      /nav/locations        std_msgs/String   JSON list of the saved places
                    (state, busy, goal and locations are latched: a node that starts late still
                     gets the current value)
@@ -37,9 +39,11 @@ LT overrides, B is the e-stop, X cancels.
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
@@ -73,6 +77,17 @@ TERMINAL_STATES = {
 }
 
 Place = Tuple[float, float, float]      # x, y, yaw in the map frame
+
+
+def save_pose(path: str, map_yaml: str, x: float, y: float, yaw: float) -> None:
+    """Atomically write the map pose that navigation.launch.py's load_saved_pose() reads back."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = f'{path}.tmp'
+    with open(tmp, 'w') as f:
+        yaml.safe_dump({'map': os.path.realpath(map_yaml), 'x': float(x), 'y': float(y),
+                        'yaw': float(yaw), 'saved': datetime.datetime.now().isoformat(timespec='seconds')},
+                       f, sort_keys=False)
+    os.replace(tmp, path)
 
 
 # --------------------------------------------------------------------------------------------
@@ -194,6 +209,12 @@ class NavApi(Node):
             'send_timeout', 8.0,
             '[s] a published goal has to be picked up by Nav2 in, or /nav/state goes to FAILED'))
         pose_rate = float(param('pose_rate_hz', 10.0, '[Hz] rate of /nav/pose'))
+        self._pose_file = os.path.expanduser(param(
+            'pose_file', '', 'keep the latest map pose here (at most once a second, when it changed) '
+                             'for the next start to resume from. Empty = off'))
+        self._map_yaml = param('map_yaml', '', 'map the saved pose belongs to')
+        self._saved_pose: Optional[Place] = None
+        self._saved_at = -math.inf
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
@@ -374,10 +395,31 @@ class NavApi(Node):
         pose.pose.position.y = tf.translation.y
         pose.pose.orientation = tf.rotation
         self._pose_pub.publish(pose)
+        self._remember_pose(tf)
         if self._station_active and self._goal is not None:
             self._distance_pub.publish(Float32(data=math.hypot(
                 pose.pose.position.x-self._goal.pose.position.x,
                 pose.pose.position.y-self._goal.pose.position.y)))
+
+    def _remember_pose(self, tf) -> None:
+        if not self._pose_file:
+            return
+        q = tf.rotation
+        pose = (tf.translation.x, tf.translation.y,
+                math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
+        now = time.monotonic()
+        last = self._saved_pose
+        if last is not None and (now - self._saved_at < 1.0 or (
+                math.hypot(pose[0] - last[0], pose[1] - last[1]) < 0.01 and
+                abs(math.remainder(pose[2] - last[2], math.tau)) < math.radians(0.5))):
+            return
+        try:
+            save_pose(self._pose_file, self._map_yaml, *pose)
+        except OSError as exc:
+            self.get_logger().warning(f'could not save the pose to {self._pose_file}: {exc}',
+                                      throttle_duration_sec=30.0)
+            return
+        self._saved_pose, self._saved_at = pose, now
 
     # ---- what Nav2 is doing ----
 

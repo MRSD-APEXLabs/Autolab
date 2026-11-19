@@ -225,3 +225,25 @@ def test_make_msg_place_base():
 def test_place_base_watch_topic_and_params():
     assert STEPS['place_base']['watch_topic'] == 'behavior/place_base_object_status'
     assert STEPS['place_base']['required_params'] == []
+
+
+def test_manipulation_steps_stop_with_a_cancel_command():
+    from behavior_tree_msgs.msg import ManipulationCommand
+    for name in ('pick_base', 'place', 'pick', 'place_base'):
+        topic, msg = STEPS[name]['stop']()
+        assert topic == 'behavior/manipulation_command'
+        assert isinstance(msg, ManipulationCommand)
+        assert msg.type == 'cancel'
+
+
+def test_navigation_steps_stop_with_nav_cancel():
+    from std_msgs.msg import Empty
+    for name in ('go_to', 'home', 'go_to_pose'):
+        topic, msg = STEPS[name]['stop']()
+        assert topic == '/nav/cancel'
+        assert isinstance(msg, Empty)
+
+
+def test_lab_machine_and_wait_steps_have_no_stop():
+    for name in ('shaker', 'ot2', 'wait'):
+        assert STEPS[name].get('stop') is None

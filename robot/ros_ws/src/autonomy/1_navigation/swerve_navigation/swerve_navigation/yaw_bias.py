@@ -27,7 +27,7 @@ class YawBiasConfig:
             raise ValueError('yaw bias parameters must be finite')
         if max(abs(self.vx_gain), abs(self.vy_gain)) > 1.0:
             raise ValueError('yaw bias coupling gain must be within +/-1 rad/m')
-        if not 0 < self.gain <= 1 or not 0 < self.max_correction <= 0.15:
+        if not 0 < self.gain <= 1 or not 0 < self.max_correction <= 0.30:
             raise ValueError('yaw bias gain/correction outside allowed bounds')
         if not 0.05 <= self.min_speed <= self.model_speed <= self.max_speed <= 0.6:
             raise ValueError('invalid yaw bias speed envelope')
@@ -105,12 +105,17 @@ class StationHeadingHold:
 
     Reference is continuous odometry, so AMCL corrections do not rotate the base.
     Commanded AND measured translation are required for any angular correction.
+    Active up to the fitted envelope's max_speed: the station back-out and the move
+    to the docking start run at 0.30-0.40 m/s.
     """
 
-    def __init__(self, config, kp=1.5, kd=0.15):
+    def __init__(self, config, kp=1.5, kd=0.15, accel=None):
+        accel = config.correction_accel if accel is None else accel
         if not math.isfinite(kp) or not 0 < kp <= 3 or not math.isfinite(kd) or not 0 <= kd <= .5:
             raise ValueError('invalid station heading feedback gains')
-        self.config, self.kp, self.kd = config, kp, kd
+        if not math.isfinite(accel) or not 0 < accel <= 1:
+            raise ValueError('invalid station heading correction ramp')
+        self.config, self.kp, self.kd, self.accel = config, kp, kd, accel
         self.reset()
 
     def reset(self):
@@ -122,7 +127,7 @@ class StationHeadingHold:
         if not all(math.isfinite(v) for v in (vx, vy, yaw, measured_wz, measured_speed, now)):
             raise ValueError('nonfinite station heading input')
         speed = math.hypot(vx, vy)
-        if not .05 <= speed <= .18:
+        if not .05 <= speed <= self.config.max_speed:
             self.reset()
             return 0.0
         if target_yaw is not None:
@@ -144,6 +149,6 @@ class StationHeadingHold:
         target = -ff - self.kp * error - self.kd * measured_wz
         cap = min(c.max_correction, c.max_angular_speed)
         target = max(-cap, min(cap, target))
-        step = min(c.correction_accel, c.max_angular_accel) * dt
+        step = min(self.accel, c.max_angular_accel) * dt
         self.correction += max(-step, min(step, target - self.correction))
         return self.correction

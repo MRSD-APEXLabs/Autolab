@@ -3,3 +3,4 @@ install/
 log/
 cache/
 core.*
+nav_state/

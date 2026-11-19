@@ -67,6 +67,14 @@ docker exec -it autolab-robot-l4t-1 bash -lc 'export DISPLAY=:1 ROS_LOCALHOST_ON
 
 Always use `bash -lc`. Without it, the stack comes up on the wrong ROS domain and ignores every command.
 
+Controller startup now checks lifecycle state after each load/configure/activate request, including when a
+DDS service reply times out. It resumes from the observed state instead of loading an already-loaded controller.
+The planner starts only after the controller is active and its `follow_joint_trajectory` action server is available,
+followed by the existing 15-second planner delay. Startup fails after 60 seconds if readiness cannot be established;
+check the `start_trajectory_controller` logs for the failed transition. Rebuild `xarm_controller` and
+`xarm_moveit_config` in the container to install this change. This recovery does not clear arm faults or release
+ACT/SDK ownership.
+
 ## 5. Plan (Thor)
 
 ```bash

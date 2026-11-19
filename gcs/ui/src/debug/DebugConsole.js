@@ -6,6 +6,7 @@ import PerceptionPanel from './panels/PerceptionPanel';
 import ManipulationPanel from './panels/ManipulationPanel';
 import LabMachinePanel from './panels/LabMachinePanel';
 import AnomalyPanel from './panels/AnomalyPanel';
+import SequencePanel from './panels/SequencePanel';
 
 function ConnectionBanner() {
   const { connected } = useMqttContext();
@@ -25,6 +26,7 @@ export default function DebugConsole() {
           <h1 className="text-xl font-semibold text-gray-800">Debug / Testing Console</h1>
         </header>
         <main className="grid grid-cols-1 md:grid-cols-2 gap-4 px-6 pb-6">
+          <SequencePanel />
           <NavigationPanel />
           <PlanningPanel />
           <PerceptionPanel />

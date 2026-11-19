@@ -25,6 +25,9 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME trajectory_controller_startup
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_controller_startup.py)
   find_package(Threads REQUIRED)
   add_executable(test_sdk_command_gate test/test_sdk_command_gate.cpp)
   target_include_directories(test_sdk_command_gate PRIVATE include)
@@ -103,6 +106,9 @@ install(
   TARGETS uf_robot_hardware
   DESTINATION lib
 )
+
+install(PROGRAMS scripts/start_trajectory_controller.py
+  DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY
   launch

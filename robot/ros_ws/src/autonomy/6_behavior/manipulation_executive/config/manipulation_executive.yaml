@@ -12,6 +12,10 @@
     # so it is selected before every plan that reads them
     camera_select_service: /camera_hub/select_zedx
     camera_select_timeout_s: 45.0      # the ZED X takes ~6 s; the hub's own select_timeout is 30 s
+    # Switched ahead of time, without waiting, so the step that needs a camera finds it streaming:
+    # this wrist camera once the arm moves to the tag / plate (place, pick) and at the start of
+    # pick_base; camera_select_service as soon as a servo / ACT run succeeds
+    wrist_camera_select_service: /camera_hub/select_zedx_nano
 
     # Visual servo (7_manipulation visual_servoing, visual_servo_node — started by hand)
     servo_start_service: /visual_servo/start
