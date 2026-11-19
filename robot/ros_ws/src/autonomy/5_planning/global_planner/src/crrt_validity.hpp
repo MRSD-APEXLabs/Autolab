@@ -38,13 +38,26 @@ struct State {
     planning_scene::PlanningScenePtr padded;                   // child of `source`, arm links padded
 };
 
-static State& state() { static State s; return s; }
+// Per thread: the parallel search (crrt_parallel.hpp) gives each search thread a copy, padded scene made beforehand.
+static State& state() { static thread_local State s; return s; }
+
+// Make s.padded, the child of `scene` with every link the arm moves padded by s.margin.
+static void pad(State& s, const moveit::core::JointModelGroup* jmg, const planning_scene::PlanningScenePtr& scene)
+{
+    s.padded = scene->diff();
+    std::map<std::string, double> padding;
+    for (const auto* link : jmg->getUpdatedLinkModelsWithGeometry())
+        padding[link->getName()] = s.margin;
+    s.padded->getCollisionEnvNonConst()->setLinkPadding(padding);
+    s.source = scene.get();
+}
 
 struct Scope {
     Scope(double margin, std::vector<Eigen::Vector3d> anchors)
     {
         state() = State{margin, std::move(anchors), nullptr, nullptr};
     }
+    explicit Scope(State s) { state() = std::move(s); }
     ~Scope() { state() = State{}; }
     Scope(const Scope&) = delete;
     Scope& operator=(const Scope&) = delete;
@@ -69,14 +82,8 @@ static bool clear(const moveit::core::RobotState& rs,
     auto& s = state();
     if (s.margin <= 0.0 || in_approach_column(rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation()))
         return true;
-    if (!s.padded || s.source != scene.get()) {
-        s.padded = scene->diff();
-        std::map<std::string, double> padding;
-        for (const auto* link : jmg->getUpdatedLinkModelsWithGeometry())
-            padding[link->getName()] = s.margin;
-        s.padded->getCollisionEnvNonConst()->setLinkPadding(padding);
-        s.source = scene.get();
-    }
+    if (!s.padded || s.source != scene.get())
+        pad(s, jmg, scene);
     collision_detection::CollisionRequest req;
     collision_detection::CollisionResult  res;
     req.group_name = crrt_cfg::GROUP_NAME;
@@ -173,6 +180,63 @@ static double halton(int index, int base)
 }
 
 // ─────────────────────────────────────────────────────────────
+//  IK SOLVER PER THREAD
+//  The group's KDL solver is not safe to share between threads: its random restarts write a member
+//  RobotState. Each thread of the parallel search (crrt_parallel.hpp) sets its own solver here;
+//  unset, it is the group's own solver, through RobotState::setFromIK.
+// ─────────────────────────────────────────────────────────────
+namespace crrt_ik {
+
+static thread_local const kinematics::KinematicsBase* solver = nullptr;
+
+// RobotState::setFromIK(jmg, pose, timeout) for one pose of the solver's tip, with this thread's solver.
+static bool set_from_ik(moveit::core::RobotState& rs,
+                        const moveit::core::JointModelGroup* jmg,
+                        const geometry_msgs::msg::Pose& pose, double timeout)
+{
+    if (!solver) return rs.setFromIK(jmg, pose, timeout);
+
+    // The pose is in the model frame; the solver wants its base frame.
+    Eigen::Isometry3d target = Eigen::Translation3d(pose.position.x, pose.position.y, pose.position.z) *
+        Eigen::Quaterniond(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+    std::string base = solver->getBaseFrame();
+    if (!base.empty() && base[0] == '/') base = base.substr(1);
+    if (!moveit::core::Transforms::sameFrame(base, rs.getRobotModel()->getModelFrame())) {
+        const auto* base_link = rs.getLinkModel(base);
+        if (!base_link) return false;
+        target = rs.getGlobalLinkTransform(base_link).inverse() * target;
+    }
+    if (timeout < std::numeric_limits<double>::epsilon()) timeout = jmg->getDefaultIKTimeout();
+
+    const auto& bij = jmg->getKinematicsSolverJointBijection();
+    std::vector<double> values;
+    rs.copyJointGroupPositions(jmg, values);
+    std::vector<double> seed(bij.size());
+    for (size_t i = 0; i < bij.size(); ++i) seed[i] = values[bij[i]];
+
+    geometry_msgs::msg::Pose query;
+    query.position.x = target.translation().x();
+    query.position.y = target.translation().y();
+    query.position.z = target.translation().z();
+    const Eigen::Quaterniond q(target.rotation());
+    query.orientation.x = q.x();
+    query.orientation.y = q.y();
+    query.orientation.z = q.z();
+    query.orientation.w = q.w();
+
+    std::vector<double> ik_sol;
+    moveit_msgs::msg::MoveItErrorCodes error;
+    if (!solver->searchPositionIK(query, seed, timeout, std::vector<double>(), ik_sol, error))
+        return false;
+    std::vector<double> solution(bij.size());
+    for (size_t i = 0; i < bij.size(); ++i) solution[bij[i]] = ik_sol[i];
+    rs.setJointGroupPositions(jmg, solution);
+    return true;
+}
+
+} // namespace crrt_ik
+
+// ─────────────────────────────────────────────────────────────
 //  IK PROJECTION HELPERS
 // ─────────────────────────────────────────────────────────────
 
@@ -196,7 +260,7 @@ static bool project_to_ee_down(moveit::core::RobotState& rs,
     q.setRPY(0.0, 0.0, std::atan2(R(1, 0), R(0, 0)));
     pose.orientation = tf2::toMsg(q);
 
-    if (!rs.setFromIK(jmg, pose, 0.01)) return false;
+    if (!crrt_ik::set_from_ik(rs, jmg, pose, 0.01)) return false;
 
     rs.updateLinkTransforms();
     Eigen::Vector3d pos_after = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation();
@@ -219,7 +283,7 @@ static bool project_to_ee_down_sample(moveit::core::RobotState& rs,
     q.setRPY(0.0, 0.0, M_PI);
     pose.orientation = tf2::toMsg(q);
 
-    return rs.setFromIK(jmg, pose, 0.005);
+    return crrt_ik::set_from_ik(rs, jmg, pose, 0.005);
 }
 
 // ─────────────────────────────────────────────────────────────

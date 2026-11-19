@@ -13,7 +13,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <controller_manager_msgs/srv/switch_controller.hpp>
 #include <controller_manager_msgs/srv/list_controllers.hpp>
-#include "crrt_rrtstar.hpp"   // pulls in crrt_plan.hpp and all others transitively
+#include "crrt_parallel.hpp"  // pulls in crrt_rrtstar.hpp, crrt_plan.hpp and all others transitively
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -103,6 +103,8 @@ static constexpr double FALLBACK_LONG_TIME_SEC      = 10.0;  // ...each with thi
 static const std::array<std::array<double, 3>, 6> GOAL_NUDGES = {{
     {0.0, 0.0, 0.02}, {0.0, 0.0, 0.04},                                          // up
     {0.02, 0.0, 0.0}, {-0.02, 0.0, 0.0}, {0.0, 0.02, 0.0}, {0.0, -0.02, 0.0}}};  // around
+// The arm this close to the goal (joint space, rad) already counts as there: SUCCESS without moving.
+static constexpr double ALREADY_THERE_RAD = 0.01;
 
 
 
@@ -584,14 +586,15 @@ static std::optional<JointVec> solve_ik(
     return joint_values;
 }
 
-// The fallback ladder. The goal is q_goal (plan_home_offset), or the IK of pose_goal. In order:
+// The fallback ladder, one search after another (planners other than Informed RRT*; see find_plan).
+// The goal is q_goal (plan_home_offset), or the IK of pose_goal. In order:
 //   0. SAFETY_MARGIN_ATTEMPTS searches that keep SAFETY_MARGIN_M from the obstacles
 //   1. MAX_PLANNING_ATTEMPTS normal searches to the goal
 //   2. a fresh obstacle cloud (commands with opts.refresh_cloud), then FALLBACK_LONG_ATTEMPTS
 //      searches of FALLBACK_LONG_TIME_SEC each
 //   3. pose goals only: one normal search to the goal moved by each of GOAL_NUDGES
 // A start or goal in collision fails at once, without a search, so those cases stay quick.
-static std::optional<MotionPlan> find_plan(
+static std::optional<MotionPlan> find_plan_sequential(
     moveit::planning_interface::MoveGroupInterface &arm_group,
     rclcpp::Node::SharedPtr node,
     std::optional<JointVec> q_goal,
@@ -647,6 +650,130 @@ static std::optional<MotionPlan> find_plan(
     return std::nullopt;
 }
 
+// One stage of find_plan: the jobs searched at once (crrt_parallel::plan), each search at most time_sec.
+static crrt_parallel::Result search_parallel(
+    moveit::planning_interface::MoveGroupInterface &arm_group,
+    rclcpp::Node::SharedPtr node,
+    const std::vector<crrt_parallel::Job> &jobs, double time_sec, const PlanOptions &opts)
+{
+    std::optional<crrt_internal::ScopedSceneFreeze> scene_freeze;
+    if (opts.ignore_wellplate_link) {
+        // plan_wellplate is only sent for a pick, so the gripper is empty: wellplate_link (the held
+        // plate modelled on Finger_left_2) is not there and may overlap the octomap.
+        scene_freeze.emplace(node);
+        crrt_internal::frozen_scene()->getAllowedCollisionMatrixNonConst().setEntry("wellplate_link", "<octomap>", true);
+    }
+    return crrt_parallel::plan(arm_group, node, jobs, time_sec);
+}
+
+// The plan for a command: the goal is q_goal (plan_home_offset), or the IK of pose_goal. An empty
+// trajectory means the arm is already there (ALREADY_THERE_RAD). Every stage below runs its searches at
+// once, and takes the straight path or a kept path (an earlier execution, either direction) without
+// searching when it passes (crrt_parallel.hpp). The stages, in order:
+//   1. SAFETY_MARGIN_ATTEMPTS searches that keep SAFETY_MARGIN_M from the obstacles, with
+//      MAX_PLANNING_ATTEMPTS without it; a margin path found within PREFER_WAIT_SEC is preferred
+//   2. pose goals whose goal is invalid (or has no IK): one search to the goal moved by each of GOAL_NUDGES
+//   3. a fresh obstacle cloud (commands with opts.refresh_cloud), then FALLBACK_LONG_ATTEMPTS searches of
+//      FALLBACK_LONG_TIME_SEC to the goal and, for pose goals, one to each moved goal (unless stage 2 tried
+//      them on this same cloud); the goal itself is preferred
+// A start or goal in collision fails its stage at once, without a search.
+static std::optional<MotionPlan> find_plan(
+    moveit::planning_interface::MoveGroupInterface &arm_group,
+    rclcpp::Node::SharedPtr node,
+    std::optional<JointVec> q_goal,
+    const std::optional<geometry_msgs::msg::Pose> &pose_goal,
+    const PlanOptions &opts)
+{
+    crrt_internal::last_finished_path().clear();
+    if (pose_goal)
+        q_goal = solve_ik(arm_group, node, *pose_goal, true);
+
+    if (q_goal) {
+        if (auto current_state = arm_group.getCurrentState(5.0)) {
+            JointVec q_now;
+            current_state->copyJointGroupPositions(crrt_cfg::GROUP_NAME, q_now);
+            const double d = joint_dist(q_now, *q_goal);
+            if (d < ALREADY_THERE_RAD) {
+                RCLCPP_INFO(node->get_logger(), "[Path Planning] Already at the goal (%.3f rad away); not moving.", d);
+                MotionPlan no_motion;   // empty trajectory
+                return no_motion;
+            }
+        }
+    }
+    if (PLANNER != Planner::INFORMED_RRTSTAR)
+        return find_plan_sequential(arm_group, node, q_goal, pose_goal, opts);
+
+    // The moved goals (pose goals only), their IK solved when first needed.
+    std::optional<std::vector<crrt_parallel::Job>> nudged;
+    auto nudges = [&]() -> const std::vector<crrt_parallel::Job> & {
+        if (!nudged) {
+            nudged.emplace();
+            for (const auto &d : GOAL_NUDGES) {
+                geometry_msgs::msg::Pose p = *pose_goal;
+                p.position.x += d[0];
+                p.position.y += d[1];
+                p.position.z += d[2];
+                char label[96];
+                std::snprintf(label, sizeof label, "the goal moved by (%+.0f, %+.0f, %+.0f) mm",
+                              d[0] * 1000, d[1] * 1000, d[2] * 1000);
+                if (const auto q = solve_ik(arm_group, node, p, false))
+                    nudged->push_back({*q, 0.0, 1, label});
+            }
+        }
+        return *nudged;
+    };
+    auto planned = [&](const crrt_parallel::Result &r, const std::vector<crrt_parallel::Job> &jobs, size_t first_moved) {
+        if (r.plan && r.job >= first_moved)
+            RCLCPP_WARN(node->get_logger(), "[Fallback] Planned to %s, not the requested goal.", jobs[r.job].label.c_str());
+        return r.plan;
+    };
+
+    bool goal_invalid = !q_goal;   // no IK for the goal
+    if (q_goal) {
+        RCLCPP_INFO(node->get_logger(), "[Path Planning] Searching with a %.0f mm safety margin around the obstacles "
+                    "(%d searches) and without it (%d), at once.", crrt_cfg::SAFETY_MARGIN_M * 1000.0,
+                    crrt_cfg::SAFETY_MARGIN_ATTEMPTS, MAX_PLANNING_ATTEMPTS);
+        const std::vector<crrt_parallel::Job> jobs = {
+            {*q_goal, crrt_cfg::SAFETY_MARGIN_M, crrt_cfg::SAFETY_MARGIN_ATTEMPTS, "the goal, with the safety margin"},
+            {*q_goal, 0.0, MAX_PLANNING_ATTEMPTS, "the goal, without the safety margin"}};
+        const auto r = search_parallel(arm_group, node, jobs, crrt_cfg::RRTSTAR_TIME_SEC, opts);
+        if (r.plan && r.job == 1)
+            RCLCPP_WARN(node->get_logger(), "[Fallback] No path keeping the %.0f mm safety margin in time; planned without it.",
+                        crrt_cfg::SAFETY_MARGIN_M * 1000.0);
+        if (r.plan)
+            return r.plan;
+        goal_invalid = !r.start_invalid && !r.any_goal_valid;
+    }
+
+    bool nudges_tried = false;
+    if (pose_goal && goal_invalid && rclcpp::ok() && !nudges().empty()) {
+        RCLCPP_WARN(node->get_logger(), "[Fallback] The goal is invalid; trying %zu moved goals at once.", nudges().size());
+        nudges_tried = true;
+        if (auto plan = planned(search_parallel(arm_group, node, nudges(), crrt_cfg::RRTSTAR_TIME_SEC, opts), nudges(), 0))
+            return plan;
+    }
+
+    bool fresh_cloud = false;
+    if (q_goal && opts.refresh_cloud && rclcpp::ok()) {
+        RCLCPP_WARN(node->get_logger(), "[Fallback] Planning failed; taking a fresh obstacle cloud.");
+        opts.refresh_cloud();
+        fresh_cloud = true;
+    }
+    if (!rclcpp::ok())
+        return std::nullopt;
+    std::vector<crrt_parallel::Job> jobs;
+    if (q_goal)
+        jobs.push_back({*q_goal, 0.0, FALLBACK_LONG_ATTEMPTS, "the goal"});
+    const size_t first_moved = jobs.size();
+    if (pose_goal && (fresh_cloud || !nudges_tried))
+        jobs.insert(jobs.end(), nudges().begin(), nudges().end());
+    if (jobs.empty())
+        return std::nullopt;
+    RCLCPP_WARN(node->get_logger(), "[Fallback] Trying longer searches (%.0f s): %d to the goal, %zu to moved goals, at once.",
+                FALLBACK_LONG_TIME_SEC, q_goal ? FALLBACK_LONG_ATTEMPTS : 0, jobs.size() - first_moved);
+    return planned(search_parallel(arm_group, node, jobs, FALLBACK_LONG_TIME_SEC, opts), jobs, first_moved);
+}
+
 std::optional<MotionPlan> plan_and_publish_rrt(
     const std::string &task_type,
     const geometry_msgs::msg::Pose &target_pose,
@@ -691,6 +818,11 @@ std::optional<MotionPlan> plan_and_publish_rrt(
             return std::nullopt;
         }
         plan = std::move(*crrt_opt);
+        if (plan.trajectory_.joint_trajectory.points.empty())
+        {
+            RCLCPP_INFO(node->get_logger(), "[Path Planning] Already at the goal; nothing to execute.");
+            return plan;
+        }
 
         // ── Publish to RViz (like MoveIt Plan button) ─────────
         auto display_pub = node->create_publisher<moveit_msgs::msg::DisplayTrajectory>(
@@ -724,6 +856,7 @@ std::optional<MotionPlan> plan_and_publish_rrt(
         }
 
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Execution succeeded. Syncing state...");
+        crrt_parallel::remember(crrt_internal::last_finished_path());
         // ── Update start state for next planning stage ─────────
         rclcpp::sleep_for(std::chrono::milliseconds(500));
         arm_group.setStartStateToCurrentState();
@@ -1336,12 +1469,13 @@ int main(int argc, char *argv[])
                 // A joint goal: the fallbacks are the longer searches (no goal nudges, no cloud refresh).
                 auto rrt_plan_opt = find_plan(arm_group, node, home_offset_joints, std::nullopt, PlanOptions{});
 
-                if (rrt_plan_opt) {
+                if (rrt_plan_opt && !rrt_plan_opt->trajectory_.joint_trajectory.points.empty()) {
                     publish_state("EXECUTING");
                     if (arm_group.execute(*rrt_plan_opt) != moveit::core::MoveItErrorCode::SUCCESS) {
                         finish_plan(std::nullopt, "execution failed (not retried)");
                         continue;
                     }
+                    crrt_parallel::remember(crrt_internal::last_finished_path());
                 }
                 finish_plan(rrt_plan_opt);
             }

@@ -10,6 +10,7 @@
 #pragma once
 #include "crrt_plan.hpp"
 #include <Eigen/SVD>
+#include <atomic>
 
 struct RRTStarNode {
     JointVec         q;
@@ -87,9 +88,9 @@ struct InformedSampler {
 //  HELPERS
 // ─────────────────────────────────────────────────────────────
 
-// Why extensions get rejected; printed when the search finds no solution.
+// Why extensions get rejected; printed when the search finds no solution. Per thread (crrt_parallel.hpp).
 struct IrrtStats { int ik = 0, not_closer = 0, collision = 0, edge_ee_down = 0, edge_collision = 0; };
-static IrrtStats irrt_stats;
+static thread_local IrrtStats irrt_stats;
 
 // Walk from q_from toward q_to, at most eta in joint space, projecting each
 // STEP_SIZE step onto ee_down and collision-checking it — the same march as
@@ -186,6 +187,131 @@ static void reparent(std::vector<RRTStarNode>& tree, int child, int new_parent, 
 }
 
 // ─────────────────────────────────────────────────────────────
+//  ONE TREE
+//  Grows an Informed RRT* tree from q_start toward q_goal for at most time_sec
+//  (counted from t0) and max_iter iterations. With `refine` it keeps improving
+//  the first solution until the budget runs out (irrtstar_plan); without, it
+//  returns the first solution (the parallel search, crrt_parallel.hpp). It
+//  also stops, without a path, once *stop is true. `log` null: no messages.
+// ─────────────────────────────────────────────────────────────
+struct IrrtGrowth {
+    std::vector<JointVec> path;   // start ... goal; empty: no solution
+    double cost  = 0.0;
+    int    iter  = 0;
+    size_t nodes = 0;
+};
+
+static IrrtGrowth irrtstar_grow(
+    const JointVec& q_start, const JointVec& q_goal, double time_sec, int max_iter,
+    moveit::core::RobotState& rs,
+    const moveit::core::JointModelGroup* jmg,
+    const planning_scene::PlanningScenePtr& scene_snapshot,
+    const std::vector<std::pair<double,double>>& limits,
+    std::mt19937& rng, bool refine,
+    const std::atomic<bool>* stop,
+    const rclcpp::Logger* log,
+    std::chrono::steady_clock::time_point t0)
+{
+    const int dof = (int)limits.size();
+
+    std::vector<RRTStarNode> tree;
+    tree.push_back({q_start, -1, 0.0, {}});
+
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    InformedSampler sampler(q_start, q_goal);
+
+    int    goal_idx = -1;
+    double c_best   = std::numeric_limits<double>::infinity();
+    int    iter     = 0;
+
+    for (; iter < max_iter; ++iter)
+    {
+        if (stop && stop->load(std::memory_order_relaxed))
+            break;
+        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
+            > time_sec)
+            break;
+
+        // ── sample ──
+        JointVec q_rand = (goal_idx < 0 && unit(rng) < crrt_cfg::GOAL_BIAS)
+                        ? q_goal
+                        : sampler.sample(c_best, rng, limits);
+
+        // ── steer (projected) ──
+        const int ni = nearest_star(tree, q_rand);
+        auto q_new_opt = constrained_steer(tree[ni].q, q_rand, crrt_cfg::RRTSTAR_ETA,
+                                           rs, jmg, scene_snapshot);
+        if (!q_new_opt) continue;
+        const JointVec& q_new = *q_new_opt;
+        if (!edge_valid(tree[ni].q, q_new, rs, jmg, scene_snapshot)) continue;
+
+        // ── near set ──
+        const int    n = (int)tree.size();
+        const double r = std::min(crrt_cfg::RRTSTAR_ETA,
+                                  crrt_cfg::RRTSTAR_GAMMA * std::pow(std::log(n + 1.0) / (n + 1.0), 1.0 / dof));
+        std::vector<int> near;
+        for (int j = 0; j < n; ++j)
+            if (joint_dist(tree[j].q, q_new) <= r) near.push_back(j);
+
+        // ── choose parent ──
+        int    best_parent = ni;
+        double best_cost   = tree[ni].cost + joint_dist(tree[ni].q, q_new);
+        for (int j : near) {
+            if (j == ni) continue;
+            double c = tree[j].cost + joint_dist(tree[j].q, q_new);
+            if (c < best_cost && edge_valid(tree[j].q, q_new, rs, jmg, scene_snapshot)) {
+                best_cost = c; best_parent = j;
+            }
+        }
+        const int new_idx = n;
+        tree.push_back({q_new, best_parent, best_cost, {}});
+        tree[best_parent].children.push_back(new_idx);
+
+        // ── rewire ──
+        for (int j : near) {
+            if (j == best_parent) continue;
+            double c = best_cost + joint_dist(q_new, tree[j].q);
+            if (c < tree[j].cost && edge_valid(q_new, tree[j].q, rs, jmg, scene_snapshot))
+                reparent(tree, j, new_idx, c);
+        }
+
+        // ── try the goal ──
+        const double dg = joint_dist(q_new, q_goal);
+        if (dg <= crrt_cfg::RRTSTAR_ETA && edge_valid(q_new, q_goal, rs, jmg, scene_snapshot)) {
+            const double cg = best_cost + dg;
+            if (goal_idx < 0) {
+                goal_idx = (int)tree.size();
+                tree.push_back({q_goal, new_idx, cg, {}});
+                tree[new_idx].children.push_back(goal_idx);
+                if (log)
+                    RCLCPP_INFO(*log,
+                        "[IRRT*] First solution at iter %d: cost %.3f (%.2f s) — refining...",
+                        iter, cg,
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+            } else if (cg < tree[goal_idx].cost) {
+                reparent(tree, goal_idx, new_idx, cg);
+            }
+        }
+        if (goal_idx >= 0 && tree[goal_idx].cost < c_best - 1e-9) {
+            c_best = tree[goal_idx].cost;
+            if (log) RCLCPP_INFO(*log, "[IRRT*] Improved: cost %.3f at iter %d", c_best, iter);
+        }
+        if (goal_idx >= 0 && !refine)
+            break;
+    }
+
+    IrrtGrowth out;
+    out.iter  = iter;
+    out.nodes = tree.size();
+    if (goal_idx >= 0) {
+        out.cost = tree[goal_idx].cost;
+        for (int i = goal_idx; i >= 0; i = tree[i].parent) out.path.push_back(tree[i].q);
+        std::reverse(out.path.begin(), out.path.end());
+    }
+    return out;
+}
+
+// ─────────────────────────────────────────────────────────────
 //  INFORMED RRT*
 //  time_sec is the search budget; the iteration cap scales with it, so a
 //  longer budget is not cut short by RRTSTAR_MAX_ITER.
@@ -255,7 +381,6 @@ irrtstar_plan(
         const auto& bnd = j->getVariableBounds()[0];
         limits.push_back({bnd.min_position_, bnd.max_position_});
     }
-    const int dof = (int)limits.size();
 
     // Diagnostics: start orientation, and whether the straight start->goal segment passes edge_valid's checks.
     {
@@ -301,93 +426,16 @@ irrtstar_plan(
         "[IRRT*] Informed RRT* started (max %d iter / %.1f s, eta %.2f)...",
         max_iter, time_sec, crrt_cfg::RRTSTAR_ETA);
 
-    std::vector<RRTStarNode> tree;
-    tree.push_back({q_start, -1, 0.0, {}});
-
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<double> unit(0.0, 1.0);
-    InformedSampler sampler(q_start, q_goal);
+    const rclcpp::Logger log = node->get_logger();
+    IrrtGrowth growth = irrtstar_grow(q_start, q_goal, time_sec, max_iter, rs, jmg, scene_snapshot, limits,
+                                      rng, true, nullptr, &log, t0);
 
-    int    goal_idx = -1;
-    double c_best   = std::numeric_limits<double>::infinity();
-    int    iter     = 0;
-
-    for (; iter < max_iter; ++iter)
-    {
-        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
-            > time_sec)
-            break;
-
-        // ── sample ──
-        JointVec q_rand = (goal_idx < 0 && unit(rng) < crrt_cfg::GOAL_BIAS)
-                        ? q_goal
-                        : sampler.sample(c_best, rng, limits);
-
-        // ── steer (projected) ──
-        const int ni = nearest_star(tree, q_rand);
-        auto q_new_opt = constrained_steer(tree[ni].q, q_rand, crrt_cfg::RRTSTAR_ETA,
-                                           rs, jmg, scene_snapshot);
-        if (!q_new_opt) continue;
-        const JointVec& q_new = *q_new_opt;
-        if (!edge_valid(tree[ni].q, q_new, rs, jmg, scene_snapshot)) continue;
-
-        // ── near set ──
-        const int    n = (int)tree.size();
-        const double r = std::min(crrt_cfg::RRTSTAR_ETA,
-                                  crrt_cfg::RRTSTAR_GAMMA * std::pow(std::log(n + 1.0) / (n + 1.0), 1.0 / dof));
-        std::vector<int> near;
-        for (int j = 0; j < n; ++j)
-            if (joint_dist(tree[j].q, q_new) <= r) near.push_back(j);
-
-        // ── choose parent ──
-        int    best_parent = ni;
-        double best_cost   = tree[ni].cost + joint_dist(tree[ni].q, q_new);
-        for (int j : near) {
-            if (j == ni) continue;
-            double c = tree[j].cost + joint_dist(tree[j].q, q_new);
-            if (c < best_cost && edge_valid(tree[j].q, q_new, rs, jmg, scene_snapshot)) {
-                best_cost = c; best_parent = j;
-            }
-        }
-        const int new_idx = n;
-        tree.push_back({q_new, best_parent, best_cost, {}});
-        tree[best_parent].children.push_back(new_idx);
-
-        // ── rewire ──
-        for (int j : near) {
-            if (j == best_parent) continue;
-            double c = best_cost + joint_dist(q_new, tree[j].q);
-            if (c < tree[j].cost && edge_valid(q_new, tree[j].q, rs, jmg, scene_snapshot))
-                reparent(tree, j, new_idx, c);
-        }
-
-        // ── try the goal ──
-        const double dg = joint_dist(q_new, q_goal);
-        if (dg <= crrt_cfg::RRTSTAR_ETA && edge_valid(q_new, q_goal, rs, jmg, scene_snapshot)) {
-            const double cg = best_cost + dg;
-            if (goal_idx < 0) {
-                goal_idx = (int)tree.size();
-                tree.push_back({q_goal, new_idx, cg, {}});
-                tree[new_idx].children.push_back(goal_idx);
-                RCLCPP_INFO(node->get_logger(),
-                    "[IRRT*] First solution at iter %d: cost %.3f (%.2f s) — refining...",
-                    iter, cg,
-                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
-            } else if (cg < tree[goal_idx].cost) {
-                reparent(tree, goal_idx, new_idx, cg);
-            }
-        }
-        if (goal_idx >= 0 && tree[goal_idx].cost < c_best - 1e-9) {
-            c_best = tree[goal_idx].cost;
-            RCLCPP_INFO(node->get_logger(), "[IRRT*] Improved: cost %.3f at iter %d", c_best, iter);
-        }
-    }
-
-    if (goal_idx < 0) {
+    if (growth.path.empty()) {
         RCLCPP_WARN(node->get_logger(),
             "[IRRT*] No solution after %d iters, tree %zu nodes. Steer stopped by: IK %d, not closer %d, "
             "collision %d. Edges rejected: ee_down %d, collision %d.",
-            iter, tree.size(), irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
+            growth.iter, growth.nodes, irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
             irrt_stats.edge_ee_down, irrt_stats.edge_collision);
         return std::nullopt;
         /* Midpoint fallback disabled.
@@ -441,12 +489,8 @@ irrtstar_plan(
 
     RCLCPP_INFO(node->get_logger(),
         "[IRRT*] Search done: %d iters, %zu nodes, best cost %.3f (direct %.3f).",
-        iter, tree.size(), tree[goal_idx].cost, sampler.c_min);
+        growth.iter, growth.nodes, growth.cost, joint_dist(q_start, q_goal));
 
-    std::vector<JointVec> full_path;
-    for (int i = goal_idx; i >= 0; i = tree[i].parent) full_path.push_back(tree[i].q);
-    std::reverse(full_path.begin(), full_path.end());
-
-    return crrt_finish_path(std::move(full_path), q_start, q_goal, arm_group, node,
+    return crrt_finish_path(std::move(growth.path), q_start, q_goal, arm_group, node,
                             robot_model, jmg, joint_names, scene_snapshot, viz, t0);
 }

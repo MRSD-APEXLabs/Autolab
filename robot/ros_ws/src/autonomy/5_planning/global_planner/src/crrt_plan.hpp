@@ -735,7 +735,8 @@ crrt_finish_path(
     const std::vector<std::string>& joint_names,
     const planning_scene::PlanningScenePtr& scene_snapshot,
     crrt_viz::Viz& viz,
-    std::chrono::steady_clock::time_point t0)
+    std::chrono::steady_clock::time_point t0,
+    bool shortcut_path = true)   // false: a kept path (crrt_parallel), shortcut when it was first planned
 {
     // Normalize joint wrapping across the path
     for (size_t i = 1; i < full_path.size(); ++i) {
@@ -827,7 +828,9 @@ crrt_finish_path(
     }
 
     RCLCPP_INFO(node->get_logger(), "[CRRT] Raw path: %zu waypoints.", full_path.size());
-    {
+    if (!shortcut_path) {
+        RCLCPP_INFO(node->get_logger(), "[CRRT] Shortcut: skipped (a kept path, already shortcut).");
+    } else {
         const size_t n_raw = full_path.size();
         auto t_sc = std::chrono::steady_clock::now();
         shortcut(full_path, rs_check, jmg, scene_snapshot, crrt_cfg::SHORTCUT_ITERS);
@@ -919,6 +922,7 @@ crrt_finish_path(
         }
         */
     }
+    crrt_internal::last_finished_path() = full_path;
     // full_path = densify_path(full_path, 0.01);
     auto plan = build_plan(
         full_path,

@@ -11,6 +11,8 @@
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 #include <moveit/planning_scene/planning_scene.h>
 #include <moveit/collision_detection/collision_common.h>
+#include <moveit/transforms/transforms.h>
+#include <moveit/kinematics_base/kinematics_base.h>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -234,6 +236,14 @@ static planning_scene::PlanningScenePtr& frozen_scene()
 {
     static planning_scene::PlanningScenePtr s;
     return s;
+}
+
+// The waypoints (shortcut, before timing) of the last plan crrt_finish_path built. The path cache
+// (crrt_parallel.hpp) keeps them once that plan has executed.
+static std::vector<JointVec>& last_finished_path()
+{
+    static std::vector<JointVec> p;
+    return p;
 }
 
 static planning_scene::PlanningScenePtr snapshot_scene(rclcpp::Node::SharedPtr node)
