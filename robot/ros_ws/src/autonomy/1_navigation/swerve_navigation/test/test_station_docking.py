@@ -119,7 +119,8 @@ def mission(monkeypatch):
         approach_distance=.8, position_tolerance=.08, yaw_tolerance=.08,
         approach_yaw_tolerance=.10), '/staging.xml'
     m.keep_transit_heading = False
-    m.clients = {leg: Client() for leg in ('dock', 'undock', 'staging', 'align', 'stage_adjust', 'dock_align')}
+    m.clients = {leg: Client() for leg in ('dock', 'undock', 'staging', 'align', 'face', 'stage_adjust',
+                                           'dock_align')}
     # Existing tests retain coverage of the translation-only fallback. New
     # correction tests remove this override to exercise checked small turns.
     m._try_heading_correction = lambda *args: False
@@ -199,6 +200,72 @@ def test_swerve_transit_keeps_heading_then_aligns_once_for_the_station(mission):
     finish(m, 'align', (0., 1.2, math.pi/2))
     finish(m, 'dock', m.goal)
     assert m.state == 'arrived' and len(m.clients['align'].requests) == 1
+
+
+BEST = Path(__file__).resolve().parents[2] / 'navigation_bringup/maps/best.locations.yaml'
+
+
+@pytest.mark.parametrize('source,destination,turns', [
+    ('home', 'shaker', True), ('shaker', 'home', True),         # 0.73 m straight behind: the ~pi turn is needed anyway
+    ('home', 'OT-2', False), ('shaker', 'OT-2', False),         # behind, but facing it turns ~3 rad away and back
+    ('OT-2', 'home', False), ('OT-2', 'shaker', False)])        # ahead/beside: already drives forward
+@pytest.mark.parametrize('heading_error', [-.15, 0., .15])
+@pytest.mark.parametrize('lateral_error', [-.10, 0., .10])
+def test_face_first_only_where_the_hop_reverses_and_the_turn_is_on_the_way(
+        source, destination, turns, heading_error, lateral_error):
+    places = {n: (p['x'], p['y'], p['yaw']) for n, p in yaml.safe_load(BEST.read_text())['locations'].items()}
+    config = docking.load_docking_config(BEST)
+    x, y, yaw = docking.staging_pose(places[source], config.staging_distance)  # end of the back-out
+    # The real back-out ends a little off its line and heading (01:40 run: ~0.12 rad).
+    robot = (x - lateral_error * math.sin(yaw), y + lateral_error * math.cos(yaw), yaw + heading_error)
+    target = docking.staging_pose(places[destination], config.staging_distance)
+    turn = docking.facing_turn(robot, target, places[destination][2], config.position_tolerance)
+    assert (turn is not None) == turns
+    if turns:
+        heading = robot[2] + turn
+        dx, dy = target[0] - robot[0], target[1] - robot[1]
+        assert dx * math.cos(heading) + dy * math.sin(heading) == pytest.approx(math.hypot(dx, dy))
+        assert abs(docking.wrap(places[destination][2] - heading)) < .5  # little left for the align turn
+
+
+def test_face_first_turns_on_the_recorded_shaker_to_home_back_out_end():
+    # Map pose at the end of the 01:40 back-out, which reversed the whole 0.76 m hop at 0.10 m/s.
+    home = (0.224, -0.578, -1.3588)
+    assert docking.facing_turn((.204, .953, 1.621), docking.staging_pose(home, .8), home[2], .12) is not None
+
+
+FACING = (-3., .1, math.pi)  # its staging pose (-2.2, 0.1) is straight behind the end of a back-out from (0, 0, 0)
+
+
+def test_hop_behind_turns_first_then_drives_forward_and_skips_the_align_turn(mission):
+    m = mission
+    m.keep_transit_heading = True
+    m.node._places['C'] = FACING
+    m.start(FACING)
+    m.test_settle()
+    finish(m, 'undock', (-.8, 0., 0.))
+    assert m.state == 'face' and not m.clients['staging'].requests
+    turn = m.clients['face'].requests[-1][0].target_yaw
+    assert turn == pytest.approx(math.atan2(.1, -1.4))
+    finish(m, 'face', (-.8, 0., turn))
+    assert m.state == 'staging'
+    goal = place_of(m.clients['staging'].requests[-1][0].pose)
+    assert goal[:2] == pytest.approx((-2.2, .1)) and goal[2] == pytest.approx(turn)  # forward hop, heading kept
+    finish(m, 'staging', (-2.2, .1, turn))
+    assert m.state == 'dock' and not m.clients['align'].requests
+    finish(m, 'dock', FACING)
+    assert m.state == 'arrived' and len(m.clients['face'].requests) == 1
+
+
+def test_face_first_turn_needs_the_full_turning_disk(mission):
+    m = mission
+    m.keep_transit_heading = True
+    m.goal, m.is_station = FACING, True
+    m.node.robot = (-.8, 0., 0.)
+    obstacle(m.global_grid, -.35, .05)  # inside the turning disk, outside the footprint
+    m._travel()
+    assert m.state == 'staging' and not m.clients['face'].requests
+    assert place_of(m.clients['staging'].requests[-1][0].pose)[2] == pytest.approx(0.)
 
 
 def test_reported_29mm_0088rad_stage_error_trims_during_approach_without_spin(mission):
@@ -678,6 +745,7 @@ def test_short_dock_keeps_alignment_and_withdrawal_farther_from_table(mission):
     finish(m, 'align', (0., 1.2, math.pi/2))
     assert m.state == 'stage_adjust'
     goal = m.clients['stage_adjust'].requests[-1][0]
+    assert goal.controller_id == 'StagePath' and goal.goal_checker_id == 'dock_alignment_checker'
     assert goal.path.poses[-1].pose.position.y == pytest.approx(1.7)
     finish(m, 'stage_adjust', (0., 1.7, math.pi/2))
     goal = m.clients['dock'].requests[-1][0]
@@ -789,7 +857,7 @@ def test_recovery_never_reanchors_a_large_map_odom_disagreement(mission):
 
 def test_docking_config_rejects_turning_too_near_table_and_excessive_tolerance():
     for settings in ({'approach_distance': .2}, {'staging_distance': .4},
-                     {'position_tolerance': .3}, {'yaw_tolerance': .2}):
+                     {'position_tolerance': .3}, {'yaw_tolerance': .2}, {'speed': .41}):
         with pytest.raises(ValueError):
             docking.DockConfig(**settings)
 

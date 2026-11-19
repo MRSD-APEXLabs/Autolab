@@ -1,0 +1,6 @@
+{
+  "samples": 3833,
+  "steady_passes": [],
+  "candidate_bias_fit": null,
+  "limits": "Odometry-based estimate, not external ground truth or module calibration. The fit is diagnostic only; no compensation is applied."
+}

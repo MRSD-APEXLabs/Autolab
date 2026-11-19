@@ -155,7 +155,7 @@ if ((HARDWARE)); then
 ================================================================================================
   This ENABLES THE SWERVE DRIVETRAIN and THE ROBOT WILL MOVE BY ITSELF towards the goals it is
   given - from RViz, from a saved place, or from /nav/goal_pose and /nav/goal_location published
-  by the rest of the system (up to 0.90 m/s forward by default; nav_speed:=normal restores 0.45).  Keep the Xbox pad IN YOUR HAND:
+  by the rest of the system (up to 1.20 m/s forward by default; nav_speed:=normal restores 0.45).  Keep the Xbox pad IN YOUR HAND:
 
       B          E-STOP (latched)          Start   release it (LT released, sticks centred)
       hold LT    joystick OVERRIDES navigation     X       cancel the current goal

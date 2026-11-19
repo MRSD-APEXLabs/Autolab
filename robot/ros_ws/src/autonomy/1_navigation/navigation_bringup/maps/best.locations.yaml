@@ -10,7 +10,7 @@ docking:
   position_tolerance: 0.12
   yaw_tolerance: 0.12
   approach_yaw_tolerance: 0.12
-  speed: 0.10
+  speed: 0.40
 locations:
   OT-2:
     x: -0.535

@@ -1,7 +1,8 @@
 """Station arrival/departure through Nav2 actions with bounded fine correction.
 
 The saved pose faces into the station. NavigateToPose is used only at the open
-staging pose. DockPath / BackUp request translation without an in-place turn.
+staging pose. DockPath (the final park), StagePath (the move to the docking start)
+and BackUp request translation without an in-place turn.
 The bridge counters yaw drift while translating. Small stopped heading turns
 use a separate slow Spin action after checking the actual swept footprint.
 No direct /cmd_vel publisher: every action uses the existing smoother, collision
@@ -35,7 +36,7 @@ from .yaw_bias import MAX_STATION_YAW_ERROR
 class DockConfig:
     approach_distance: float = 0.3
     staging_distance: float = 0.8  # turns and withdrawal remain away from the table
-    speed: float = 0.10
+    speed: float = 0.10  # BackUp (back-out) speed; the final park speed is DockPath's in nav2_params.yaml
     lateral_tolerance: float = 0.05
     yaw_tolerance: float = 0.12
     approach_yaw_tolerance: float = 0.12  # never accept a heading that final verification rejects
@@ -52,8 +53,8 @@ class DockConfig:
             raise ValueError('docking staging_distance must be >= 0.5 m for turning clearance')
         if self.position_tolerance > 0.15:
             raise ValueError('docking position_tolerance must be <= 0.15 m')
-        if self.speed > 0.10:
-            raise ValueError('docking speed must be <= 0.10 m/s')
+        if self.speed > 0.40:
+            raise ValueError('docking (back-out) speed must be <= 0.40 m/s')
         if self.yaw_tolerance > 0.15 or self.lateral_tolerance > 0.10:
             raise ValueError('docking alignment tolerances are too large')
         if not self.yaw_tolerance <= self.approach_yaw_tolerance <= .12:
@@ -86,6 +87,28 @@ def line_errors(station, robot):
     return dx * c + dy * s, -dx * s + dy * c, wrap(robot[2] - station[2])
 
 
+# [rad] extra total rotation a face-first turn may add. 1 rad costs < 1 s of spin at 1.2 rad/s, far less than
+# reversing even 0.3 m at 0.10 m/s. home <-> shaker needs 0-0.4 (0.4 when the back-out ends a little off-line, run
+# 2026-11-19 01:40); facing the pose on the hops into OT-2 would add ~3 rad.
+FACE_MAX_EXTRA_TURN = 1.0
+
+
+def facing_turn(robot, target, station_yaw, min_distance):
+    """Turn [rad] that points the body at a staging pose BEHIND the robot, or None.
+
+    A keep-heading hop to a pose behind reverses at FollowPath vx_min (0.10 m/s; the lidar is blind behind).
+    Facing it first lets the hop drive forward with the lidar ahead. Only where that turn is on the way to the
+    station heading (home <-> shaker), not where it turns away and back (into OT-2), which would be slower.
+    """
+    dx, dy = target[0] - robot[0], target[1] - robot[1]
+    if (math.hypot(dx, dy) <= min_distance or
+            dx * math.cos(robot[2]) + dy * math.sin(robot[2]) >= 0):
+        return None
+    face = wrap(math.atan2(dy, dx) - robot[2])
+    extra = abs(face) + abs(wrap(station_yaw - robot[2] - face)) - abs(wrap(station_yaw - robot[2]))
+    return face if extra <= FACE_MAX_EXTRA_TURN else None
+
+
 def map_goal_in_odom(robot, odom, goal):
     yaw = odom[2] - robot[2]
     dx, dy = goal[0] - robot[0], goal[1] - robot[1]
@@ -98,7 +121,8 @@ def docking_marker(state, name, goal, robot, tolerance, held, reason, frame, sta
     """The full mission status, independent of Nav2's staging sub-goal status."""
     distance = math.hypot(robot[0]-goal[0], robot[1]-goal[1]) if robot and goal else None
     verified = state == 'arrived' and distance is not None and distance <= tolerance and held
-    phases = {'idle': 'Ready', 'preparing': 'Preparing', 'staging': 'Moving to approach position',
+    phases = {'idle': 'Ready', 'preparing': 'Preparing', 'face': 'Turning toward approach position',
+              'staging': 'Moving to approach position',
               'dock_align': 'Fine heading correction', 'align': 'Aligning away from the table', 'stage_adjust': 'Moving to docking start',
               'dock': 'Parking', 'undock': 'Backing out', 'settling': 'Checking stopped pose',
               'stopped': 'STOPPED - parking incomplete', 'undocked': 'Undocked',
@@ -201,6 +225,7 @@ class StationDocking:
             'stage_adjust': ActionClient(node, FollowPath, 'follow_path'),
             'dock_align': ActionClient(node, Spin, 'dock_spin'),
             'align': ActionClient(node, Spin, 'spin'),
+            'face': ActionClient(node, Spin, 'spin'),
             'undock': ActionClient(node, BackUp, 'backup'),
         }
         self.cancel_clients = [node.create_client(CancelGoal, name + '/_action/cancel_goal')
@@ -293,7 +318,8 @@ class StationDocking:
             elif self.state == 'undock':
                 target = self.odom_endpoint[2]
             self.heading_target_pub.publish(Float64(data=float(target) if target is not None else math.nan))
-        self.rotation_lock.publish(Bool(data=self.state not in ('idle', 'staging', 'align', 'dock_align', 'undocked')))
+        self.rotation_lock.publish(Bool(data=self.state not in ('idle', 'face', 'staging', 'align', 'dock_align',
+                                                                'undocked')))
 
     def _local_map(self, msg):
         self.local_grid, self.local_time = msg, time.monotonic()
@@ -490,7 +516,7 @@ class StationDocking:
         self.state = 'arrived'
         self._report('parked; final pose verified')
 
-    def _travel(self):
+    def _travel(self, face=True):
         if self.goal is None:
             self.state = 'undocked'
             self._report('undocked; stopped in the open staging area')
@@ -501,6 +527,14 @@ class StationDocking:
         if robot is None:
             self.cancel('fresh transit pose unavailable')
             return
+        if face and self.is_station and self.keep_transit_heading:
+            turn = facing_turn(robot, target, self.goal[2], self.config.position_tolerance)
+            if turn is not None and footprint_clear(self.global_grid, robot, self.config.footprint_half_size,
+                                                    turning=True):
+                goal = Spin.Goal(target_yaw=turn)
+                goal.time_allowance.sec = 30
+                self._send('face', goal)
+                return
         goal = NavigateToPose.Goal(pose=goal_message(
             ((target[0], target[1], robot[2])
              if self.is_station and self.keep_transit_heading else target),
@@ -537,7 +571,7 @@ class StationDocking:
         self.odom_goal_yaw = self.dock_goal_odom[2]
         self._send('dock', self._path_goal(robot, self.goal))
 
-    def _path_goal(self, start, end, checker='dock_position_checker'):
+    def _path_goal(self, start, end, checker='dock_position_checker', controller='DockPath'):
         # Zero stamps use the current map->odom transform throughout the approach.
         # This path bypasses the normal rotation shim and all recovery behaviors.
         path = Path()
@@ -547,7 +581,7 @@ class StationDocking:
                                    start[1] + (end[1] - start[1]) * i / count,
                                    end[2]), self.node._frame, None)
                       for i in range(count + 1)]
-        return FollowPath.Goal(path=path, controller_id='DockPath',
+        return FollowPath.Goal(path=path, controller_id=controller,
                                goal_checker_id=checker)
 
     def _align(self):
@@ -594,7 +628,7 @@ class StationDocking:
             self.cancel('fresh odometry transform unavailable at staging')
             return
         self.stage_goal_odom = map_goal_in_odom(robot, self.odom_line, stage)
-        self._send('stage_adjust', self._path_goal(robot, stage, 'dock_alignment_checker'))
+        self._send('stage_adjust', self._path_goal(robot, stage, 'dock_alignment_checker', 'StagePath'))
 
     def _straight(self, leg, distance):
         self.odom_line = self.node._robot_place('odom')
@@ -617,6 +651,7 @@ class StationDocking:
         self.deadline = time.monotonic() + (180.0 if leg == 'staging' else 60.0)
         message = ('navigate to open space' if leg == 'staging' else
                    'rotate only in the checked open staging area' if leg == 'align' else
+                   'turn toward the approach position in checked turning space' if leg == 'face' else
                    'slow bounded heading correction in checked clearance' if leg == 'dock_align' else
                    'translate while holding heading; no in-place turn')
         self._report(f'{leg}: {message}')
@@ -765,6 +800,8 @@ class StationDocking:
             self.after_correction()
         elif leg == 'undock':
             self._travel()
+        elif leg == 'face':
+            self._travel(face=False)
         elif leg == 'staging' and self.is_station:
             self._align()
         elif leg == 'align':
