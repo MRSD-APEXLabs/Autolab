@@ -186,4 +186,6 @@ fi
 HW=false; ((HARDWARE)) && HW=true
 echo
 echo "Starting: ros2 launch navigation_bringup navigation.launch.py hardware:=$HW ${LAUNCH_ARGS[*]}"
-exec ros2 launch navigation_bringup navigation.launch.py "hardware:=$HW" "${LAUNCH_ARGS[@]}"
+# ros2_launch.py = `ros2 launch` that a double Ctrl-C cannot leave hanging (see that file).
+exec python3 "$SRC_DIR/../../robot_bringup/scripts/ros2_launch.py" navigation_bringup navigation.launch.py \
+  "hardware:=$HW" "${LAUNCH_ARGS[@]}"

@@ -23,7 +23,71 @@ static bool satisfies_ee_down(moveit::core::RobotState& rs)
 }
 
 // ─────────────────────────────────────────────────────────────
-//  FULL VALIDITY CHECK  (constraint + collision)
+//  SAFETY MARGIN
+//  While a crrt_clearance::Scope is alive, is_valid() also requires every link the arm moves to be
+//  `margin` m clear of the world (the octomap), unless the end effector is in the approach column
+//  above the start or the goal (crrt_cfg::APPROACH_*). There only the plain collision check applies,
+//  so poses close to a surface stay reachable, entered and left from above.
+// ─────────────────────────────────────────────────────────────
+namespace crrt_clearance {
+
+struct State {
+    double margin = 0.0;                                       // 0: no margin
+    std::vector<Eigen::Vector3d> anchors;                      // end-effector positions of the start and goal
+    const planning_scene::PlanningScene* source = nullptr;     // the scene `padded` was made from
+    planning_scene::PlanningScenePtr padded;                   // child of `source`, arm links padded
+};
+
+static State& state() { static State s; return s; }
+
+struct Scope {
+    Scope(double margin, std::vector<Eigen::Vector3d> anchors)
+    {
+        state() = State{margin, std::move(anchors), nullptr, nullptr};
+    }
+    ~Scope() { state() = State{}; }
+    Scope(const Scope&) = delete;
+    Scope& operator=(const Scope&) = delete;
+};
+
+static bool in_approach_column(const Eigen::Vector3d& ee)
+{
+    for (const auto& a : state().anchors) {
+        const double up = ee.z() - a.z();
+        if (std::hypot(ee.x() - a.x(), ee.y() - a.y()) <= crrt_cfg::APPROACH_RADIUS_M &&
+            up >= -crrt_cfg::APPROACH_BELOW_M && up <= crrt_cfg::APPROACH_HEIGHT_M)
+            return true;
+    }
+    return false;
+}
+
+// Whether rs (link transforms up to date) keeps the margin. A padded child of `scene` is made once per scene.
+static bool clear(const moveit::core::RobotState& rs,
+                  const moveit::core::JointModelGroup* jmg,
+                  const planning_scene::PlanningScenePtr& scene)
+{
+    auto& s = state();
+    if (s.margin <= 0.0 || in_approach_column(rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation()))
+        return true;
+    if (!s.padded || s.source != scene.get()) {
+        s.padded = scene->diff();
+        std::map<std::string, double> padding;
+        for (const auto* link : jmg->getUpdatedLinkModelsWithGeometry())
+            padding[link->getName()] = s.margin;
+        s.padded->getCollisionEnvNonConst()->setLinkPadding(padding);
+        s.source = scene.get();
+    }
+    collision_detection::CollisionRequest req;
+    collision_detection::CollisionResult  res;
+    req.group_name = crrt_cfg::GROUP_NAME;
+    s.padded->getCollisionEnv()->checkRobotCollision(req, res, rs, scene->getAllowedCollisionMatrix());
+    return !res.collision;
+}
+
+} // namespace crrt_clearance
+
+// ─────────────────────────────────────────────────────────────
+//  FULL VALIDITY CHECK  (constraint + collision [+ safety margin])
 //  Uses a pre-snapshotted scene — no lock acquired here.
 // ─────────────────────────────────────────────────────────────
 static bool is_valid(const JointVec& q,
@@ -42,7 +106,7 @@ static bool is_valid(const JointVec& q,
     req.contacts   = false;
     scene->checkCollision(req, res, rs);
 
-    return !res.collision;
+    return !res.collision && crrt_clearance::clear(rs, jmg, scene);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -117,14 +181,19 @@ static double halton(int index, int base)
 static bool project_to_ee_down(moveit::core::RobotState& rs,
                                 const moveit::core::JointModelGroup* jmg)
 {
-    Eigen::Vector3d pos_before = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation();
+    const Eigen::Isometry3d ee_before = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK);
+    Eigen::Vector3d pos_before = ee_before.translation();
 
     geometry_msgs::msg::Pose pose;
     pose.position.x = pos_before.x();
     pose.position.y = pos_before.y();
     pose.position.z = pos_before.z();
+    // Level roll and pitch but keep the step's own yaw: ee_down leaves the wrist free about z, and
+    // forcing yaw = pi here kept every tree node at pi, so a goal at another yaw (plan_april_<id> /
+    // plan_wellplate use APPROACH_YAW) was never within reach of the tree.
+    const Eigen::Matrix3d R = ee_before.rotation();
     tf2::Quaternion q;
-    q.setRPY(0.0, 0.0, M_PI);
+    q.setRPY(0.0, 0.0, std::atan2(R(1, 0), R(0, 0)));
     pose.orientation = tf2::toMsg(q);
 
     if (!rs.setFromIK(jmg, pose, 0.01)) return false;
@@ -328,11 +397,13 @@ build_plan(const std::vector<JointVec>& waypoints,
         0.05   // resample_dt (output waypoint spacing in seconds)
     );
 
-    const double vel_scale   = 0.08;  // was 0.15
-    const double accel_scale = 0.05;  // was 0.10
+    // 3x the previous 0.08 / 0.05: velocity x3 and acceleration x9 (= 3^2) make TOTG's trajectory exactly
+    // 3x faster (1/3 of the duration, same path). Peak: 0.75 rad/s (43 deg/s) per arm joint, 0.45 rad/s^2.
+    const double vel_scale   = 0.24;  // was 0.08 (before that 0.15)
+    const double accel_scale = 0.45;  // was 0.05 (before that 0.10)
 
     if (!totg.computeTimeStamps(rt, vel_scale, accel_scale)) {
-        RCLCPP_ERROR(rclcpp::get_logger("build_plan"),
+        RCLCPP_WARN(rclcpp::get_logger("build_plan"),
             "[build_plan] TOTG retiming failed — falling back to naive timing.");
         // fallback: build naive timed plan rather than returning empty
         trajectory_msgs::msg::JointTrajectory jt;

@@ -39,11 +39,11 @@ prm_plan_from_to(
     rs.setToDefaultValues();
 
     if (!is_collision_free(q_from, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[PRM] from state is in collision.");
+        RCLCPP_WARN(node->get_logger(), "[PRM] from state is in collision.");
         return std::nullopt;
     }
     if (!is_valid(q_to, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[PRM] to state is invalid.");
+        RCLCPP_WARN(node->get_logger(), "[PRM] to state is invalid.");
         return std::nullopt;
     }
 
@@ -190,12 +190,12 @@ prm_plan(
 
     // Start: collision only — arm may not satisfy ee_down at rest
     if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[PRM] Start state is in collision.");
+        RCLCPP_WARN(node->get_logger(), "[PRM] Start state is in collision.");
         return std::nullopt;
     }
     // Goal: full validation including ee_down
     if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[PRM] Goal state is invalid (collision or ee_down violated).");
         return std::nullopt;
     }
@@ -211,7 +211,7 @@ prm_plan(
         build_prm_roadmap(arm_group, node);
         roadmap = load_prm_roadmap(node, dof);
         if (roadmap.empty()) {
-            RCLCPP_ERROR(node->get_logger(), "[PRM] Roadmap build failed.");
+            RCLCPP_WARN(node->get_logger(), "[PRM] Roadmap build failed.");
             return std::nullopt;
         }
     }
@@ -257,7 +257,7 @@ prm_plan(
     }
 
     if (roadmap[START_ID].neighbors.empty() || roadmap[GOAL_ID].neighbors.empty()) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[PRM] Could not connect start/goal to roadmap — aborting.");
         return std::nullopt;
     }
@@ -295,14 +295,14 @@ prm_plan(
         RCLCPP_INFO(node->get_logger(), "[PRM] Stage 1: start -> midpoint...");
         auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
         if (!plan1) {
-            RCLCPP_ERROR(node->get_logger(), "[PRM] Stage 1 failed.");
+            RCLCPP_WARN(node->get_logger(), "[PRM] Stage 1 failed.");
             return std::nullopt;
         }
 
         RCLCPP_INFO(node->get_logger(), "[PRM] Stage 2: midpoint -> goal...");
         auto plan2 = prm_plan_from_to(arm_group, node, best_mid, q_goal);
         if (!plan2) {
-            RCLCPP_ERROR(node->get_logger(), "[PRM] Stage 2 failed.");
+            RCLCPP_WARN(node->get_logger(), "[PRM] Stage 2 failed.");
             return std::nullopt;
         }
 
@@ -376,7 +376,7 @@ prm_plan(
 
         // Check constraint separately
         if (!satisfies_ee_down(rs_check)) {
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[PRM] Waypoint %d FAILED ee_down constraint.", wp_idx);
             return std::nullopt;
         }
@@ -397,19 +397,19 @@ prm_plan(
                     key.second.find("octomap") != std::string::npos)
                     has_octomap = true;
             }
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[PRM] Waypoint %d FAILED collision  octomap=%s  pairs: %s",
                 wp_idx, has_octomap ? "YES" : "NO", pairs.c_str());
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                     "[PRM] Waypoint %d angles: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
                     wp_idx,
                     q[0], q[1], q[2], q[3], q[4], q[5]);
             RCLCPP_WARN(node->get_logger(),
                     "[PRM] Path validation failed — trying midpoint fallback...");
                 auto plan1 = prm_plan_from_to(arm_group, node, q_start, best_mid);
-                if (!plan1) { RCLCPP_ERROR(node->get_logger(), "[PRM] Midpoint Stage 1 failed."); return std::nullopt; }
+                if (!plan1) { RCLCPP_WARN(node->get_logger(), "[PRM] Midpoint Stage 1 failed."); return std::nullopt; }
                 auto plan2 = prm_plan_from_to(arm_group, node, best_mid, q_goal);
-                if (!plan2) { RCLCPP_ERROR(node->get_logger(), "[PRM] Midpoint Stage 2 failed."); return std::nullopt; }
+                if (!plan2) { RCLCPP_WARN(node->get_logger(), "[PRM] Midpoint Stage 2 failed."); return std::nullopt; }
                 std::vector<JointVec> stitched;
                 for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
                     stitched.push_back(pt.positions);
@@ -525,7 +525,7 @@ std::vector<JointVec> load_manual_library(rclcpp::Node::SharedPtr node,
             library.emplace_back(q.begin(), q.begin() + expected_dof);
         }
     } catch (const std::exception& e) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[CRRT] Failed to parse manual waypoints: %s", e.what());
         library.clear();
         return library;
@@ -573,7 +573,7 @@ crrt_plan_from_to(
     rs.setToDefaultValues();
 
     if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[CRRT] from_to: goal invalid.");
+        RCLCPP_WARN(node->get_logger(), "[CRRT] from_to: goal invalid.");
         return std::nullopt;
     }
 
@@ -759,7 +759,7 @@ crrt_finish_path(
 
         // Check constraint separately
         if (!satisfies_ee_down(rs_check)) {
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[CRRT] Waypoint %d FAILED ee_down constraint.", wp_idx);
             return std::nullopt;
         }
@@ -780,10 +780,10 @@ crrt_finish_path(
                     key.second.find("octomap") != std::string::npos)
                     has_octomap = true;
             }
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[CRRT] Waypoint %d FAILED collision  octomap=%s  pairs: %s",
                 wp_idx, has_octomap ? "YES" : "NO", pairs.c_str());
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[CRRT] Waypoint %d angles: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]",
                 wp_idx, q[0], q[1], q[2], q[3], q[4], q[5]);
             return std::nullopt;
@@ -792,11 +792,11 @@ crrt_finish_path(
                 "[CRRT] Path validation failed — trying midpoint fallback...");
 
             const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
-            if (!q_mid) { RCLCPP_ERROR(node->get_logger(), "[CRRT] No IK for the midpoint."); return std::nullopt; }
+            if (!q_mid) { RCLCPP_WARN(node->get_logger(), "[CRRT] No IK for the midpoint."); return std::nullopt; }
             auto plan1 = crrt_plan_from_to(arm_group, node, q_start, *q_mid);
-            if (!plan1) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 1 failed."); return std::nullopt; }
+            if (!plan1) { RCLCPP_WARN(node->get_logger(), "[CRRT] Midpoint Stage 1 failed."); return std::nullopt; }
             auto plan2 = crrt_plan_from_to(arm_group, node, *q_mid, q_goal);
-            if (!plan2) { RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 2 failed."); return std::nullopt; }
+            if (!plan2) { RCLCPP_WARN(node->get_logger(), "[CRRT] Midpoint Stage 2 failed."); return std::nullopt; }
 
             std::vector<JointVec> stitched;
             for (const auto& pt : plan1->trajectory_.joint_trajectory.points)
@@ -943,7 +943,7 @@ crrt_plan(
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[CRRT] JMG '%s' not found.", crrt_cfg::GROUP_NAME.c_str());
         return std::nullopt;
     }
@@ -951,7 +951,7 @@ crrt_plan(
 
     auto current_state = arm_group.getCurrentState(5.0);
     if (!current_state) {
-        RCLCPP_ERROR(node->get_logger(), "[CRRT] getCurrentState() failed.");
+        RCLCPP_WARN(node->get_logger(), "[CRRT] getCurrentState() failed.");
         return std::nullopt;
     }
     JointVec q_start;
@@ -969,12 +969,12 @@ crrt_plan(
 
     // Start: collision only — arm may not satisfy ee_down at rest
     if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[CRRT] Start state is in collision.");
+        RCLCPP_WARN(node->get_logger(), "[CRRT] Start state is in collision.");
         return std::nullopt;
     }
     // Goal: full validation including ee_down
     if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[CRRT] Goal violates constraint or is in collision — aborting.");
         return std::nullopt;
     }
@@ -1057,14 +1057,14 @@ crrt_plan(
         RCLCPP_INFO(node->get_logger(), "[CRRT] Stage 1: start -> midpoint...");
         auto plan1 = crrt_plan_from_to(arm_group, node, q_start, q_mid);
         if (!plan1) {
-            RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 1 failed.");
+            RCLCPP_WARN(node->get_logger(), "[CRRT] Midpoint Stage 1 failed.");
             return std::nullopt;
         }
 
         RCLCPP_INFO(node->get_logger(), "[CRRT] Stage 2: midpoint -> goal...");
         auto plan2 = crrt_plan_from_to(arm_group, node, q_mid, q_goal);
         if (!plan2) {
-            RCLCPP_ERROR(node->get_logger(), "[CRRT] Midpoint Stage 2 failed.");
+            RCLCPP_WARN(node->get_logger(), "[CRRT] Midpoint Stage 2 failed.");
             return std::nullopt;
         }
 

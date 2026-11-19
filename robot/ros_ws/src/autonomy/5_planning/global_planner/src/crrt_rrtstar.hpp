@@ -122,7 +122,7 @@ static std::optional<JointVec> constrained_steer(
         collision_detection::CollisionResult  res;
         req.group_name = crrt_cfg::GROUP_NAME;
         scene->checkCollision(req, res, rs);
-        if (res.collision) { ++irrt_stats.collision; break; }
+        if (res.collision || !crrt_clearance::clear(rs, jmg, scene)) { ++irrt_stats.collision; break; }
 
         q_curr = q_proj;
         d_curr = d_next;
@@ -187,19 +187,24 @@ static void reparent(std::vector<RRTStarNode>& tree, int child, int new_parent, 
 
 // ─────────────────────────────────────────────────────────────
 //  INFORMED RRT*
+//  time_sec is the search budget; the iteration cap scales with it, so a
+//  longer budget is not cut short by RRTSTAR_MAX_ITER.
 // ─────────────────────────────────────────────────────────────
 std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
 irrtstar_plan(
     moveit::planning_interface::MoveGroupInterface& arm_group,
     rclcpp::Node::SharedPtr node,
-    const std::vector<double>& q_goal)
+    const std::vector<double>& q_goal,
+    double time_sec = crrt_cfg::RRTSTAR_TIME_SEC)
 {
     auto t0 = std::chrono::steady_clock::now();
+    const int max_iter = static_cast<int>(
+        crrt_cfg::RRTSTAR_MAX_ITER * std::max(1.0, time_sec / crrt_cfg::RRTSTAR_TIME_SEC));
 
     auto robot_model = arm_group.getRobotModel();
     const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
     if (!jmg) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[IRRT*] JMG '%s' not found.", crrt_cfg::GROUP_NAME.c_str());
         return std::nullopt;
     }
@@ -207,7 +212,7 @@ irrtstar_plan(
 
     auto current_state = arm_group.getCurrentState(5.0);
     if (!current_state) {
-        RCLCPP_ERROR(node->get_logger(), "[IRRT*] getCurrentState() failed.");
+        RCLCPP_WARN(node->get_logger(), "[IRRT*] getCurrentState() failed.");
         return std::nullopt;
     }
     JointVec q_start;
@@ -223,7 +228,7 @@ irrtstar_plan(
 
     // Start: collision only — arm may not satisfy ee_down at rest
     if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[IRRT*] Start state is in collision.");
+        RCLCPP_WARN(node->get_logger(), "[IRRT*] Start state is in collision.");
         return std::nullopt;
     }
     // Goal: full validation including ee_down
@@ -239,7 +244,7 @@ irrtstar_plan(
         scene_snapshot->checkCollision(req, res, rs);
         std::string pairs;
         for (const auto& [key, _] : res.contacts) pairs += key.first + " <-> " + key.second + "  ";
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[IRRT*] Goal invalid — ee_down=%s, collision=%s %s",
             satisfies_ee_down(rs) ? "ok" : "FAIL", res.collision ? "YES:" : "NO", pairs.c_str());
         return std::nullopt;
@@ -277,7 +282,8 @@ irrtstar_plan(
                 req.max_contacts = 10;
                 req.max_contacts_per_pair = 1;
                 scene_snapshot->checkCollision(req, res, rs);
-                straight = "invalid at " + std::to_string(pct) + "%: collision";
+                straight = "invalid at " + std::to_string(pct) + "%: " +
+                           (res.collision ? "collision" : "within the safety margin");
                 for (const auto& [key, _] : res.contacts) straight += " [" + key.first + " <-> " + key.second + "]";
             }
             break;
@@ -293,7 +299,7 @@ irrtstar_plan(
 
     RCLCPP_INFO(node->get_logger(),
         "[IRRT*] Informed RRT* started (max %d iter / %.1f s, eta %.2f)...",
-        crrt_cfg::RRTSTAR_MAX_ITER, crrt_cfg::RRTSTAR_TIME_SEC, crrt_cfg::RRTSTAR_ETA);
+        max_iter, time_sec, crrt_cfg::RRTSTAR_ETA);
 
     std::vector<RRTStarNode> tree;
     tree.push_back({q_start, -1, 0.0, {}});
@@ -306,10 +312,10 @@ irrtstar_plan(
     double c_best   = std::numeric_limits<double>::infinity();
     int    iter     = 0;
 
-    for (; iter < crrt_cfg::RRTSTAR_MAX_ITER; ++iter)
+    for (; iter < max_iter; ++iter)
     {
         if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
-            > crrt_cfg::RRTSTAR_TIME_SEC)
+            > time_sec)
             break;
 
         // ── sample ──
@@ -378,7 +384,7 @@ irrtstar_plan(
     }
 
     if (goal_idx < 0) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[IRRT*] No solution after %d iters, tree %zu nodes. Steer stopped by: IK %d, not closer %d, "
             "collision %d. Edges rejected: ee_down %d, collision %d.",
             iter, tree.size(), irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
@@ -387,7 +393,7 @@ irrtstar_plan(
         /* Midpoint fallback disabled.
         const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
         if (!q_mid) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] No IK for the midpoint.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] No IK for the midpoint.");
             return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(),
@@ -397,13 +403,13 @@ irrtstar_plan(
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 1: start -> midpoint...");
         auto plan1 = crrt_plan_from_to(arm_group, node, q_start, *q_mid);
         if (!plan1) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 1 failed.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] Midpoint Stage 1 failed.");
             return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 2: midpoint -> goal...");
         auto plan2 = crrt_plan_from_to(arm_group, node, *q_mid, q_goal);
         if (!plan2) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 2 failed.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] Midpoint Stage 2 failed.");
             return std::nullopt;
         }
         // Join the legs (dropping the repeated midpoint), shortcut the whole path so

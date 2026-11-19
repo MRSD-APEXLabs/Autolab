@@ -184,6 +184,7 @@ def test_duplicate_nodes_are_blocked_before_driver_query():
     from act_inference.node import ActInferenceNode
     node = SimpleNamespace(rollout=SimpleNamespace(execute=True),
                            get_node_names=lambda: ['act_inference', 'act_inference'])
+    node._verify_single_node = lambda check_abort: ActInferenceNode._verify_single_node(node, check_abort)
     with pytest.raises(RuntimeError, match='Multiple act_inference'):
         ActInferenceNode._verify_motion_ownership(node, check)
 

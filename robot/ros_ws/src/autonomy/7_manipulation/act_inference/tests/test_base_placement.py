@@ -23,6 +23,8 @@ class ClockStop:
 
 
 STIFFNESS_N_PER_M = 5000.   # fake deck and ridge: 5 N/mm
+# The fake controller's forward kinematics, whatever the joints: about where home_offset is.
+HOME_POSE = np.r_[[-.0206, .3438, .1853], Rotation.from_euler('xyz', [180., 0., 0.], degrees=True).as_rotvec()]
 
 
 def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, ridge_x=None, reports=True):
@@ -63,6 +65,10 @@ def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, 
 
         def initialize_target_pose(self):
             return state['pose'].copy()
+
+        def forward_kinematics(self, joints):
+            assert len(joints) == 6
+            return HOME_POSE.copy()
 
         def prepare_force_torque(self, enable):
             assert enable and not self.read_only
@@ -387,4 +393,254 @@ def test_jog_rejects_bad_requests_before_connecting(monkeypatch, offset, speed):
     _, calls, _ = setup_robot(monkeypatch, stop)
     with pytest.raises(ValueError):
         bp.jog_base_xyz(InferenceConfig(), offset, speed, execute=True, stop=stop)
+    assert not calls
+
+
+def rpy_deg(rotvec):
+    return Rotation.from_rotvec(rotvec).as_euler('xyz', degrees=True)
+
+
+def rotation_steps(start, commands):
+    rotvecs = np.vstack([start[3:], np.asarray(commands)[:, 3:]])
+    return np.array([(Rotation.from_rotvec(b) * Rotation.from_rotvec(a).inv()).magnitude()
+                     for a, b in zip(rotvecs[:-1], rotvecs[1:])])
+
+
+@pytest.mark.parametrize('sign', [1., -1.])
+def test_jog_rz_turns_about_the_base_z_axis_holding_xyz(monkeypatch, sign):
+    stop = ClockStop()
+    initial = np.r_[[.1, .2, .3], Rotation.from_euler('xyz', [-179., -1.5, 90.], degrees=True).as_rotvec()]
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=initial)
+    assert bp.jog_base_rz(InferenceConfig(), sign * 10., 10., execute=True, stop=stop) == 'done'
+    assert calls == ['connect', 'enable', 'close']
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[:, :3], np.tile(initial[:3], (len(goals), 1)), atol=1e-10)
+    np.testing.assert_allclose(rpy_deg(goals[-1, 3:]), rpy_deg(initial[3:]) + [0., 0., sign * 10.], atol=1e-6)
+    assert rotation_steps(initial, commands).max() <= np.radians(10.) / InferenceConfig().motion.loop_hz + 1e-10
+    assert stop.now >= 1.
+
+
+def test_jog_rz_prediction_only_does_not_command(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    assert bp.jog_base_rz(InferenceConfig(), 10., 10., execute=False, stop=stop) == 'done'
+    assert calls == ['connect', 'close'] and not commands
+
+
+@pytest.mark.parametrize('angle,speed', [(np.nan, 10.), (180., 10.), (10., 0.), (10., np.inf)])
+def test_jog_rz_rejects_bad_requests_before_connecting(monkeypatch, angle, speed):
+    stop = ClockStop()
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.jog_base_rz(InferenceConfig(), angle, speed, execute=True, stop=stop)
+    assert not calls
+
+
+def scripted(*phases):
+    """Teleop command(): each (velocity, ticks) phase in turn, then None (R2 released)."""
+    queue = [velocity for velocity, ticks in phases for _ in range(ticks)]
+    return lambda: queue.pop(0) if queue else None
+
+
+TELEOP_START = np.r_[[.1, .2, .3], Rotation.from_euler('xyz', [-179., -1.5, 90.], degrees=True).as_rotvec()]
+
+
+def teleop_steps(commands):
+    return np.linalg.norm(np.diff(np.vstack([TELEOP_START[:3], np.asarray(commands)[:, :3]]), axis=0), axis=1)
+
+
+def test_teleop_follows_the_sticks_holding_orientation(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    # 50 Hz at 10 mm/s: 0.2 mm per tick at full stick
+    command = scripted(((1., 0., 0., 0.), 50), ((0., -.5, 0., 0.), 50), ((0., 0., 0., 0.), 10), ((0., 0., 1., 0.), 25))
+    assert bp.teleop_base_xyz(InferenceConfig(), command, 10., .15, execute=True, stop=stop) == 'done'
+    assert calls == ['connect', 'enable', 'close']
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[-1, :3], TELEOP_START[:3] + [.01, -.005, .005], atol=1e-10)
+    np.testing.assert_allclose(goals[:, 3:], np.tile(TELEOP_START[3:], (len(goals), 1)), atol=1e-10)
+    assert teleop_steps(commands).max() <= .010 / InferenceConfig().motion.loop_hz + 1e-10
+
+
+def test_teleop_turns_about_the_base_z_axis(monkeypatch):
+    stop = ClockStop()
+    _, _, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    # 50 Hz at 20 deg/s: 0.4 deg per tick at full stick; 50 ticks left = +20 deg, then 25 at half right = -5 deg
+    command = scripted(((0., 0., 0., 1.), 50), ((0., 0., 0., -.5), 25))
+    assert bp.teleop_base_xyz(InferenceConfig(), command, 10., .15, execute=True, stop=stop,
+                              rotation_speed_deg_s=20.) == 'done'
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[:, :3], np.tile(TELEOP_START[:3], (len(goals), 1)), atol=1e-10)
+    np.testing.assert_allclose(rpy_deg(goals[-1, 3:]), rpy_deg(TELEOP_START[3:]) + [0., 0., 15.], atol=1e-6)
+    assert rotation_steps(TELEOP_START, commands).max() <= np.radians(20.) / InferenceConfig().motion.loop_hz + 1e-10
+
+
+def test_teleop_diagonal_is_capped_at_the_speed(monkeypatch):
+    stop = ClockStop()
+    _, _, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    assert bp.teleop_base_xyz(InferenceConfig(), scripted(((1., 3., -1., 0.), 50)), 10., .15, execute=True,
+                              stop=stop) == 'done'
+    np.testing.assert_allclose(np.asarray(commands)[-1, :3], TELEOP_START[:3] + np.array([1., 1., -1.]) / np.sqrt(3) * .01,
+                               atol=1e-10)
+    assert teleop_steps(commands).max() <= .010 / InferenceConfig().motion.loop_hz + 1e-10
+
+
+def test_teleop_stays_within_the_radius(monkeypatch):
+    stop = ClockStop()
+    _, _, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    command = scripted(((1., 0., 0., 0.), 200), ((0., 1., 0., 0.), 100))
+    assert bp.teleop_base_xyz(InferenceConfig(), command, 10., .02, execute=True, stop=stop) == 'done'
+    reach = np.linalg.norm(np.asarray(commands)[:, :3] - TELEOP_START[:3], axis=1)
+    assert reach.max() <= .02 + 1e-9 and reach[-1] > .0199
+    assert commands[-1][1] > TELEOP_START[1] + .005   # slides along the boundary
+
+
+def test_teleop_prediction_only_does_not_command(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    assert bp.teleop_base_xyz(InferenceConfig(), scripted(((1., 0., 0., 1.), 10)), 10., .15, stop=stop) == 'done'
+    assert calls == ['connect', 'close'] and not commands
+
+
+def test_teleop_cancellation(monkeypatch):
+    stop = ClockStop(cancel_at=.5)
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    assert bp.teleop_base_xyz(InferenceConfig(), lambda: (1., 0., 0., 1.), 10., .15, execute=True,
+                              stop=stop) == 'stopped'
+    assert calls[-1] == 'close'
+
+
+@pytest.mark.parametrize('bad', [(1., 0., 0.), (np.nan, 0., 0., 0.), (0., 0., 0., np.inf)])
+def test_teleop_rejects_a_bad_command(monkeypatch, bad):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.teleop_base_xyz(InferenceConfig(), lambda: bad, 10., .15, execute=True, stop=stop)
+    assert calls[-1] == 'close' and not commands
+
+
+@pytest.mark.parametrize('speed,radius,rotation', [(0., .15, 30.), (np.nan, .15, 30.), (10., 0., 30.),
+                                                   (10., np.inf, 30.), (10., .15, 0.), (10., .15, np.nan)])
+def test_teleop_rejects_bad_settings_before_connecting(monkeypatch, speed, radius, rotation):
+    stop = ClockStop()
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.teleop_base_xyz(InferenceConfig(), lambda: None, speed, radius, execute=True, stop=stop,
+                           rotation_speed_deg_s=rotation)
+    assert not calls
+
+
+def rotation_to(pose, reference):
+    return (Rotation.from_rotvec(pose[3:]) * Rotation.from_rotvec(reference[3:]).inv()).magnitude()
+
+
+def test_teleop_home_drives_straight_home_then_the_sticks_work_around_it(monkeypatch):
+    stop = ClockStop()
+    _, _, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    # 220 mm from TELEOP_START at 10 mm/s: ~1100 ticks; then 10 ticks of +x (2 mm), beyond the start's 150 mm radius
+    command = scripted(((0., 0., 0., 1.), 25), (bp.TELEOP_HOME, 1500), ((1., 0., 0., 0.), 10))
+    assert bp.teleop_base_xyz(InferenceConfig(), command, 10., .15, execute=True, stop=stop,
+                              home_joints=bp.HOME_OFFSET_JOINTS) == 'done'
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[-1, :3], HOME_POSE[:3] + [.002, 0., 0.], atol=1e-9)
+    assert rotation_to(goals[-1], HOME_POSE) < 1e-8
+    home_ticks = goals[25:25 + 1500, :3] - goals[24, :3]
+    direction = (HOME_POSE[:3] - goals[24, :3]) / np.linalg.norm(HOME_POSE[:3] - goals[24, :3])
+    assert np.abs(home_ticks - np.outer(home_ticks @ direction, direction)).max() < 1e-9   # a straight line
+    assert teleop_steps(commands).max() <= .010 / InferenceConfig().motion.loop_hz + 1e-10
+    assert rotation_steps(TELEOP_START, commands).max() <= np.radians(30.) / InferenceConfig().motion.loop_hz + 1e-10
+
+
+def test_teleop_home_needs_home_joints(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.teleop_base_xyz(InferenceConfig(), lambda: bp.TELEOP_HOME, 10., .15, execute=True, stop=stop)
+    assert calls[-1] == 'close' and not commands
+
+
+def test_move_home_goes_straight_to_the_forward_kinematics_pose(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    assert bp.move_home(InferenceConfig(), bp.HOME_OFFSET_JOINTS, 15., 30., execute=True, stop=stop) == 'done'
+    assert calls == ['connect', 'enable', 'close']
+    goals = np.asarray(commands)
+    np.testing.assert_allclose(goals[-1, :3], HOME_POSE[:3], atol=1e-9)
+    assert rotation_to(goals[-1], HOME_POSE) < 1e-8
+    path = goals[:, :3] - TELEOP_START[:3]
+    direction = (HOME_POSE[:3] - TELEOP_START[:3]) / np.linalg.norm(HOME_POSE[:3] - TELEOP_START[:3])
+    assert np.abs(path - np.outer(path @ direction, direction)).max() < 1e-9   # a straight line
+    assert rotation_steps(TELEOP_START, commands).max() <= np.radians(30.) / InferenceConfig().motion.loop_hz + 1e-10
+    assert stop.now >= np.linalg.norm(HOME_POSE[:3] - TELEOP_START[:3]) / .015
+
+
+def test_move_home_prediction_only_does_not_command(monkeypatch):
+    stop = ClockStop()
+    _, calls, commands = setup_robot(monkeypatch, stop)
+    assert bp.move_home(InferenceConfig(), bp.HOME_OFFSET_JOINTS, 15., 30., stop=stop) == 'done'
+    assert calls == ['connect', 'close'] and not commands
+
+
+def test_move_home_cancellation(monkeypatch):
+    stop = ClockStop(cancel_at=.5)
+    _, calls, _ = setup_robot(monkeypatch, stop, initial_pose=TELEOP_START)
+    assert bp.move_home(InferenceConfig(), bp.HOME_OFFSET_JOINTS, 15., 30., execute=True, stop=stop) == 'stopped'
+    assert calls[-1] == 'close'
+
+
+@pytest.mark.parametrize('joints,speed,rotation', [((0.,) * 5, 15., 30.), ((np.nan,) + (0.,) * 5, 15., 30.),
+                                                   (bp.HOME_OFFSET_JOINTS, 0., 30.), (bp.HOME_OFFSET_JOINTS, 15., np.inf)])
+def test_move_home_rejects_bad_requests_before_connecting(monkeypatch, joints, speed, rotation):
+    stop = ClockStop()
+    _, calls, _ = setup_robot(monkeypatch, stop)
+    with pytest.raises(ValueError):
+        bp.move_home(InferenceConfig(), joints, speed, rotation, execute=True, stop=stop)
+    assert not calls
+
+
+def setup_clear_robot(monkeypatch):
+    """Fake arm for clear_arm_errors: faulted (error C31, state 4) until clear_errors()."""
+    calls, codes = [], [31, 0, 4]
+
+    class Robot:
+        def __init__(self, ip, motion, read_only):
+            self.read_only = read_only
+
+        def connect(self, check_health=True):
+            assert not check_health   # a health check refuses the faulted arm this is for
+            calls.append('connect')
+
+        def error_state(self):
+            return tuple(codes)
+
+        def clear_errors(self):
+            assert not self.read_only
+            calls.append('clear')
+            codes[:] = [0, 0, 0]
+
+        def close(self):
+            calls.append('close')
+
+    monkeypatch.setattr(bp, 'XArm6Robot', Robot)
+    return calls
+
+
+def test_clear_errors_clears_and_enables_without_motion(monkeypatch, capsys):
+    calls = setup_clear_robot(monkeypatch)
+    assert bp.clear_arm_errors(InferenceConfig(), execute=True) == 'done'
+    assert calls == ['connect', 'clear', 'close']
+    out = capsys.readouterr().out
+    assert 'xArm error C31, warning 0, state 4' in out and 'Cleared: xArm error C0, warning 0, state 0' in out
+
+
+def test_clear_errors_prediction_only_only_reads(monkeypatch):
+    calls = setup_clear_robot(monkeypatch)
+    assert bp.clear_arm_errors(InferenceConfig(), execute=False) == 'done'
+    assert calls == ['connect', 'close']
+
+
+def test_clear_errors_preexisting_stop_never_connects(monkeypatch):
+    calls = setup_clear_robot(monkeypatch)
+    stop = ClockStop(cancel_at=0.)   # already set
+    assert bp.clear_arm_errors(InferenceConfig(), execute=True, stop=stop) == 'stopped'
     assert not calls

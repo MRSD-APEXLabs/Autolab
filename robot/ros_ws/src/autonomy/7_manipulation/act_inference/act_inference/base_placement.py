@@ -461,3 +461,186 @@ def jog_base_xyz(config, offset_m, speed_mm_s, execute=False, stop=None):
         return _move_goals(robot, initial, (goal,), motion, stop, timeout, 'Jog')
     finally:
         robot.close()
+
+
+def _turn_rz(rotvec, angle_rad):
+    """Orientation `rotvec` turned by `angle_rad` about the xArm base-frame z axis (RZ)."""
+    return continuous_rotvec((Rotation.from_euler('z', angle_rad) * Rotation.from_rotvec(rotvec)).as_rotvec(), rotvec)
+
+
+def jog_base_rz(config, angle_deg, speed_deg_s, execute=False, stop=None):
+    """Turn the TCP by `angle_deg` about the xArm base-frame z axis (RZ) at `speed_deg_s`, holding its XYZ."""
+    stop = stop if stop is not None else threading.Event()
+    if not math.isfinite(angle_deg) or abs(angle_deg) >= 180:
+        raise ValueError('Jog angle must be finite and below 180 degrees')
+    if not math.isfinite(speed_deg_s) or speed_deg_s <= 0:
+        raise ValueError('Jog rotation speed must be positive')
+    if stop.is_set():
+        return 'stopped'
+    motion = replace(config.motion, rotation_speed=math.radians(speed_deg_s))
+    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    try:
+        robot.connect()
+        initial = robot.initialize_target_pose()
+        goal = initial.copy()
+        goal[3:] = _turn_rz(initial[3:], math.radians(angle_deg))
+        if stop.is_set():
+            return 'stopped'
+        rpy = lambda pose: Rotation.from_rotvec(pose[3:]).as_euler('xyz', degrees=True).round(2).tolist()
+        print(f'Jog {"EXECUTE" if execute else "PREDICTION ONLY"}: base-frame RZ {angle_deg:+g} deg at '
+              f'{speed_deg_s:g} deg/s; TCP RPY deg={rpy(initial)} -> {rpy(goal)}', flush=True)
+        if not execute:
+            return 'done'
+        robot.enable()
+        timeout = abs(angle_deg) / speed_deg_s + 10.0
+        return _move_goals(robot, initial, (goal,), motion, stop, timeout, 'Jog')
+    finally:
+        robot.close()
+
+
+# The planner's plan_home_offset joint goal (global_planner move_to_pose_node.cpp), radians.
+HOME_OFFSET_JOINTS = (1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284)
+TELEOP_HOME = 'home'   # teleop command: drive straight to the home pose
+
+
+def _pose_text(pose):
+    rpy = Rotation.from_rotvec(pose[3:]).as_euler('xyz', degrees=True)
+    return f'mm={(pose[:3] * 1000).round(1).tolist()} RPY deg={rpy.round(2).tolist()}'
+
+
+def move_home(config, joints, speed_mm_s, rotation_speed_deg_s, execute=False, stop=None):
+    """Move the TCP straight to its pose at `joints` (rad, e.g. HOME_OFFSET_JOINTS; the controller's forward
+    kinematics) at up to `speed_mm_s` and `rotation_speed_deg_s`, the controller's IK following it. No planning:
+    nothing on the way is avoided."""
+    stop = stop if stop is not None else threading.Event()
+    joints = np.asarray(joints, dtype=float)
+    if joints.shape != (6,) or not np.isfinite(joints).all():
+        raise ValueError('Home joints must be six finite angles in radians')
+    if not math.isfinite(speed_mm_s) or speed_mm_s <= 0:
+        raise ValueError('Home speed must be positive')
+    if not math.isfinite(rotation_speed_deg_s) or rotation_speed_deg_s <= 0:
+        raise ValueError('Home rotation speed must be positive')
+    if stop.is_set():
+        return 'stopped'
+    motion = replace(config.motion, translation_speed=speed_mm_s / 1000,
+                     rotation_speed=math.radians(rotation_speed_deg_s))
+    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    try:
+        robot.connect()
+        initial = robot.initialize_target_pose()
+        goal = robot.forward_kinematics(joints)
+        goal[3:] = continuous_rotvec(goal[3:], initial[3:])
+        distance = float(np.linalg.norm(goal[:3] - initial[:3]))
+        angle = math.degrees((Rotation.from_rotvec(goal[3:]) * Rotation.from_rotvec(initial[3:]).inv()).magnitude())
+        if stop.is_set():
+            return 'stopped'
+        print(f'Home {"EXECUTE" if execute else "PREDICTION ONLY"}: straight from TCP {_pose_text(initial)} to '
+              f'{_pose_text(goal)} ({distance * 1000:.0f} mm, {angle:.0f} deg) at {speed_mm_s:g} mm/s, '
+              f'{rotation_speed_deg_s:g} deg/s', flush=True)
+        if not execute:
+            return 'done'
+        robot.enable()
+        timeout = distance * 1000 / speed_mm_s + angle / rotation_speed_deg_s + 10.0
+        return _move_goals(robot, initial, (goal,), motion, stop, timeout, 'Home')
+    finally:
+        robot.close()
+
+
+def clear_arm_errors(config, execute=False, stop=None):
+    """Clear the xArm's error and warning and enable it again (motors on, servo mode 1, state 0) without commanding
+    a pose: the arm holds where it is. execute=False only reads the codes."""
+    stop = stop if stop is not None else threading.Event()
+    if stop.is_set():
+        return 'stopped'
+    robot = XArm6Robot(config.robot_ip, config.motion, read_only=not execute)
+    try:
+        robot.connect(check_health=False)   # a faulted arm is what this is for
+        error, warning, state = robot.error_state()
+        print(f'Clear errors {"EXECUTE" if execute else "PREDICTION ONLY"}: xArm error C{error}, warning {warning}, '
+              f'state {state}', flush=True)
+        if stop.is_set():
+            return 'stopped'
+        if not execute:
+            return 'done'
+        robot.clear_errors()
+        error, warning, state = robot.error_state()
+        print(f'Cleared: xArm error C{error}, warning {warning}, state {state}; motors enabled in servo mode 1',
+              flush=True)
+        return 'done'
+    finally:
+        robot.close()
+
+
+def teleop_base_xyz(config, command, speed_mm_s, radius_m, execute=False, stop=None, rotation_speed_deg_s=30.0,
+                    home_joints=None):
+    """Drive the TCP in the xArm base frame from a live command (the gamepad).
+
+    Every control tick `command()` returns (x, y, z, rz) velocity fractions in [-1, 1], TELEOP_HOME, or None to
+    end: x, y, z move the TCP at up to `speed_mm_s`, rz turns it about the base z axis (XYZ held) at up to
+    `rotation_speed_deg_s`; TELEOP_HOME drives it straight to its pose at `home_joints` (see move_home) at those
+    speeds. The XYZ target stays within `radius_m` of the start pose, or of where the last home move left it. Once
+    the command ends, the arm settles on the last target and this returns 'done'; `stop` returns 'stopped'."""
+    stop = stop if stop is not None else threading.Event()
+    if not math.isfinite(speed_mm_s) or speed_mm_s <= 0:
+        raise ValueError('Teleop speed must be positive')
+    if not math.isfinite(rotation_speed_deg_s) or rotation_speed_deg_s <= 0:
+        raise ValueError('Teleop rotation speed must be positive')
+    if not math.isfinite(radius_m) or radius_m <= 0:
+        raise ValueError('Teleop radius must be positive')
+    if stop.is_set():
+        return 'stopped'
+    motion = replace(config.motion, translation_speed=speed_mm_s / 1000,
+                     rotation_speed=math.radians(rotation_speed_deg_s))
+    period = 1 / motion.loop_hz
+    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    try:
+        robot.connect()
+        initial = robot.initialize_target_pose()
+        home = robot.forward_kinematics(home_joints) if home_joints is not None else None
+        print(f'Arm teleop {"EXECUTE" if execute else "PREDICTION ONLY"}: base-frame XYZ at up to {speed_mm_s:g} mm/s '
+              f'within {radius_m * 1000:g} mm of TCP mm={(initial[:3] * 1000).round(3).tolist()}, '
+              f'RZ at up to {rotation_speed_deg_s:g} deg/s'
+              + (f', home at TCP {_pose_text(home)}' if home is not None else ''), flush=True)
+        rate = ControlRate(period, time.monotonic, stop.wait)
+        if not execute:
+            while not stop.is_set() and command() is not None:
+                rate.wait()
+            return 'stopped' if stop.is_set() else 'done'
+        robot.enable()
+        target = initial.copy()
+        anchor = initial.copy()   # the centre of the radius_m sphere
+        while True:
+            if stop.is_set():
+                return 'stopped'
+            measured, _ = robot.observation()
+            velocity = command()
+            if velocity is None:
+                break
+            if isinstance(velocity, str):
+                if velocity != TELEOP_HOME or home is None:
+                    raise ValueError(f'Unknown teleop command {velocity!r}')
+                goal = home.copy()
+                goal[3:] = continuous_rotvec(home[3:], target[3:])
+                target = limit_action(target, goal, motion, period, target, True, math.inf)
+                anchor = target.copy()
+            else:
+                velocity = np.asarray(velocity, dtype=float)
+                if velocity.shape != (4,) or not np.isfinite(velocity).all():
+                    raise ValueError('Teleop command must be a finite (x, y, z, rz)')
+                velocity = np.clip(velocity, -1., 1.)
+                goal = target.copy()
+                goal[:3] += velocity[:3] * motion.translation_speed * period
+                offset = goal[:3] - anchor[:3]
+                distance = float(np.linalg.norm(offset))
+                if distance > radius_m:
+                    goal[:3] = anchor[:3] + offset * (radius_m / distance)
+                goal[3:] = _turn_rz(target[3:], velocity[3] * motion.rotation_speed * period)
+                target = limit_action(target, goal, motion, period, anchor, True, radius_m + 1e-6)
+            if stop.is_set():
+                return 'stopped'
+            robot.servo(target, period, measured=measured)
+            rate.wait()
+        # Hold the last target until the measured TCP has arrived.
+        return _move_goals(robot, target, (target,), motion, stop, 5.0, 'Arm teleop')
+    finally:
+        robot.close()

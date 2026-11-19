@@ -199,15 +199,14 @@ def test_jog_hands_back_only_after_a_completed_move(result, handback):
     from act_inference.node import ActInferenceNode
     events = []
 
-    def jog(config, offset, speed, execute, stop):
-        events.append(('jog', offset, speed, execute))
+    def move(stop):
+        events.append('move')
         return result
 
-    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True), jog_speed_mm_s=10., _jog_fn=jog,
-                           runner=SimpleNamespace(_check_abort=lambda: None),
+    node = SimpleNamespace(rollout=SimpleNamespace(execute=True), runner=SimpleNamespace(_check_abort=lambda: None),
                            handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
-    assert ActInferenceNode._jog(node, threading.Event(), (0., 0., .01)) == result
-    assert events == [('jog', (0., 0., .01), 10., True)] + (['handback'] if handback else [])
+    assert ActInferenceNode._jog(node, threading.Event(), move) == result
+    assert events == ['move'] + (['handback'] if handback else [])
 
 
 @pytest.mark.parametrize('state,servo,alive,busy', [
@@ -225,7 +224,7 @@ def test_jog_refused_while_another_node_drives_the_arm(state, servo, alive, busy
                            _verify_motion_ownership=None,
                            runner=SimpleNamespace(start=lambda **kwargs: starts.append(kwargs) or (False, 'x')))
     node._arm_busy = lambda: ActInferenceNode._arm_busy(node)
-    response = ActInferenceNode._on_jog(node, None, SimpleNamespace(), 'jog_z_plus', (0., 0., .01))
+    response = ActInferenceNode._on_jog(node, None, SimpleNamespace(), 'jog_z_plus', 'move', 'moved 10 mm')
     assert ActInferenceNode._arm_busy(node) == busy
     assert (response.success, response.message) == (False, f'not jogging: {busy}' if busy else 'x')
     assert len(starts) == (0 if busy else 1)
@@ -245,9 +244,25 @@ def test_jog_services_over_ros():
         jogs.append(offset)
         return 'done'
 
+    def jog_rz(config, angle, speed, execute, stop):
+        assert not execute and speed == 10.
+        jogs.append(angle)
+        return 'done'
+
+    def home(config, joints, speed, rotation_speed, execute, stop):
+        assert not execute and (speed, rotation_speed) == (40., 30.)
+        jogs.append(tuple(joints))
+        return 'done'
+
+    def clear_errors(config, execute, stop):
+        assert not execute
+        jogs.append('clear')
+        return 'done'
+
     namespace = f'/test_act_jog_{os.getpid()}'
     rclpy.init()
-    node = ActInferenceNode(policy='policy', jog_fn=jog, namespace=namespace,
+    node = ActInferenceNode(policy='policy', jog_fn=jog, jog_rz_fn=jog_rz, home_fn=home, clear_errors_fn=clear_errors,
+                            namespace=namespace,
                             parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_jog_client', namespace=namespace)
@@ -256,16 +271,246 @@ def test_jog_services_over_ros():
     executor.add_node(client_node)
     threading.Thread(target=executor.spin, daemon=True).start()
     try:
-        for name, offset in (('x_plus', (.01, 0., 0.)), ('y_minus', (0., -.01, 0.)), ('z_plus', (0., 0., .01))):
+        for name, offset, done in (('x_plus', (.01, 0., 0.), 'moved 10 mm'), ('y_minus', (0., -.01, 0.), 'moved 10 mm'),
+                                   ('z_plus', (0., 0., .01), 'moved 10 mm'), ('rz_plus', 10., 'rotated 10 deg'),
+                                   ('rz_minus', -10., 'rotated 10 deg'),
+                                   ('home', (1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284), 'at home_offset')):
             client = client_node.create_client(Trigger, f'act_inference/jog/{name}')
             assert client.wait_for_service(timeout_sec=5)
             response = client.call(Trigger.Request())
-            assert response.success and response.message == f'jog_{name}: moved 10 mm', response.message
+            assert response.success and response.message == f'jog_{name}: {done}', response.message
             assert jogs[-1] == offset
             status = node.runner.status()
             assert status['target'] == f'jog_{name}' and status['result'] == 'done' and not status['running']
+        client = client_node.create_client(Trigger, 'act_inference/clear_errors')
+        assert client.wait_for_service(timeout_sec=5)
+        response = client.call(Trigger.Request())
+        assert response.success and response.message == 'clear_errors: errors cleared, arm enabled', response.message
+        assert jogs[-1] == 'clear'
+        status = node.runner.status()
+        assert status['target'] == 'clear_errors' and status['result'] == 'done' and not status['running']
     finally:
         executor.shutdown()
         node.destroy_node()
         client_node.destroy_node()
+        rclpy.shutdown()
+
+
+def joy_axes(r2=False, l2=False, lx=0., ly=0., rx=0., ry=0.):
+    """Normalised Xbox /joy axes: LX LY LT RX RY RT dpad-X dpad-Y; triggers +1 released, -1 fully pressed."""
+    return [lx, ly, -1. if l2 else 1., rx, ry, -1. if r2 else 1., 0., 0.]
+
+
+def teleop_node(**fields):
+    return SimpleNamespace(teleop_enable_axis=5, teleop_block_axis=2, teleop_trigger_threshold=.6,
+                           teleop_axes=[4, 3, 1, 0], teleop_signs=[1., 1., 1., 1.], teleop_deadband=.1,
+                           teleop_joy_timeout=.5, teleop_home_button=3, clear_errors_button=6,
+                           _joy_lock=threading.Lock(), _joy=(float('-inf'), [], []), _teleop_released=False,
+                           _clear_errors_held=True, **fields)
+
+
+Y_HELD = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]   # Xbox buttons: A B X Y LB RB back start guide LS RS
+BACK_HELD = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+
+
+@pytest.mark.parametrize('axes,buttons,age,expected', [
+    (joy_axes(), [], 0., None),                                          # R2 released
+    (joy_axes(r2=True, ry=1.), [], .6, None),                            # /joy went quiet
+    (joy_axes(r2=True, ry=1.)[:5], [], 0., None),                        # no RT axis: never engaged
+    (joy_axes(r2=True, l2=True, ry=1., lx=1.), Y_HELD, 0., (0., 0., 0., 0.)),     # L2 drives the base: the arm holds
+    (joy_axes(r2=True, ry=1., rx=-1., ly=.55, lx=-1.), [], 0., (1., -1., .5, -1.)),  # RY -> x, RX -> y, LY -> z, LX -> rz
+    (joy_axes(r2=True, ry=.05, rx=float('nan')), [], 0., (0., 0., 0., 0.)),         # deadband, non-finite
+    (joy_axes(r2=True, ry=1.), Y_HELD, 0., 'home'),                      # R2 + Y: drive to home_offset
+    (joy_axes(), Y_HELD, 0., None),                                      # Y alone does nothing
+])
+def test_teleop_command_from_the_gamepad(axes, buttons, age, expected):
+    from act_inference.node import ActInferenceNode
+    node = teleop_node()
+    node._joy = (time.monotonic() - age, axes, buttons)
+    command = ActInferenceNode._teleop_command(node)
+    if expected is None or isinstance(expected, str):
+        assert command == expected
+    else:
+        assert command == pytest.approx(expected)
+
+
+def test_teleop_signs_flip_an_axis():
+    from act_inference.node import ActInferenceNode
+    node = teleop_node()
+    node.teleop_signs = [-1., 1., -1., -1.]
+    node._joy = (time.monotonic(), joy_axes(r2=True, ry=1., ly=1., lx=1.), [])
+    assert ActInferenceNode._teleop_command(node) == pytest.approx((-1., 0., -1., -1.))
+
+
+def joy_node(busy=''):
+    from act_inference.node import ActInferenceNode
+    starts, logs = [], []
+    node = teleop_node(_arm_busy=lambda: busy, _verify_motion_ownership='verify', _teleop='teleop',
+                       _verify_single_node='single', _clear_errors='clear',
+                       _publish_status=lambda: None,
+                       get_logger=lambda: SimpleNamespace(info=logs.append, warn=logs.append),
+                       runner=SimpleNamespace(start=lambda **kwargs: starts.append(kwargs) or (True, '')))
+    node._start_clear_errors = lambda: ActInferenceNode._start_clear_errors(node)
+    return node, starts, logs
+
+
+def test_back_press_clears_errors_once_per_press_without_r2():
+    from act_inference.node import ActInferenceNode
+    node, starts, _ = joy_node()
+    press, release = SimpleNamespace(axes=joy_axes(), buttons=BACK_HELD), SimpleNamespace(axes=joy_axes(), buttons=[])
+    ActInferenceNode._on_joy(node, press)   # held before the node saw it released: ignored
+    assert not starts
+    for msg in (release, press, press, release, press):
+        ActInferenceNode._on_joy(node, msg)
+    assert starts == [dict(target='clear_errors', run='clear', prepare='single')] * 2
+
+
+def test_back_refused_while_another_node_drives_the_arm():
+    from act_inference.node import ActInferenceNode
+    node, starts, logs = joy_node(busy='the planner is executing')
+    ActInferenceNode._on_joy(node, SimpleNamespace(axes=joy_axes(), buttons=[]))
+    ActInferenceNode._on_joy(node, SimpleNamespace(axes=joy_axes(), buttons=BACK_HELD))
+    assert not starts and logs == ['Clear errors refused: the planner is executing']
+
+
+@pytest.mark.parametrize('held,result,after', [
+    (True, 'done', ['handback']),    # a failed SDK run kept the arm: hand it back to ROS
+    (False, 'done', ['activate']),   # faulted under ROS control: restart the controllers the driver stopped
+    (True, 'stopped', []), (False, 'stopped', []),
+])
+def test_clear_errors_gives_the_arm_back_to_the_planner(held, result, after):
+    from act_inference.node import ActInferenceNode
+    events = []
+    node = SimpleNamespace(config='config', rollout=SimpleNamespace(execute=True),
+                           _clear_errors_fn=lambda config, execute, stop: events.append((config, execute)) or result,
+                           runner=SimpleNamespace(_check_abort=lambda: None),
+                           handoff=SimpleNamespace(held=held, finish=lambda check: events.append('handback')),
+                           _activate_arm_controllers=lambda check: events.append('activate'))
+    assert ActInferenceNode._clear_errors(node, threading.Event()) == result
+    assert events == [('config', True)] + after
+
+
+def controllers_node(state, switch_ok=True):
+    switched = []
+    node = SimpleNamespace(
+        handoff=SimpleNamespace(controllers=('xarm6_traj_controller',), status=lambda check: {'sdk_owned': True},
+                                list_controllers=lambda check: [SimpleNamespace(name='xarm6_traj_controller',
+                                                                                state=state)]),
+        _switch_arm_controllers=lambda stopped, started, check: switched.append((stopped, started)) or switch_ok)
+    return node, switched
+
+
+@pytest.mark.parametrize('state,expected', [('active', []), ('inactive', [([], ['xarm6_traj_controller'])])])
+def test_clear_errors_starts_only_stopped_arm_controllers(state, expected):
+    from act_inference.node import ActInferenceNode
+    node, switched = controllers_node(state)
+    ActInferenceNode._activate_arm_controllers(node, lambda: None)
+    assert switched == expected
+
+
+def test_clear_errors_reports_a_controller_that_will_not_start():
+    from act_inference.node import ActInferenceNode
+    node, _ = controllers_node('inactive', switch_ok=False)
+    with pytest.raises(RuntimeError, match='xarm6_traj_controller did not start.*sdk_owned'):
+        ActInferenceNode._activate_arm_controllers(node, lambda: None)
+
+
+def test_r2_press_starts_one_teleop_run_and_needs_a_release_before_the_next():
+    from act_inference.node import ActInferenceNode
+    node, starts, _ = joy_node()
+    press, release = SimpleNamespace(axes=joy_axes(r2=True), buttons=[]), SimpleNamespace(axes=joy_axes(), buttons=[])
+    ActInferenceNode._on_joy(node, press)   # held before the node saw it released: ignored
+    assert not starts
+    for msg in (release, press, press, press):
+        ActInferenceNode._on_joy(node, msg)
+    assert starts == [dict(target='jog_teleop', run='teleop', prepare='verify')]
+    assert node._joy[1] == joy_axes(r2=True)
+    ActInferenceNode._on_joy(node, release)
+    ActInferenceNode._on_joy(node, press)
+    assert len(starts) == 2
+
+
+def test_r2_refused_while_another_node_drives_the_arm():
+    from act_inference.node import ActInferenceNode
+    node, starts, logs = joy_node(busy='the planner is executing')
+    ActInferenceNode._on_joy(node, SimpleNamespace(axes=joy_axes(), buttons=[]))
+    ActInferenceNode._on_joy(node, SimpleNamespace(axes=joy_axes(r2=True), buttons=[]))
+    assert not starts and logs == ['Arm teleop refused: the planner is executing']
+
+
+@pytest.mark.parametrize('result,handback', [('done', True), ('stopped', False)])
+def test_teleop_hands_back_only_after_a_completed_run(result, handback):
+    from act_inference.node import ActInferenceNode
+    events = []
+
+    def teleop(config, command, speed, radius, execute, stop, rotation_speed_deg_s, home_joints):
+        events.append(('teleop', command, speed, radius, execute, rotation_speed_deg_s, home_joints))
+        return result
+
+    node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True), teleop_speed_mm_s=10.,
+                           teleop_rotation_speed_deg_s=20., teleop_radius_mm=150., home_joints='joints',
+                           _teleop_fn=teleop, _teleop_command='command',
+                           runner=SimpleNamespace(_check_abort=lambda: None),
+                           handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
+    assert ActInferenceNode._teleop(node, threading.Event()) == result
+    assert events == [('teleop', 'command', 10., .15, True, 20., 'joints')] + (['handback'] if handback else [])
+
+
+def test_gamepad_teleop_over_ros():
+    rclpy = pytest.importorskip('rclpy')
+    from rclpy.executors import MultiThreadedExecutor
+    from sensor_msgs.msg import Joy
+
+    from act_inference.node import ActInferenceNode
+
+    seen = []
+
+    def teleop(config, command, speed, radius, execute, stop, rotation_speed_deg_s, home_joints):
+        assert not execute and speed == 40. and radius == .15 and rotation_speed_deg_s == 30.
+        assert home_joints == pytest.approx([1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284])
+        while (velocity := command()) is not None:
+            seen.append(velocity)
+            stop.wait(.02)
+        return 'done'
+
+    namespace = f'/test_act_teleop_{os.getpid()}'
+    rclpy.init()
+    node = ActInferenceNode(policy='policy', teleop_fn=teleop, namespace=namespace,
+                            parameter_overrides=[rclpy.parameter.Parameter('execute', value=False),
+                                                 rclpy.parameter.Parameter('select_service', value=''),
+                                                 rclpy.parameter.Parameter('teleop_joy_topic', value='joy')])
+    pad = rclpy.create_node('act_teleop_pad', namespace=namespace)
+    publisher = pad.create_publisher(Joy, 'joy', 10)
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    executor.add_node(pad)
+    threading.Thread(target=executor.spin, daemon=True).start()
+
+    def publish_for(seconds, axes, buttons=()):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            publisher.publish(Joy(axes=axes, buttons=list(buttons)))
+            time.sleep(.05)
+
+    try:
+        deadline = time.monotonic() + 5
+        while publisher.get_subscription_count() == 0:
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        publish_for(.3, joy_axes())
+        publish_for(1., joy_axes(r2=True, ry=1., ly=-1., lx=1.))
+        publish_for(.5, joy_axes(r2=True), Y_HELD)
+        status = node.runner.status()
+        assert status['running'] and status['target'] == 'jog_teleop'
+        publish_for(.3, joy_axes())
+        deadline = time.monotonic() + 5
+        while (status := node.runner.status())['running']:
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        assert status['result'] == 'done', status
+        assert (1., 0., -1., 1.) in seen and 'home' in seen
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        pad.destroy_node()
         rclpy.shutdown()

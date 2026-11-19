@@ -69,6 +69,16 @@ static constexpr int    RRTSTAR_MAX_ITER = 20000;
 static constexpr double RRTSTAR_ETA      = 0.5;   // max extension per step (rad)
 static constexpr double RRTSTAR_GAMMA    = 3.0;   // near-neighbour radius scale
 
+// Safety margin (crrt_clearance in crrt_validity.hpp). The first searches of every plan keep each link
+// the arm moves SAFETY_MARGIN_M from the obstacles (on top of the cloud inflation), except while the end
+// effector is in the approach column straight above the start or the goal: within APPROACH_RADIUS_M of
+// it horizontally, from APPROACH_BELOW_M below it to APPROACH_HEIGHT_M above it.
+static constexpr double SAFETY_MARGIN_M        = 0.05;
+static constexpr int    SAFETY_MARGIN_ATTEMPTS = 2;
+static constexpr double APPROACH_RADIUS_M      = 0.08;
+static constexpr double APPROACH_HEIGHT_M      = 0.15;
+static constexpr double APPROACH_BELOW_M       = 0.02;   // joint-space moves dip a little
+
 // Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
 static constexpr double WS_X_MIN = -0.15;
 static constexpr double WS_X_MAX =  0.85;
@@ -147,7 +157,7 @@ static PSMHolder& get_psm(rclcpp::Node::SharedPtr node)
             psm_node, "robot_description");
 
         if (!holder.psm->getPlanningScene()) {
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[CRRT] PSM failed to init — check robot_description param.");
             return;
         }
@@ -163,13 +173,23 @@ static PSMHolder& get_psm(rclcpp::Node::SharedPtr node)
         // initial full scene, so this PSM's world stays EMPTY - no octomap, no
         // collision objects - and every path validates as clear. Pull the full
         // state once, now that the executor is spinning to service the call.
-        if (holder.psm->requestPlanningSceneState("/get_planning_scene")) {
+        // Fallback: move_group may still be starting, so try a few times.
+        bool fetched = false;
+        for (int attempt = 1; attempt <= 5 && rclcpp::ok() && !fetched; ++attempt) {
+            fetched = holder.psm->requestPlanningSceneState("/get_planning_scene");
+            if (!fetched && attempt < 5) {
+                RCLCPP_WARN(node->get_logger(),
+                    "[CRRT] requestPlanningSceneState failed (try %d/5); retrying in 2 s.", attempt);
+                rclcpp::sleep_for(std::chrono::seconds(2));
+            }
+        }
+        if (fetched) {
             planning_scene_monitor::LockedPlanningSceneRO ls(holder.psm);
             RCLCPP_INFO(node->get_logger(),
                 "[CRRT] Full planning scene fetched (%zu world objects).",
                 ls->getWorld()->size());
         } else {
-            RCLCPP_ERROR(node->get_logger(),
+            RCLCPP_WARN(node->get_logger(),
                 "[CRRT] requestPlanningSceneState FAILED - planner will see an "
                 "EMPTY world and treat every path as collision-free.");
         }
