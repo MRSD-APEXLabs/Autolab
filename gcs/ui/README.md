@@ -13,6 +13,12 @@ CI=true npx react-scripts test --watchAll=false            # run once, non-inter
 CI=true npx react-scripts test src/debug --watchAll=false   # just the debug console suite
 ```
 
+### Experiment workflow without the robot (manual)
+
+`mock/mock_executor.py` fakes the routine executor, robot, and clog-detection service over
+MQTT, so the full experiment flow can be clicked through with `npm start` and no hardware or
+ROS. See [`mock/README.md`](mock/README.md).
+
 ### Debug / Testing Console (manual)
 
 The `/debug` route (`src/debug/`) is a curated low-level command console for testing
