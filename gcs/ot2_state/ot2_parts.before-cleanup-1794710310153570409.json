@@ -1,0 +1,5 @@
+{
+  "stage": "needs_inspection",
+  "ssh_host": "p5090",
+  "error": "Inspect robot/state before rerunning."
+}

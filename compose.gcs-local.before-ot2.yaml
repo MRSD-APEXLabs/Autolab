@@ -1,0 +1,14 @@
+services:
+  gcs-real:
+    volumes:
+      # This GCS runs without a GUI; the host's .Xauthority is a directory.
+      - /dev/null:/home/gcs/.Xauthority:ro
+      # Build fresh against this checkout, not copied build/install symlinks.
+      - gcs_local_build:/home/gcs/AutoLab/gcs/ros_ws/build
+      - gcs_local_install:/home/gcs/AutoLab/gcs/ros_ws/install
+      - gcs_local_log:/home/gcs/AutoLab/gcs/ros_ws/log
+
+volumes:
+  gcs_local_build:
+  gcs_local_install:
+  gcs_local_log:

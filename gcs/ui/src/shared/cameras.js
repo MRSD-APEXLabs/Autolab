@@ -5,10 +5,9 @@ export const HUB_STATUS_TOPIC = 'ros2/camera_hub/status';
 export const SELECT_CAMERA_TOPIC = 'cmd/perception/select_camera';
 export const SELECT_RESULT_TOPIC = 'perception/select_camera_result';
 
-export const ROBOT_HOST = process.env.REACT_APP_ROBOT_HOST || window.location.hostname;
-export const STREAM_PORT = process.env.REACT_APP_STREAM_PORT || '8002';
-
-const streamBase = () => `http://${ROBOT_HOST}:${STREAM_PORT}`;
+// Stream directly from the camera server by IP; no client DNS or GCS relay.
+// An explicit base URL can still be supplied for other deployments.
+const streamBase = () => (process.env.REACT_APP_CAMERA_STREAM_BASE || 'http://192.168.10.3:8002').replace(/\/$/, '');
 export const streamUrl = (kind, camera) => `${streamBase()}/stream/${kind}/${camera}.mjpg`;
 export const healthUrl = () => `${streamBase()}/health`;
 export const cameraLabel = (camera) => (camera ? CAMERA_LABELS[camera] ?? camera : 'none');

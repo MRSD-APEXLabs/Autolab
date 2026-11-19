@@ -14,7 +14,7 @@ const health = (key, age) => Promise.resolve({ json: () => Promise.resolve({ [ke
 test('streams the given kind and camera', () => {
   global.fetch.mockReturnValue(health('annotated/zedx', 0.1));
   render(<CameraFeed camera="zedx" kind="annotated" title="Annotated" />);
-  expect(screen.getByRole('img').getAttribute('src')).toBe('http://localhost:8002/stream/annotated/zedx.mjpg');
+  expect(screen.getByRole('img').getAttribute('src')).toBe('http://192.168.10.3:8002/stream/annotated/zedx.mjpg');
 });
 
 test('placeholders make no stream request', () => {
@@ -33,7 +33,7 @@ test('stream error shows retry, which reloads with a cache-busting query', () =>
   fireEvent.error(screen.getByRole('img'));
   expect(screen.getByText('Stream unavailable')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-  expect(screen.getByRole('img').getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx.mjpg?retry=1');
+  expect(screen.getByRole('img').getAttribute('src')).toBe('http://192.168.10.3:8002/stream/raw/zedx.mjpg?retry=1');
 });
 
 test('stale overlay from /health frame age', async () => {
@@ -54,10 +54,10 @@ test('switching camera swaps the stream URL', () => {
   global.fetch.mockReturnValue(health('raw/zedx', 0.2));
   const { rerender } = render(<CameraPair camera="zedx" />);
   expect(screen.getAllByRole('img').map((i) => i.getAttribute('src'))).toEqual([
-    'http://localhost:8002/stream/annotated/zedx.mjpg', 'http://localhost:8002/stream/raw/zedx.mjpg']);
+    'http://192.168.10.3:8002/stream/annotated/zedx.mjpg', 'http://192.168.10.3:8002/stream/raw/zedx.mjpg']);
   rerender(<CameraPair camera="zedx_nano" />);
   expect(screen.getAllByRole('img').map((i) => i.getAttribute('src'))).toEqual([
-    'http://localhost:8002/stream/annotated/zedx_nano.mjpg', 'http://localhost:8002/stream/raw/zedx_nano.mjpg']);
+    'http://192.168.10.3:8002/stream/annotated/zedx_nano.mjpg', 'http://192.168.10.3:8002/stream/raw/zedx_nano.mjpg']);
 });
 
 test('switching camera mounts a new <img> and blanks the old one so Safari drops its MJPEG connection', () => {
@@ -67,7 +67,7 @@ test('switching camera mounts a new <img> and blanks the old one so Safari drops
   rerender(<CameraFeed camera="zedx_nano" kind="raw" title="Raw" />);
   const newImg = screen.getByRole('img');
   expect(newImg).not.toBe(oldImg);
-  expect(newImg.getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx_nano.mjpg');
+  expect(newImg.getAttribute('src')).toBe('http://192.168.10.3:8002/stream/raw/zedx_nano.mjpg');
   expect(oldImg.getAttribute('src')).toMatch(/^data:/);
 });
 
@@ -82,5 +82,5 @@ test('unmounting blanks the stream <img>', () => {
 test('StrictMode remount keeps the stream URL (dev server double-runs effects)', () => {
   global.fetch.mockReturnValue(health('raw/zedx', 0.2));
   render(<React.StrictMode><CameraFeed camera="zedx" kind="raw" title="Raw" /></React.StrictMode>);
-  expect(screen.getByRole('img').getAttribute('src')).toBe('http://localhost:8002/stream/raw/zedx.mjpg');
+  expect(screen.getByRole('img').getAttribute('src')).toBe('http://192.168.10.3:8002/stream/raw/zedx.mjpg');
 });

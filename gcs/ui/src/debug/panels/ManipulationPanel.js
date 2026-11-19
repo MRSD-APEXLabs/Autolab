@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
 import StatusEcho from '../StatusEcho';
+import JogControls from './JogControls';
 
 const TYPES = ['pick_base', 'place', 'pick', 'place_base'];
 // types that go to (or from) a lab machine's AprilTag
@@ -49,6 +50,7 @@ export default function ManipulationPanel() {
       <div className="mt-3">
         <StatusEcho topic="ros2/robot_1/behavior/manipulation_phase" label="Manipulation Phase" />
       </div>
+      <JogControls />
     </section>
   );
 }

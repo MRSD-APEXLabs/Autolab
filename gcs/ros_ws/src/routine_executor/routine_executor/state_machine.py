@@ -55,7 +55,7 @@ class RoutineStateMachine:
     def on_failure(self):
         if self.state not in _ACTIVE:
             return
-        self.retry_count += 1
+        # max_retries counts re-dispatches after the initial attempt.
         if self.retry_count >= self.max_retries:
             self.state = 'failed'
             self.error = (
@@ -63,6 +63,7 @@ class RoutineStateMachine:
             )
             self.needs_dispatch = False
         else:
+            self.retry_count += 1
             self.needs_dispatch = True  # retry: re-dispatch same step
 
     def cancel(self):

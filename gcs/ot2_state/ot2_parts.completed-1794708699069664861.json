@@ -1,0 +1,18 @@
+{
+  "stage": "completed",
+  "ssh_host": "p5090",
+  "robot_url": "http://192.168.10.17:31950",
+  "wrapper_url": "http://127.0.0.1:8001",
+  "run_id": "a0e31c69-1d24-4e91-839a-3f9ccc499e6b",
+  "pipette_id": "d4b85541-0634-477e-9fa9-5d59257110b0",
+  "volume_ul": 200.0,
+  "tip_index": 1,
+  "source": "tube_rack A2 (slot 10)",
+  "source_tube": "A2",
+  "aspiration_command_id": "233fa555-aa5a-480f-be6b-2b1e1ad76075",
+  "completed_at": "2026-11-15T02:10:22.372773Z",
+  "lift_command_id": "e01fd2d8-9f23-4522-8b74-111d36dd10ed",
+  "position": "fully_raised_above_tube_rack_A2",
+  "dispense_command_id": "ef15a128-3846-4c4a-899c-82430130abb1",
+  "destination": "empty_plate A1 (slot 2)"
+}

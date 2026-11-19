@@ -1,0 +1,20 @@
+{
+  "stage": "completed",
+  "ssh_host": "p5090",
+  "robot_url": "http://192.168.10.17:31950",
+  "wrapper_url": "http://127.0.0.1:8001",
+  "run_id": "a70c5e05-1649-4bd3-8ba6-2837488be8ce",
+  "pipette_id": "96aee789-1cf9-403b-9f4f-ee297605ef0f",
+  "volume_ul": 200.0,
+  "tip_index": 1,
+  "source": "tube_rack A2 (slot 10)",
+  "source_tube": "A2",
+  "aspiration_command_id": "01f7577d-c406-4283-bd1c-2df43ee8bb09",
+  "completed_at": "2026-11-15T02:31:31.912593Z",
+  "lift_command_id": "32cc207b-9940-4f15-9fb7-9283a3102087",
+  "position": "fixed_trash_tip_discarded",
+  "dispense_command_id": "83c151c4-44c1-4f95-92fb-4416df1c7e07",
+  "destination": "empty_plate A1 (slot 2)",
+  "recovery_drop_command_id": "f8ccf8e4-6e30-4ccc-98b0-60f20949249e",
+  "recovery_note": "Dispense and vertical lift were already successful. Recovered only fixedTrash move and tip drop; loaded numeric-version compatibility fix."
+}

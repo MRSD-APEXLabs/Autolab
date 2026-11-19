@@ -46,7 +46,7 @@ test('expanded shows annotated and raw streams of the active camera', () => {
   expand();
   const srcs = screen.getAllByRole('img').map((img) => img.getAttribute('src'));
   expect(srcs).toEqual([
-    'http://localhost:8002/stream/annotated/zedx.mjpg', 'http://localhost:8002/stream/raw/zedx.mjpg']);
+    'http://192.168.10.3:8002/stream/annotated/zedx.mjpg', 'http://192.168.10.3:8002/stream/raw/zedx.mjpg']);
 });
 
 test('minimizing unmounts the streams', () => {

@@ -74,7 +74,8 @@ def test_on_failure_exceeds_retries_sets_failed():
     sm = make_sm(max_retries=2)
     sm.start()
     sm.on_failure()  # retry 1
-    sm.on_failure()  # retry 2 — exhausted
+    sm.on_failure()  # schedule retry 2
+    sm.on_failure()  # retry 2 failed — exhausted
     assert sm.state == 'failed'
     assert sm.error is not None
 
@@ -148,6 +149,7 @@ def test_on_success_in_terminal_state_is_noop():
 def test_on_failure_in_terminal_state_is_noop():
     sm = make_sm([{'name': 'pick_base'}], max_retries=1)
     sm.start()
+    sm.on_failure()  # schedule retry 1
     sm.on_failure()  # transitions to 'failed'
     sm.on_failure()  # should be a no-op, not raise
     assert sm.state == 'failed'
@@ -254,7 +256,8 @@ def test_on_failure_while_paused_exceeds_retries_sets_failed():
     sm.start()
     sm.pause()
     sm.on_failure()  # retry 1
-    sm.on_failure()  # retry 2 — exhausted
+    sm.on_failure()  # schedule retry 2
+    sm.on_failure()  # retry 2 failed — exhausted
     assert sm.state == 'failed'
     assert sm.error is not None
 
@@ -345,7 +348,7 @@ def test_to_dict_has_recordings():
 def _fail_second_step(sm):
     sm.start()
     sm.on_success()
-    for _ in range(sm.max_retries):
+    for _ in range(sm.max_retries + 1):
         sm.on_failure()
 
 

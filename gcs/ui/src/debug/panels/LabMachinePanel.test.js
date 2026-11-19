@@ -5,7 +5,7 @@ import { useMqttContext } from '../../shared/useMqtt';
 jest.mock('../../shared/useMqtt');
 
 beforeEach(() => {
-  useMqttContext.mockReturnValue({ publish: jest.fn(), connected: true, subscribe: () => () => {} });
+  useMqttContext.mockReturnValue({ publish: jest.fn(), connected: true, subscribe: (topic, callback) => { if (topic === "ot2/parts/status") callback(JSON.stringify({ status: "idle" })); return () => {}; } });
 });
 
 test('OT2 send button is disabled when the JSON textarea is invalid', () => {
@@ -17,7 +17,7 @@ test('OT2 send button is disabled when the JSON textarea is invalid', () => {
 
 test('OT2 publishes parsed parameters_json on confirm', () => {
   const publish = jest.fn();
-  useMqttContext.mockReturnValue({ publish, connected: true, subscribe: () => () => {} });
+  useMqttContext.mockReturnValue({ publish, connected: true, subscribe: (topic, callback) => { if (topic === "ot2/parts/status") callback(JSON.stringify({ status: "idle" })); return () => {}; } });
 
   render(<LabMachinePanel />);
   fireEvent.change(screen.getByLabelText(/Parameters JSON/i), { target: { value: '{"steps":[]}' } });
@@ -32,7 +32,7 @@ test('OT2 publishes parsed parameters_json on confirm', () => {
 
 test('Shaker publishes pwm and wait_time_s on confirm', () => {
   const publish = jest.fn();
-  useMqttContext.mockReturnValue({ publish, connected: true, subscribe: () => () => {} });
+  useMqttContext.mockReturnValue({ publish, connected: true, subscribe: (topic, callback) => { if (topic === "ot2/parts/status") callback(JSON.stringify({ status: "idle" })); return () => {}; } });
 
   render(<LabMachinePanel />);
   fireEvent.change(screen.getByLabelText(/PWM/i), { target: { value: '200' } });
@@ -44,4 +44,16 @@ test('Shaker publishes pwm and wait_time_s on confirm', () => {
     'cmd/lab_machine/shaker_command',
     JSON.stringify({ pwm: 200, wait_time_s: 30 }),
   );
+});
+
+
+test('Shaker rejects invalid PWM and timeout values', () => {
+  render(<LabMachinePanel />);
+  fireEvent.change(screen.getByLabelText(/Wait Time/i), { target: { value: '-1' } });
+  expect(screen.getByRole('button', { name: 'Send Shaker Command' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText(/Wait Time/i), { target: { value: '0' } });
+  fireEvent.change(screen.getByLabelText(/PWM/i), { target: { value: '256' } });
+  expect(screen.getByRole('button', { name: 'Send Shaker Command' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText(/PWM/i), { target: { value: '0' } });
+  expect(screen.getByRole('button', { name: 'Send Shaker Command' })).toBeEnabled();
 });

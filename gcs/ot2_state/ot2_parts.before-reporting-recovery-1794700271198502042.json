@@ -1,0 +1,25 @@
+{
+  "stage": "needs_inspection",
+  "ssh_host": "p5090",
+  "robot_url": "http://192.168.10.17:31950",
+  "wrapper_url": "http://127.0.0.1:8001",
+  "run_id": "9f909fc5-c993-42f1-b80a-50db28c5578c",
+  "pipette_id": "a2d86222-6a0f-4673-97a1-5bb1ec2f315a",
+  "volume_ul": 200.0,
+  "tip_index": 1,
+  "source": "tube_rack A1 (slot 10)",
+  "aspiration_command_id": "2fc8e180-2c4e-4a45-a5cc-04878a377155",
+  "completed_at": "2026-11-14T23:49:47.142825Z",
+  "lift_command_id": "dab642eb-d76c-4eba-b53e-94cccc5255ee",
+  "hold_command_id": "3162e2ea-13d7-4f56-96f5-df16091d788f",
+  "position": "above_empty_plate_A1",
+  "hold_coordinates": {
+    "x": 146.9,
+    "y": 74.2,
+    "z": 80.0
+  },
+  "dispense_command_id": "e79262ee-5a6c-46d7-801a-f98fa68e3272",
+  "destination": "empty_plate A1 (slot 2)",
+  "error": "[Errno 32] Broken pipe",
+  "failed_stage": "tip_discarded"
+}

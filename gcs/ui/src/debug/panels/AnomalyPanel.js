@@ -4,6 +4,7 @@ import {
 } from '../../shared/anomalyApi';
 import { verdict, stepLabel, TONE_CLASSES } from '../../shared/verdict';
 import usePolling from '../../shared/usePolling';
+import TipCheckControls from './TipCheckControls';
 
 const JOBS_POLL_MS = 3000;
 const HEALTH_POLL_MS = 5000;
@@ -91,6 +92,8 @@ export default function AnomalyPanel() {
   return (
     <section className="border border-gray-200 rounded-xl p-4 bg-white md:col-span-2">
       <h2 className="font-semibold text-gray-800 mb-1">Clog Detection</h2>
+      <TipCheckControls />
+      <h3 className="text-sm font-semibold text-gray-700 mb-1">O-VAD pipeline service</h3>
       <HealthLine health={health} error={healthError} />
 
       <div className="mb-3">
