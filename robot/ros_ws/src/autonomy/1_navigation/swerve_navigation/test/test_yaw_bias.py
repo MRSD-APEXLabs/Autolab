@@ -10,9 +10,11 @@ import yaml
 
 from swerve_navigation.swerve_bridge import (ArmState, CommandGovernor, ControlLoop, DriveCommand,
                                       GovernorLimits, STOP_COMMAND, SwerveBridge)
-from swerve_navigation.yaw_bias import YawBiasConfig, YawBiasCompensator, StationHeadingHold
+from swerve_navigation.yaw_bias import (MAX_STATION_YAW_ERROR, YawBiasConfig, YawBiasCompensator,
+                                       StationHeadingHold)
 
-CONFIG = YawBiasConfig(vx_gain=0.10370857339120197, vy_gain=-0.20359885945361017)
+CONFIG = YawBiasConfig(vx_gain=0.46420008082422815, vy_gain=-0.37087673953450834, max_correction=.30)
+HOLD_ACCEL = 1.0
 LIMITS = GovernorLimits(max_linear_speed=1., max_angular_speed=1.5,
                         max_linear_accel=1.2, max_angular_accel=3., cmd_timeout=.3)
 
@@ -26,7 +28,7 @@ def test_forward_and_sideways_countersteering_have_correct_sign_and_size():
     for vx, vy in ((.3, 0.), (-.3, 0.), (0., .3), (0., -.3)):
         out, _ = run(YawBiasCompensator(CONFIG), (vx, vy, 0.))
         assert out == pytest.approx(-.75 * (CONFIG.vx_gain * vx + CONFIG.vy_gain * vy))
-        assert abs(out) < .07
+        assert abs(out) < CONFIG.max_correction
 
 
 def test_settling_ramp_saturation_and_speed_envelope():
@@ -58,8 +60,8 @@ def test_stops_and_rotation_locks_remove_correction_immediately():
 
 def test_raw_deadband_is_preserved_but_does_not_erase_feedforward():
     comp = YawBiasCompensator(CONFIG)
-    out, _ = run(comp, (.3, 0., .02))
-    assert out == pytest.approx(-.75 * CONFIG.vx_gain * .3)
+    out, _ = run(comp, (.12, 0., .02))
+    assert out == pytest.approx(-.75 * CONFIG.vx_gain * .12)
     assert 0 < abs(out) < CONFIG.command_deadband
     out, _ = run(YawBiasCompensator(CONFIG), (.3, 0., .2))
     assert out == pytest.approx(.2)  # no fitted correction during turns
@@ -79,7 +81,8 @@ def test_direction_changes_clear_old_correction_and_bounds_are_enforced():
 
 
 @pytest.mark.parametrize('phase,locked', [('dock', True), ('undock', True),
-                                         ('stage_adjust', True), ('staging', False), ('align', False)])
+                                         ('stage_adjust', True), ('staging', False), ('align', False),
+                                         ('face', False)])
 def test_docking_phase_heartbeat_controls_correction(phase, locked):
     from swerve_navigation.station_docking import StationDocking
     messages = []
@@ -98,7 +101,7 @@ def test_station_feedback_holds_physical_heading_on_biased_lagged_drive(velocity
     previous = 0.
     for i in range(400):
         correction = hold.apply(*velocity, yaw, rate, .1, i*.02)
-        assert abs(correction) <= .07 + 1e-12
+        assert abs(correction) <= CONFIG.max_correction + 1e-12
         assert abs(correction-previous) <= .004 + 1e-12
         rate += (.8*correction+bias-rate)*.02/.1
         yaw = math.atan2(math.sin(yaw+rate*.02), math.cos(yaw+rate*.02))
@@ -111,12 +114,41 @@ def test_station_feedback_holds_physical_heading_on_biased_lagged_drive(velocity
     assert hold.reference is None
 
 
+# Measured on the docking legs (recordings/dock_attempt_20261119_010325.csv): the drift is there
+# within 0.3 s of starting, ~0.29 rad/s on the 0.40 m/s move to the docking start (0.36 forward,
+# 0.18 lateral) and ~0.8 rad/m at the start of the back-out; ~0.05 rad is left after the align turn.
+# That worst drift is held for the whole leg here. Drift was measured as gyro rate minus the
+# applied correction, so the plant realises the correction 1:1 (after a 0.1 s lag).
+@pytest.mark.parametrize('vx,vy,distance,coupling', [(-.40, 0., .80, .8), (.36, -.18, .50, .75)])
+def test_station_feedback_holds_heading_on_fast_station_legs(vx, vy, distance, coupling):
+    speed = math.hypot(vx, vy)
+
+    def drive(hold):
+        yaw, rate, travelled, peak, v = .05, 0., 0., .05, 0.
+        while travelled < distance:
+            v = min(speed, v + 1.2*.02, max(.03, math.sqrt(2*1.2*(distance-travelled))))
+            cx, cy = vx*v/speed, vy*v/speed
+            drift = math.copysign(coupling*v, CONFIG.vx_gain*vx + CONFIG.vy_gain*vy)
+            correction = (hold.apply(cx, cy, yaw, rate, v, travelled/speed, target_yaw=0.)
+                          if hold else 0.)
+            assert hold is None or abs(correction) <= hold.config.max_correction + 1e-12
+            rate += (correction-rate)*.02/.1
+            yaw += (drift+rate)*.02
+            travelled += v*.02
+            peak = max(peak, abs(yaw))
+        return peak
+    old = StationHeadingHold(YawBiasConfig(vx_gain=CONFIG.vx_gain, vy_gain=CONFIG.vy_gain, max_correction=.15))
+    assert drive(None) > MAX_STATION_YAW_ERROR
+    assert drive(old) > MAX_STATION_YAW_ERROR  # 0.15 rad/s cap, 0.2 rad/s^2 ramp: the hardware failure
+    assert drive(StationHeadingHold(CONFIG, accel=HOLD_ACCEL)) < MAX_STATION_YAW_ERROR - .1
+
+
 def test_station_feedback_requires_commanded_and_measured_translation():
     hold = StationHeadingHold(CONFIG)
     assert hold.apply(.12, 0., 0., .05, 0., 0.) == 0.
     assert hold.apply(.12, 0., .04, .05, 0., .1) == 0.
     assert hold.apply(0., 0., .04, .05, .1, .2) == 0.
-    assert hold.apply(.3, 0., .04, .05, .3, .3) == 0.  # not a slow docking maneuver
+    assert hold.apply(.5, 0., .04, .05, .5, .3) == 0.  # above the fitted envelope (transit)
 
 
 def test_station_feedback_trims_small_initial_error_to_requested_heading_while_moving():
@@ -231,6 +263,8 @@ def test_hardware_parameters_match_reviewed_fit():
     p = yaml.safe_load((root / 'navigation_bringup/config/swerve_bridge.yaml').read_text())['swerve_bridge']['ros__parameters']
     assert p['yaw_bias_enabled'] is True
     assert p['yaw_bias_vx_gain'] == CONFIG.vx_gain and p['yaw_bias_vy_gain'] == CONFIG.vy_gain
+    assert p['yaw_bias_max_correction'] == CONFIG.max_correction
+    assert p['station_heading_accel'] == HOLD_ACCEL
     assert p['rotational_deadband'] == CONFIG.command_deadband
 
 
@@ -240,17 +274,20 @@ def test_fit_recovers_omni_bias_and_rejects_unidentifiable_data(tmp_path, alread
     spec = importlib.util.spec_from_file_location('fit_drive_drift', root / 'scripts/fit_drive_drift.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    rows = []
+    rows, yaw = [], 3.
     for i, (vx, vy) in enumerate(((.15, 0.), (.3, 0.), (-.15, 0.), (-.3, 0.),
                                    (0., .15), (0., .3), (0., -.15), (0., -.3))):
         for j in range(200):
+            gyro = .12*vx-.2*vy
+            # The wheel-kinematic twist sees only part of the real (gyro) rotation.
             rows.append(dict(t=(i*200+j)*.02, source='teleop', cmd_age=.01,
                              cmd_vx=vx, cmd_vy=vy, cmd_wz=0., odom_vx=vx,
-                             odom_vy=vy, odom_wz=.12*vx-.2*vy))
+                             odom_vy=vy, odom_wz=.25*gyro, yaw=math.atan2(math.sin(yaw), math.cos(yaw))))
             if already_compensated:
-                correction = -.6 * rows[-1]['odom_wz']
+                correction = -.6 * gyro
                 rows[-1].update(applied_age=.01, applied_wz=correction)
-                rows[-1]['odom_wz'] += correction
+                gyro += correction
+            yaw += gyro*.02
     path = tmp_path / 'data.csv'
     with path.open('w') as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
@@ -270,7 +307,7 @@ def test_fit_recovers_omni_bias_and_rejects_unidentifiable_data(tmp_path, alread
 
 
 @pytest.mark.parametrize('kwargs', [{'gain': 2.}, {'vx_gain': math.nan},
-                                    {'vx_gain': 5.}, {'max_correction': .3}, {'model_speed': .05}])
+                                    {'vx_gain': 5.}, {'max_correction': .31}, {'model_speed': .05}])
 def test_unsafe_model_parameters_are_refused(kwargs):
     with pytest.raises(ValueError):
         YawBiasConfig(**kwargs)

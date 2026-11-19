@@ -18,7 +18,7 @@ full workspace, nav_ws).  It starts:
                approach) and nav_api (the /nav topic interface for the rest of the system)
 
 Velocity chain -- NOTHING in Nav2 publishes /cmd_vel:
-  controller_server, behavior_server -> /cmd_vel_nav_raw -> velocity_smoother
+  controller_server, behavior_server, dock_behavior_server -> /cmd_vel_nav_raw -> velocity_smoother
   -> /cmd_vel_smoothed -> collision_monitor -> /cmd_vel_nav -> cmd_vel_mux -> /cmd_vel
 No docking_server / route_server: the stock docking_server publishes straight to /cmd_vel.
 
@@ -33,6 +33,7 @@ the C++ one): ../scripts/install_deps.sh installs both. Where they are missing t
 and starts nothing, instead of failing the whole autonomy bringup. See ../README.md.
 """
 
+import math
 import os
 import yaml
 
@@ -74,7 +75,7 @@ NAV2_PACKAGES = (
 # Brought up in this order, shut down in reverse. bt_navigator loads its tree on activation and
 # needs the action servers of the nodes listed before it.
 LOCALIZATION_NODES = ['map_server', 'amcl']
-NAVIGATION_NODES = ['controller_server', 'smoother_server', 'planner_server', 'behavior_server',
+NAVIGATION_NODES = ['controller_server', 'smoother_server', 'planner_server', 'behavior_server', 'dock_behavior_server',
                     'velocity_smoother', 'collision_monitor', 'bt_navigator', 'waypoint_follower']
 
 # Every node runs on wall time.
@@ -100,6 +101,32 @@ def parse_float(name, text):
         return float(text)
     except ValueError:
         raise RuntimeError(f'launch argument {name}:={text!r} is not a number') from None
+
+
+def load_saved_pose(path, map_yaml):
+    """(x, y, yaw) that nav_api last saved in `path` for this map, or None."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path) as f:
+            saved = yaml.safe_load(f)
+        if os.path.realpath(saved['map']) != os.path.realpath(map_yaml):
+            return None
+        pose = tuple(float(saved[key]) for key in ('x', 'y', 'yaw'))
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
+        return None
+    return pose if all(math.isfinite(value) for value in pose) else None
+
+
+def initial_pose(x, y, yaw, pose_file, map_yaml):
+    """AMCL start pose and where it came from: explicit x/y/yaw, else the saved pose, else 0, 0, 0."""
+    given = {'x': x, 'y': y, 'yaw': yaw}
+    if any(given.values()):
+        return tuple(parse_float(name, text or '0') for name, text in given.items()), 'launch arguments'
+    saved = load_saved_pose(pose_file, map_yaml)
+    if saved is not None:
+        return saved, f'saved pose {pose_file}'
+    return (0.0, 0.0, 0.0), 'map origin (no saved pose for this map)'
 
 
 def missing_packages(names):
@@ -207,7 +234,8 @@ def _nodes(context):
             params.append(os.path.join(share, 'config', 'nav2_fast_humble_overlay.yaml'))
     params.append(WALL_TIME)
 
-    x, y, yaw = (parse_float(name, arg(name)) for name in ('x', 'y', 'yaw'))
+    pose_file = os.path.expanduser(arg('pose_file'))
+    (x, y, yaw), pose_source = initial_pose(arg('x'), arg('y'), arg('yaw'), pose_file, map_yaml)
     goal_heading = resolve_goal_heading(nav_motion, arg('goal_heading'))
     approach = parse_float('approach_distance', arg('approach_distance'))
     bt_xml = os.path.join(share, 'behavior_trees', 'navigate_to_pose_cautious_humble.xml'
@@ -226,7 +254,7 @@ def _nodes(context):
     actions = [
         LogInfo(msg=f"[navigation] map={map_yaml} nav_motion={nav_motion} nav_speed={nav_speed} "
                     f'goal_heading={goal_heading} approach={approach} '
-                    f'AMCL initial pose x={x} y={y} yaw={yaw}'),
+                    f'AMCL initial pose x={x:.3f} y={y:.3f} yaw={yaw:.3f} from {pose_source}'),
         LogInfo(msg='[navigation] *** HARDWARE MODE: swerve_bridge drives the REAL robot. Keep the '
                     'gamepad in hand: B = e-stop, releasing LT stops teleop. ***'
                     if hardware else
@@ -275,6 +303,8 @@ def _nodes(context):
         nav2_node('nav2_smoother', 'smoother_server', name='smoother_server'),
         nav2_node('nav2_planner', 'planner_server', name='planner_server'),
         nav2_node('nav2_behaviors', 'behavior_server', name='behavior_server',
+                  remappings=to_nav_raw),
+        nav2_node('nav2_behaviors', 'behavior_server', name='dock_behavior_server',
                   remappings=to_nav_raw),
         # cmd_vel is the smoother's INPUT; its output topic cmd_vel_smoothed is fixed in the node.
         nav2_node('nav2_velocity_smoother', 'velocity_smoother', name='velocity_smoother',
@@ -343,7 +373,11 @@ def _nodes(context):
                 'goal_topic': '/goal_pose_staged' if approach > 0.0 or
                               map_settings.get('docking', {}).get('enabled') is True else '/goal_pose',
                 'station_docking': map_settings.get('docking', {}).get('enabled') is True,
-                'cancel_topic': '/nav_cancel'}]))
+                'cancel_topic': '/nav_cancel',
+                # Only the real base is where the pose says: a dry run's simulated base moves
+                # while the robot stands still.
+                'pose_file': pose_file if hardware else '',
+                'map_yaml': map_yaml}]))
     return actions
 
 
@@ -380,12 +414,18 @@ def generate_launch_description():
                         'straight in (no turning next to the goal). 0 = go to the goal '
                         'directly.'),
         DeclareLaunchArgument(
-            'x', default_value='0.0',
-            description='AMCL initial pose x in the map [m]. 0, 0, 0 = where mapping started.'),
+            'x', default_value='',
+            description='AMCL initial pose x in the map [m]. x, y and yaw all empty (default) = '
+                        'the pose in pose_file, else 0, 0, 0 = where mapping started.'),
         DeclareLaunchArgument(
-            'y', default_value='0.0', description='AMCL initial pose y in the map [m].'),
+            'y', default_value='', description='AMCL initial pose y in the map [m].'),
         DeclareLaunchArgument(
-            'yaw', default_value='0.0', description='AMCL initial pose yaw in the map [rad].'),
+            'yaw', default_value='', description='AMCL initial pose yaw in the map [rad].'),
+        DeclareLaunchArgument(
+            'pose_file', default_value='',
+            description='Where nav_api keeps the latest map pose on hardware runs; the next start '
+                        'resumes there (the base does not move while the stack is down). run.sh '
+                        'sets <ros_ws>/nav_state/last_pose.yaml. Empty = off.'),
         DeclareLaunchArgument(
             'api_namespace', default_value='/',
             description="Namespace the /nav API is published in. '/' (default) = /nav/state, "

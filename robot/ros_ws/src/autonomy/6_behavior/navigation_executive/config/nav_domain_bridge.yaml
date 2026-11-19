@@ -1,5 +1,5 @@
-# Bridges ONLY the nav_api contract between the robot_1 domain (0) and the isolated navigation
-# domain (42, the default NAVIGATION_DOMAIN_ID in autonomy/1_navigation/run.sh). Nav2 internals,
+# Bridges ONLY the nav_api contract, plus the gamepad's /joy for the arm teleop, between the robot_1 domain (0) and
+# the isolated navigation domain (42, the default NAVIGATION_DOMAIN_ID in autonomy/1_navigation/run.sh). Nav2 internals,
 # TF, cmd_vel etc. stay on 42 and are not visible on domain 0 (GCS, LAN). If run.sh is started
 # with a different NAVIGATION_DOMAIN_ID, change 42 below to match.
 #
@@ -24,5 +24,11 @@ topics:
     to_domain: 0
   /nav/result:
     type: std_msgs/msg/String
+    from_domain: 42
+    to_domain: 0
+
+  # navigation gamepad (joy_auto) -> act_inference arm teleop (hold R2)
+  /joy:
+    type: sensor_msgs/msg/Joy
     from_domain: 42
     to_domain: 0

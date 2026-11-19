@@ -23,7 +23,7 @@ static std::vector<ManualWaypoint> load_manual_waypoints(
     nlohmann::json j;
     try { f >> j; }
     catch (const std::exception& e) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[PRM] Failed to parse manual waypoints JSON: %s", e.what());
         return {};
     }
@@ -71,7 +71,7 @@ static std::vector<PRMNode> load_prm_roadmap(
     f.read(reinterpret_cast<char*>(&dof), sizeof(dof));
 
     if (dof != expected_dof) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[PRM] DOF mismatch: file has %zu, robot has %zu — rebuild roadmap.",
             dof, expected_dof);
         return {};
@@ -467,7 +467,7 @@ void build_prm_roadmap(
     // ═════════════════════════════════════════════════════════
     std::ofstream file(PRM_ROADMAP_FILE, std::ios::binary);
     if (!file) {
-        RCLCPP_ERROR(node->get_logger(),
+        RCLCPP_WARN(node->get_logger(),
             "[PRM] Failed to open %s for writing.", PRM_ROADMAP_FILE.c_str());
         return;
     }
@@ -500,7 +500,7 @@ void inject_waypoints_into_roadmap(
     // Load existing roadmap
     std::vector<PRMNode> roadmap = load_prm_roadmap(node, dof);
     if (roadmap.empty()) {
-        RCLCPP_ERROR(node->get_logger(), "[INJECT] No roadmap to inject into.");
+        RCLCPP_WARN(node->get_logger(), "[INJECT] No roadmap to inject into.");
         return;
     }
 

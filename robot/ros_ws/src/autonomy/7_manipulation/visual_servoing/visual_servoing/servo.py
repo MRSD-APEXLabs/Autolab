@@ -18,7 +18,7 @@ import numpy as np
 from .arm import ArmError, GRIPPER_FSR_CUTOFF, flange_for_tip, level_pose
 from .control import (Gains, PlateFilter, PoseHistory, finger_angle_offset, grasp_yaw, hover_target, plate_in_base,
                       servo_command)
-from .mount import Mount
+from .mount import Mount, rpy_matrix
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,13 @@ class GripperConfig:
     use_fsr: bool = True              # False: close to the gripper's position + close_offset, no FSR feedback
     close_offset: int = 350            # gripper units; 350 held the plate on the arm (2026-09-22)
     close_settle: float = 4.0          # s for the fingers to close before lifting (1.5 lifted mid-close)
-    tare_samples: int = 25             # FSR reads at the hover, gripper open; pressures count from their median (0: raw)
+    step_settle: float = 0.5           # s after each closing step before the next FSR read (not close_start: it
+                                       # waits its travel at ServoConfig.probe_gripper_rate)
+    # The main grip's settle after contact ends early once grip_settle_count FSR medians in a row each differ from
+    # the one before by at most grip_settle_tolerance ADC counts on both pads; close_settle is the cap. < 0: off
+    grip_settle_tolerance: int = -1
+    grip_settle_count: int = 2
+    tare_samples: int = 25            # FSR reads at the hover, gripper open; pressures count from their median (0: raw)
     fsr_polarity: tuple = (1, 1)       # +1: contact raises ADC; -1: contact lowers ADC
     fsr_samples: int = 5              # median of this many reads for each contact decision
     fsr_sample_interval: float = 0.05 # seconds between independent ADC readings
@@ -101,6 +107,7 @@ class ServoConfig:
     weak_size_tolerance: float = 0.12   # both sides within this fraction of plate_size
     filter_alpha: float = 0.3
     filter_gate: float = 0.03           # m
+    filter_orientation_gate_deg: float = 20.0  # reject larger base-frame axis changes, modulo 180 deg
     grasp: bool = True                  # False: stop at the hover pose
     grasp_depth: float = -0.002         # m below the top face (0.005 hit the tray on the arm: 7 mm higher held)
     approach_speed: float = 30.0        # mm/s, hover to `final_segment` above the grasp height
@@ -111,10 +118,14 @@ class ServoConfig:
     # ft_contact_count reads), lift probe_lift, open, re-zero the F/T, lower to probe_grip_depth below the touch,
     # then close as usual. No touch within probe_depth below the expected top: the attempt fails (retry).
     probe_contact: bool = False
-    probe_close: int = 550              # gripper value for the closed-finger probe
-    probe_gripper_rate: float = 80.0    # gripper units/s; the jaws report no position, so each probe close/open
-    probe_gripper_margin: float = 1.0   # waits travel / rate + margin s (350 units needed > 1.5 s, 4 s was enough)
+    probe_close: int = 550              # gripper value for the closed-finger probe (closes while the arm moves down)
+    probe_open: int = 0                 # gripper value the probe opens to before the grasp descent; the close starts there
+    probe_gripper_rate: float = 200.0   # gripper units/s; the jaws report no position, so each probe close/open and
+    probe_gripper_margin: float = 0.5   # the start's open wait travel / rate + margin s (firmware rev4, 2026-11-19:
+                                        # up to ~209 units/s after a 0.17 s ramp); the jump to gripper.close_start
+                                        # waits travel / rate
     probe_lift: float = 0.005           # m above the touch while the gripper opens
+    probe_reposition_speed: float = 15.0  # mm/s off the touch to probe_lift, the turn to the grasp tilt, down to grip
     probe_depth: float = 0.010          # m below the expected plate top the probe may go (also min_tip_z)
     probe_grip_depth: float = 0.0075    # m below the touched plate top the fingertips close (bench: old plate_height 0.03 / 4)
     # Probe touches descend at final_speed down to probe_slow_margin above where contact is expected (the camera's
@@ -137,6 +148,16 @@ class ServoConfig:
     probe_tilt_max_touches: int = 15
     probe_tilt_lift: float = 0.002      # m above the last touch for each tilt step
     probe_tilt_settle: float = 0.3      # s still before each F/T read of the tilt
+    # probe_pivot_offset > 0 (with probe_tilt): after the first touch, roll on the fingertip that touched instead of
+    # lifting: rotate about where it touches (probe_pivot_offset along the finger axis from the fingertip centre, closed
+    # at probe_close) so the other one comes down at probe_touch_speed, streaming the F/T, until the tilt torque crosses
+    # zero (both touch); the grasp tilt is interpolated at the crossing. The gripper's weight moves onto the torque as
+    # it tilts, so first one tilt of probe_roll_calibration_deg in the air measures that per degree; the roll subtracts
+    # it. The touching fingertip coming off, |dFz| above probe_roll_max_n: roll back to the first touch and lift and
+    # retouch instead. probe_tilt_max_deg without a crossing: the level grasp from the first touch.
+    probe_pivot_offset: float = 0.0     # m; 0: lift and retouch
+    probe_roll_calibration_deg: float = 5.0
+    probe_roll_max_n: float = 12.0
     lift: float = 0.10                  # m after closing
     lift_speed: float = 50.0            # mm/s
     max_retries: int = 0                # one attempt per start command; retries explicitly opt in
@@ -164,7 +185,8 @@ class ServoRunner:
         self.prepare = prepare
         self.clock, self.sleep = clock, sleep
         self.history = PoseHistory()
-        self.plate = PlateFilter(config.filter_alpha, config.filter_gate)
+        self.plate = PlateFilter(config.filter_alpha, config.filter_gate,
+                                 orientation_gate=np.radians(config.filter_orientation_gate_deg))
         self._lock = threading.Lock()
         self._pending = []          # detections waiting for the control loop: (stamp, detections, intrinsics)
         self._abort = threading.Event()
@@ -321,6 +343,7 @@ class ServoRunner:
         cfg = self.config
         start_pose = None
         self._controlled_end = False    # return to the start only after a run that ended as planned
+        self._open_until = 0.0          # clock time the start's gripper_open is done (the tare waits for it)
         try:
             if self.prepare is not None:
                 self._set(phase='selecting camera')
@@ -333,9 +356,12 @@ class ServoRunner:
                 self.arm.position_mode()
                 if cfg.grasp:
                     self.arm.gripper_setup()
+                    before = self.arm.gripper_position()   # the last target: where the jaws went (None: unknown)
                     self.arm.gripper_open()
                     if cfg.gripper.use_fsr:
-                        self._wait(cfg.gripper.close_settle)  # finish opening before the unloaded tare
+                        # finish opening before the unloaded tare (_grasp waits for the rest): align meanwhile
+                        travel = before if before is not None else 1000
+                        self._open_until = self.clock() + travel / cfg.probe_gripper_rate + cfg.probe_gripper_margin
                 if cfg.level_at_start:
                     self.arm.move_flange(level_pose(start_pose), cfg.level_speed)
             for attempt in range(cfg.max_retries + 1):
@@ -383,6 +409,7 @@ class ServoRunner:
                 self.arm.hand_back()
             except Exception as exc:
                 log.warning('hand back (mode 1) failed: %s', exc)
+        self.arm.release_ft()   # free an SDK client slot for act_inference (5-client controller limit)
         if self.status().get('result') is None:
             self._set(result='stopped' if cfg.dry_run else 'done')
         self._set(phase='idle', running=False, finished=self.clock())
@@ -463,6 +490,7 @@ class ServoRunner:
         self.arm.position_mode()
         pose = self.arm.flange_pose()
         yaw = grasp_yaw(self.plate.short_axis, self._yaw(pose), cfg.finger_axis)
+        self._wait(max(0.0, self._open_until - self.clock()))   # the start's open, before the F/T zero and FSR tare
         if cfg.probe_contact:
             self._ft_setup()
             base = self._fsr_baseline() if gcfg.use_fsr else (0, 0)
@@ -497,7 +525,11 @@ class ServoRunner:
             log.info('closed the gripper %s -> %d without FSR feedback, lifted', current, value)
             return self._ft_hold(ft_before, True)
         value = gcfg.close_start
-        self.arm.gripper_set(value)
+        start = self.arm.gripper_position()   # open: 0, or grasp.probe_open after a probe
+        # one move to close_start (short of contact), then gripper.step at a time; the jaws report no position, so
+        # wait their travel before the first FSR read
+        self.arm.gripper_set(value, settle=0.0)
+        self._wait(abs(value - (start or 0)) / cfg.probe_gripper_rate)
         fsr = (None, None)
         nudge_total, nudges = 0.0, 0
         last_nudged_finger = None
@@ -509,7 +541,10 @@ class ServoRunner:
             self._set(fsr_pressure=list(rise))
             if self._pressed(rise):
                 break
-            finger, lateral = self._ft_balance(self._unbalanced_finger(rise), rise)
+            finger, lateral = self._unbalanced_finger(rise), None
+            if gcfg.use_ft or any(t >= 0 and r > t for r, t in zip(rise, gcfg.target_pressure)):
+                # without use_ft the F/T only logs: skip its read while closing freely, until a pad touches
+                finger, lateral = self._ft_balance(finger, rise)
             if finger is not None and gcfg.use_ft and lateral is not None:
                 value, nudge_total = self._track_close(finger, lateral, value, base, nudge_total)
                 continue
@@ -523,7 +558,7 @@ class ServoRunner:
                         and max(fsr) <= GRIPPER_FSR_CUTOFF and value < gcfg.max_close):
                     previous = value
                     value = min(value + max(1, gcfg.step // 4), gcfg.max_close)
-                    if not self.arm.gripper_set(value):
+                    if not self.arm.gripper_set(value, settle=gcfg.step_settle):
                         raise ArmError('gripper balance adjustment command failed')
                     self._set(gripper=value, balance_close_increment=value - previous)
                     last_nudged_finger = None
@@ -558,14 +593,14 @@ class ServoRunner:
                         and max(after) <= GRIPPER_FSR_CUTOFF and value < gcfg.max_close):
                     previous = value
                     value = min(value + max(1, gcfg.step // 4), gcfg.max_close)
-                    if not self.arm.gripper_set(value):
+                    if not self.arm.gripper_set(value, settle=gcfg.step_settle):
                         raise ArmError('gripper balance adjustment command failed')
                     self._set(gripper=value, balance_close_increment=value - previous)
                     log.info('FSR load reduced: taking up slack, gripper %d -> %d', previous, value)
                     last_nudged_finger = None
                 continue
             value = min(value + gcfg.step, gcfg.max_close)
-            self.arm.gripper_set(value)
+            self.arm.gripper_set(value, settle=gcfg.step_settle)
         else:
             self._set(fsr_contact_confirmed=False)
             log.warning('FSR thresholds not reached: retaining the gripper command without a lift')
@@ -574,8 +609,7 @@ class ServoRunner:
         self._set(fsr_contact_confirmed=True, phase='grip_settling',
                   grip_contact_fsr=list(fsr), grip_contact_pressure=list(rise))
         self._ft_log('contact confirmed', self._ft_read(), pressure=rise)
-        self._wait(gcfg.close_settle)
-        settled_fsr = self._sample_fsr(gcfg.fsr_samples)
+        settled_fsr = self._grip_settle()
         self._set(fsr_before_squeeze=list(settled_fsr),
                   pressure_before_squeeze=list(self._fsr_pressure(settled_fsr, base)))
         self._ft_log('before squeeze', self._ft_read(), pressure=self._fsr_pressure(settled_fsr, base))
@@ -607,6 +641,25 @@ class ServoRunner:
                   hold_fsr_active=[t >= 0 and r > t for r, t in zip(rise, gcfg.stop_pressure)])
         log.info('grasp check after lift: fsr=%s (baseline %s) -> %s', fsr, base, 'held' if ok else 'not held')
         return self._ft_hold(ft_before, ok)
+
+    def _grip_settle(self):
+        """Let the main grip settle after contact, before the final squeeze: close_settle s; with
+        grip_settle_tolerance >= 0 until grip_settle_count FSR medians in a row each differ from the one before by at
+        most that on both pads, at most close_settle s (plus the last sample). Returns the last FSR median."""
+        cfg = self.config.gripper
+        if cfg.grip_settle_tolerance < 0:
+            self._wait(cfg.close_settle)
+            return self._sample_fsr(cfg.fsr_samples)
+        started = self.clock()
+        last, stable = self._sample_fsr(cfg.fsr_samples), 0
+        while stable < cfg.grip_settle_count and self.clock() - started < cfg.close_settle:
+            fsr = self._sample_fsr(cfg.fsr_samples)
+            stable = stable + 1 if max(abs(a - b) for a, b in zip(fsr, last)) <= cfg.grip_settle_tolerance else 0
+            last = fsr
+        seconds, steady = self.clock() - started, stable >= cfg.grip_settle_count
+        self._set(grip_settle_s=round(seconds, 2), grip_settle_steady=steady)
+        log.info('grip settle: FSR %s after %.1f s (%s)', last, seconds, 'steady' if steady else 'close_settle cap')
+        return last
 
     def _squeeze_before_lift(self):
         """After the main grip settles, send and verify the final increment before moving the arm."""
@@ -780,7 +833,7 @@ class ServoRunner:
                 self._nudge(sign * slide)
                 walked += sign * slide
             value = min(value + cfg.step, cfg.max_close)
-            if not self.arm.gripper_set(value):
+            if not self.arm.gripper_set(value, settle=cfg.step_settle):
                 raise ArmError('gripper tracking close command failed')
             fsr = self._sample_fsr(cfg.fsr_samples)
             rise = self._fsr_pressure(fsr, base)
@@ -841,10 +894,17 @@ class ServoRunner:
             raise RunFailed('probe_contact needs the wrist F/T sensor')
         flange = self._probe_flange(yaw)
         self._set(phase='probing', probe_contact=None)
-        self._probe_gripper(cfg.probe_close, 'close')
-        self.arm.move_flange(flange(top + np.array([0.0, 0.0, cfg.final_segment])), cfg.approach_speed)
+        # the jaws close while the arm moves to final_segment above the plate; they are there before the F/T baseline
+        closed = self._probe_gripper(cfg.probe_close, 'close', wait=False)
+        above = top + np.array([0.0, 0.0, cfg.final_segment])
+        self.arm.move_flange(flange(above), cfg.approach_speed)
+        self._wait(max(0.0, closed - self.clock()))
         self._check_abort()
-        baseline = self._ft_read()
+        gravity = None
+        if cfg.probe_tilt and cfg.probe_pivot_offset > 0.0:
+            gravity, baseline = self._roll_gravity(flange, above)
+        else:
+            baseline = self._ft_read()
         if baseline is None:
             raise RunFailed('F/T read failed before the probe')
         floor = top.copy()
@@ -865,16 +925,16 @@ class ServoRunner:
                      f'({(contact_z - top[2]) * 1000:+.1f} mm from the camera estimate)')
         up = top.copy()
         if cfg.probe_tilt:
-            self._grasp_tilt, contact_z = self._probe_tilt(top, floor[2], flange, baseline, contact_z)
+            self._grasp_tilt, contact_z = self._probe_tilt(top, floor[2], flange, baseline, contact_z, gravity)
             up[2] = contact_z + cfg.probe_lift
             # straight up off the plate first, then turn to the grasp tilt about the fingertip centre
             pose = self.arm.flange_pose()
             pose[2, 3] += max(0.0, up[2] - float(self._tip(pose)[2]))
-            self.arm.move_flange(pose, cfg.final_speed)
+            self.arm.move_flange(pose, cfg.probe_reposition_speed)
         else:
             up[2] = contact_z + cfg.probe_lift
-        self.arm.move_flange(flange(up, self._grasp_tilt), cfg.final_speed)
-        self._probe_gripper(0, 'open')
+        self.arm.move_flange(flange(up, self._grasp_tilt), cfg.probe_reposition_speed)
+        self._probe_gripper(cfg.probe_open, 'open')   # wide enough to lower over the plate; the close starts here
         try:
             self.arm.ft_zero()   # gripper open, nothing touching: the zero the closing routine reads against
         except ArmError as exc:
@@ -884,7 +944,7 @@ class ServoRunner:
         self._limit(grasp_tip)
         self._set(phase='descending', grasp_tip_mm=[round(v * 1000, 1) for v in grasp_tip])
         self._check_abort()
-        self.arm.move_flange(flange(grasp_tip, self._grasp_tilt), cfg.final_speed)
+        self.arm.move_flange(flange(grasp_tip, self._grasp_tilt), cfg.probe_reposition_speed)
         self._ft_log('grasp height', self._ft_read())
         return grasp_tip
 
@@ -893,10 +953,11 @@ class ServoRunner:
         cfg = self.config
         return lambda tip, tilt=0.0: flange_for_tip(tip, yaw, self.mount.flange_T_tip, tilt, cfg.finger_axis)
 
-    def _probe_tilt(self, top, floor_z, flange, baseline, contact_z):
+    def _probe_tilt(self, top, floor_z, flange, baseline, contact_z, gravity=None):
         """probe_tilt, from the first (level) touch at `contact_z` with the pre-probe `baseline`: tilt and touch again
-        until both fingertips touch. Returns (tilt rad, fingertip-centre contact z) for the grasp; (0, the first touch)
-        when the seek gives up, so the grasp is the level one."""
+        until both fingertips touch; with `gravity` (probe_pivot_offset) roll on the touching fingertip first.
+        Returns (tilt rad, fingertip-centre contact z) for the grasp; (0, the first touch) when the seek gives up, so
+        the grasp is the level one."""
         cfg, gcfg = self.config, self.config.gripper
         first_z = contact_z
         tilt, step, touches = 0.0, np.radians(cfg.probe_tilt_step_deg), 1
@@ -918,7 +979,14 @@ class ServoRunner:
                 result = 'balanced'
                 break
             sign = 1.0 if torque > 0 else -1.0     # torque < 0: the + side fingertip touches, tilt - to lower the other
-            sides[sign] = (tilt, torque / max(abs(wrench[2] - baseline[2]), 1e-6), contact_z)
+            if gravity is not None and touches == 1:
+                rolled = self._probe_roll(sign, baseline, gravity, contact_z)
+                if rolled is not None:
+                    result, tilt, rolled_z = rolled
+                    contact_z = rolled_z if rolled_z is not None else contact_z
+                    break
+                self._set(phase='probe tilting')     # rolled back onto the first touch: lift and retouch instead
+            sides[sign] =(tilt, torque / max(abs(wrench[2] - baseline[2]), 1e-6), contact_z)
             if len(sides) == 2:
                 (t_pos, l_pos, z_pos), (t_neg, l_neg, z_neg) = sides[1.0], sides[-1.0]
                 if abs(t_pos - t_neg) <= min_step + 1e-9:
@@ -955,7 +1023,7 @@ class ServoRunner:
                 result = 'lost'
                 break
             contact_z = float(self._tip(touch[0])[2])
-        if result in ('balanced', 'converged'):
+        if result in ('balanced', 'converged', 'rolled'):
             self._set(probe_tilt_result=result, probe_tilt_deg=round(float(np.degrees(tilt)), 2),
                       probe_tilt_touches=touches,
                       probe_contact_tip_mm=[round(v * 1000, 1) for v in (top[0], top[1], contact_z)])
@@ -968,20 +1036,136 @@ class ServoRunner:
                   probe_tilt_gave_up_deg=round(float(np.degrees(tilt)), 2))
         return 0.0, first_z
 
-    def _probe_gripper(self, value, what):
-        """Move the gripper to `value` and wait until it has got there. The firmware reports only the last target,
-        not where the jaws are, so the wait is the travel at probe_gripper_rate plus probe_gripper_margin."""
+    def _roll_gravity(self, flange, above):
+        """probe_pivot_offset, closed fingers in the air at `above`: tilt probe_roll_calibration_deg about the fingertip
+        centre and back. Returns (F/T change per rad of tilt, the level wrench: the pre-probe baseline)."""
+        cfg, gcfg = self.config, self.config.gripper
+        angle = np.radians(cfg.probe_roll_calibration_deg)
+        self.arm.move_flange(flange(above, angle), cfg.approach_speed)
+        self._wait(cfg.probe_tilt_settle)
+        tilted = self._ft_read()
+        self.arm.move_flange(flange(above), cfg.approach_speed)
+        self._wait(cfg.probe_tilt_settle)
+        level = self._ft_read()
+        if tilted is None or level is None:
+            raise RunFailed('F/T read failed during the probe roll calibration')
+        gravity = (np.array(tilted) - np.array(level)) / angle
+        per_deg = gcfg.ft_tilt_torque_sign * gravity[3 + gcfg.ft_tilt_torque_axis] * np.radians(1.0)
+        self._set(probe_roll_gravity_nm_per_deg=round(float(per_deg), 5))
+        log.info('probe roll calibration: tilt torque %+.5f N m per deg of tilt in the air', per_deg)
+        return gravity, level
+
+    def _tool_tilt(self, pose):
+        """Tilt (rad, as tilt_rotation) of `pose` from tool-down at its own yaw."""
+        rel = rpy_matrix(np.pi, 0.0, self._yaw(pose)).T @ pose[:3, :3]
+        if self.config.finger_axis == 'y':
+            return float(np.arctan2(rel[2, 1], rel[1, 1]))
+        return float(np.arctan2(-rel[0, 2], rel[0, 0]))
+
+    def _probe_roll(self, direction, baseline, gravity, contact_z):
+        """probe_pivot_offset, at the first (level) touch with the tilt torque's sign `direction` (the tilt that lowers
+        the fingertip in the air): rotate about the touching fingertip in probe_tilt_step_deg legs up to
+        probe_tilt_max_deg, the other fingertip coming down at probe_touch_speed, reading the F/T against `baseline` plus
+        `gravity` * tilt. Returns ('rolled', tilt, fingertip-centre contact z) at the tilt where the torque crosses zero;
+        ('cap', tilt, None) at probe_tilt_max_deg without a crossing; None after rolling back onto the first touch
+        when the touching fingertip came off or |dFz| passed probe_roll_max_n."""
+        cfg, gcfg = self.config, self.config.gripper
+        axis = 3 + gcfg.ft_tilt_torque_axis
+        need = max(1, gcfg.ft_contact_count)
+        self._set(phase='probe rolling')
+        start = self.arm.flange_pose()
+        yaw = self._yaw(start)
+        unit = np.eye(3)[{'x': 0, 'y': 1}[cfg.finger_axis]]
+        pivot = self.mount.flange_T_tip.copy()      # where the touching fingertip meets the plate, flange frame
+        pivot[:3, 3] -= direction * cfg.probe_pivot_offset * unit
+        point = (start @ pivot)[:3, 3]
+        pose_at = lambda tilt: flange_for_tip(point, yaw, pivot, tilt, cfg.finger_axis)
+        # the controller moves the TCP in a line at `speed`: it turns about the pivot at radius / speed
+        about = np.eye(3)[0 if cfg.finger_axis == 'y' else 1]
+        lever = self.arm.flange_T_tcp[:3, 3] - pivot[:3, 3]
+        radius = float(np.linalg.norm(lever - np.dot(lever, about) * about))
+        speed = cfg.probe_touch_speed * radius / (2.0 * cfg.probe_pivot_offset)
+        step, limit = np.radians(cfg.probe_tilt_step_deg), np.radians(cfg.probe_tilt_max_deg)
+        tilts = [direction * min(limit, step * (i + 1)) for i in range(int(np.ceil(limit / step - 1e-9)))]
+        deadline = self.clock() + 2.0 * radius * limit * 1000.0 / speed + 2.0
+        log.info('probe roll on the %s fingertip (pivot %.1f mm along the fingers), %.2f mm/s',
+                 '+' if direction < 0 else '-', -direction * cfg.probe_pivot_offset * 1000, speed)
+        samples, crossing, lost, outcome, leg = [], None, 0, None, 0
+        self.arm.move_flange(pose_at(tilts[0]), speed, wait=False)
+        try:
+            while outcome is None:
+                self._check_abort()
+                pose = self.arm.flange_pose()
+                wrench = self.arm.ft_force()
+                if wrench is None:
+                    raise RunFailed('F/T read failed during the probe roll')
+                tilt = self._tool_tilt(pose)
+                expected = np.asarray(baseline) + gravity * tilt
+                dfz = abs(wrench[2] - expected[2])
+                torque = gcfg.ft_tilt_torque_sign * (wrench[axis] - expected[axis])
+                samples.append((tilt, torque))
+                lost = lost + 1 if dfz < gcfg.ft_probe_contact_n else 0
+                if dfz > cfg.probe_roll_max_n:
+                    outcome = 'force'
+                elif lost >= need:
+                    outcome = 'lost'
+                elif torque * direction <= 0.0:          # the other fingertip took over the torque: both touch
+                    crossing = len(samples) - 1 if crossing is None else crossing
+                    outcome = 'crossed' if len(samples) - crossing >= need else None
+                else:
+                    crossing = None
+                if outcome is not None:
+                    self.arm.halt()
+                elif np.linalg.norm(pose[:3, 3] - pose_at(tilts[leg])[:3, 3]) < 0.0005:
+                    if leg == len(tilts) - 1:
+                        outcome = 'cap'
+                    else:
+                        leg += 1
+                        self.arm.move_flange(pose_at(tilts[leg]), speed, wait=False)
+                elif self.clock() > deadline:
+                    raise RunFailed('probe roll did not reach its end')
+                if outcome is None:
+                    self.sleep(gcfg.fsr_sample_interval)
+        except BaseException:
+            try:
+                self.arm.halt()
+            except Exception as exc:
+                log.warning('halting the probe roll failed: %s', exc)
+            raise
+        self._set(probe_roll_result=outcome, probe_roll_reads=len(samples))
+        self._ft_log(f'probe roll {np.degrees(tilt):+.2f} deg', wrench, f'{outcome}, tilt torque {torque:+.4f} N m')
+        if outcome in ('force', 'lost'):
+            log.warning('probe roll stopped (%s) at %+.2f deg: back onto the first touch, lift and retouch',
+                        outcome, np.degrees(tilt))
+            self.arm.move_flange(start, speed)
+            return None
+        if outcome == 'cap':
+            return 'cap', tilt, None
+        (t1, q1), (t2, q2) = samples[max(0, crossing - 1)], samples[crossing]
+        tilt = t2 if q1 == q2 else t1 + q1 / (q1 - q2) * (t2 - t1)    # torque zero, linear between the two reads
+        target = pose_at(tilt)
+        self.arm.move_flange(target, speed)
+        # the fingertip centre there, from the first contact (the halt pressed the touching fingertip a little deeper)
+        return 'rolled', tilt, float(self._tip(target)[2]) + contact_z - float(self._tip(start)[2])
+
+    def _probe_gripper(self, value, what, wait=True):
+        """Move the gripper to `value` and (`wait`) wait until it has got there; returns the clock time it gets there.
+        The firmware reports only the last target, not where the jaws are, so that is the travel at
+        probe_gripper_rate plus probe_gripper_margin from now."""
         cfg = self.config
         self._check_abort()
         start = self.arm.gripper_position()   # the previous target: where the jaws went last
         travel = abs(value - start) if start is not None else 1000
         if not self.arm.gripper_set(value, settle=0.0):
             raise ArmError(f'probe gripper {what} command failed')
-        wait = travel / cfg.probe_gripper_rate + cfg.probe_gripper_margin
-        self._set(gripper=value, probe_gripper_wait_s=round(wait, 2))
-        log.info('probe gripper %s %s -> %d: waiting %.1f s', what, start, value, wait)
-        self._wait(wait)
-        self._check_abort()
+        seconds = travel / cfg.probe_gripper_rate + cfg.probe_gripper_margin
+        self._set(gripper=value, probe_gripper_wait_s=round(seconds, 2))
+        log.info('probe gripper %s %s -> %d: %s %.1f s', what, start, value, 'waiting' if wait else 'moving on,', seconds)
+        there = self.clock() + seconds
+        if wait:
+            self._wait(seconds)
+            self._check_abort()
+        return there
 
     def _probe_descend(self, target, baseline, slow_z):
         """Move towards `target` until Fz departs from `baseline` by more than ft_probe_contact_n for

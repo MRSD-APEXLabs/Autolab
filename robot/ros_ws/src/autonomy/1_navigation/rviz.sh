@@ -54,7 +54,7 @@ fi
 # the script remains usable for a host-only navigation stack.
 if command -v docker >/dev/null 2>&1 &&
    docker inspect -f '{{.State.Running}}' autolab-robot-l4t-1 2>/dev/null | grep -qx true &&
-   docker exec autolab-robot-l4t-1 pgrep -f 'ros2 launch navigation_bringup' >/dev/null 2>&1; then
+   docker exec autolab-robot-l4t-1 pgrep -f 'ros2(_launch\.py| launch) navigation_bringup' >/dev/null 2>&1; then
   cat >&2 <<'EOF'
 REFUSING: Humble navigation is active in autolab-robot-l4t-1.
 

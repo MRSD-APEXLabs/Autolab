@@ -10,6 +10,7 @@
 #pragma once
 #include "crrt_plan.hpp"
 #include <Eigen/SVD>
+#include <atomic>
 
 struct RRTStarNode {
     JointVec         q;
@@ -87,9 +88,9 @@ struct InformedSampler {
 //  HELPERS
 // ─────────────────────────────────────────────────────────────
 
-// Why extensions get rejected; printed when the search finds no solution.
+// Why extensions get rejected; printed when the search finds no solution. Per thread (crrt_parallel.hpp).
 struct IrrtStats { int ik = 0, not_closer = 0, collision = 0, edge_ee_down = 0, edge_collision = 0; };
-static IrrtStats irrt_stats;
+static thread_local IrrtStats irrt_stats;
 
 // Walk from q_from toward q_to, at most eta in joint space, projecting each
 // STEP_SIZE step onto ee_down and collision-checking it — the same march as
@@ -122,7 +123,7 @@ static std::optional<JointVec> constrained_steer(
         collision_detection::CollisionResult  res;
         req.group_name = crrt_cfg::GROUP_NAME;
         scene->checkCollision(req, res, rs);
-        if (res.collision) { ++irrt_stats.collision; break; }
+        if (res.collision || !crrt_clearance::clear(rs, jmg, scene)) { ++irrt_stats.collision; break; }
 
         q_curr = q_proj;
         d_curr = d_next;
@@ -186,119 +187,36 @@ static void reparent(std::vector<RRTStarNode>& tree, int child, int new_parent, 
 }
 
 // ─────────────────────────────────────────────────────────────
-//  INFORMED RRT*
+//  ONE TREE
+//  Grows an Informed RRT* tree from q_start toward q_goal for at most time_sec
+//  (counted from t0) and max_iter iterations. With `refine` it keeps improving
+//  the first solution until the budget runs out (irrtstar_plan); without, it
+//  returns the first solution (the parallel search, crrt_parallel.hpp). It
+//  also stops, without a path, once *stop is true. `log` null: no messages.
 // ─────────────────────────────────────────────────────────────
-std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
-irrtstar_plan(
-    moveit::planning_interface::MoveGroupInterface& arm_group,
-    rclcpp::Node::SharedPtr node,
-    const std::vector<double>& q_goal)
+struct IrrtGrowth {
+    std::vector<JointVec> path;   // start ... goal; empty: no solution
+    double cost  = 0.0;
+    int    iter  = 0;
+    size_t nodes = 0;
+};
+
+static IrrtGrowth irrtstar_grow(
+    const JointVec& q_start, const JointVec& q_goal, double time_sec, int max_iter,
+    moveit::core::RobotState& rs,
+    const moveit::core::JointModelGroup* jmg,
+    const planning_scene::PlanningScenePtr& scene_snapshot,
+    const std::vector<std::pair<double,double>>& limits,
+    std::mt19937& rng, bool refine,
+    const std::atomic<bool>* stop,
+    const rclcpp::Logger* log,
+    std::chrono::steady_clock::time_point t0)
 {
-    auto t0 = std::chrono::steady_clock::now();
-
-    auto robot_model = arm_group.getRobotModel();
-    const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
-    if (!jmg) {
-        RCLCPP_ERROR(node->get_logger(),
-            "[IRRT*] JMG '%s' not found.", crrt_cfg::GROUP_NAME.c_str());
-        return std::nullopt;
-    }
-    const auto& joint_names = jmg->getVariableNames();
-
-    auto current_state = arm_group.getCurrentState(5.0);
-    if (!current_state) {
-        RCLCPP_ERROR(node->get_logger(), "[IRRT*] getCurrentState() failed.");
-        return std::nullopt;
-    }
-    JointVec q_start;
-    current_state->copyJointGroupPositions(jmg, q_start);
-
-    // One frozen, padded world for the whole planning command.
-    crrt_internal::ScopedSceneFreeze scene_freeze(node);
-    planning_scene::PlanningScenePtr scene_snapshot =
-        crrt_internal::snapshot_scene(node);
-
-    moveit::core::RobotState rs(robot_model);
-    rs.setToDefaultValues();
-
-    // Start: collision only — arm may not satisfy ee_down at rest
-    if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
-        RCLCPP_ERROR(node->get_logger(), "[IRRT*] Start state is in collision.");
-        return std::nullopt;
-    }
-    // Goal: full validation including ee_down
-    if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
-        rs.setJointGroupPositions(jmg, q_goal);
-        rs.updateLinkTransforms();
-        collision_detection::CollisionRequest req;
-        collision_detection::CollisionResult  res;
-        req.group_name = crrt_cfg::GROUP_NAME;
-        req.contacts = true;
-        req.max_contacts = 10;
-        req.max_contacts_per_pair = 1;
-        scene_snapshot->checkCollision(req, res, rs);
-        std::string pairs;
-        for (const auto& [key, _] : res.contacts) pairs += key.first + " <-> " + key.second + "  ";
-        RCLCPP_ERROR(node->get_logger(),
-            "[IRRT*] Goal invalid — ee_down=%s, collision=%s %s",
-            satisfies_ee_down(rs) ? "ok" : "FAIL", res.collision ? "YES:" : "NO", pairs.c_str());
-        return std::nullopt;
-    }
-
-    std::vector<std::pair<double,double>> limits;
-    for (const auto* j : jmg->getActiveJointModels()) {
-        const auto& bnd = j->getVariableBounds()[0];
-        limits.push_back({bnd.min_position_, bnd.max_position_});
-    }
     const int dof = (int)limits.size();
-
-    // Diagnostics: start orientation, and whether the straight start->goal segment passes edge_valid's checks.
-    {
-        rs.setJointGroupPositions(jmg, q_start);
-        rs.updateLinkTransforms();
-        const Eigen::Matrix3d R = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).rotation();
-        const double roll  = std::atan2(R(2,1), R(2,2));
-        const double pitch = std::atan2(-R(2,0), std::hypot(R(2,1), R(2,2)));
-        const double yaw   = std::atan2(R(1,0), R(0,0));
-        const double d     = joint_dist(q_start, q_goal);
-        std::string straight = "VALID";
-        JointVec cur = q_start;
-        while (joint_dist(cur, q_goal) > crrt_cfg::STEP_SIZE) {
-            cur = steer(cur, q_goal, crrt_cfg::STEP_SIZE);
-            if (is_valid(cur, rs, jmg, scene_snapshot)) continue;
-            const int pct = (int)std::lround(100.0 * (1.0 - joint_dist(cur, q_goal) / d));
-            if (!satisfies_ee_down(rs)) {
-                straight = "invalid at " + std::to_string(pct) + "%: ee_down";
-            } else {
-                collision_detection::CollisionRequest req;
-                collision_detection::CollisionResult  res;
-                req.group_name = crrt_cfg::GROUP_NAME;
-                req.contacts = true;
-                req.max_contacts = 10;
-                req.max_contacts_per_pair = 1;
-                scene_snapshot->checkCollision(req, res, rs);
-                straight = "invalid at " + std::to_string(pct) + "%: collision";
-                for (const auto& [key, _] : res.contacts) straight += " [" + key.first + " <-> " + key.second + "]";
-            }
-            break;
-        }
-        RCLCPP_INFO(node->get_logger(),
-            "[IRRT*] Start EE roll %.1f pitch %.1f yaw %.1f deg (tol %.1f); start->goal %.2f rad; straight path %s",
-            roll * 180 / M_PI, pitch * 180 / M_PI, yaw * 180 / M_PI, crrt_cfg::EE_ROLL_TOL * 180 / M_PI, d, straight.c_str());
-    }
-    irrt_stats = {};
-
-    auto& viz = crrt_viz::get(node, robot_model, jmg);
-    viz.begin();
-
-    RCLCPP_INFO(node->get_logger(),
-        "[IRRT*] Informed RRT* started (max %d iter / %.1f s, eta %.2f)...",
-        crrt_cfg::RRTSTAR_MAX_ITER, crrt_cfg::RRTSTAR_TIME_SEC, crrt_cfg::RRTSTAR_ETA);
 
     std::vector<RRTStarNode> tree;
     tree.push_back({q_start, -1, 0.0, {}});
 
-    std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<double> unit(0.0, 1.0);
     InformedSampler sampler(q_start, q_goal);
 
@@ -306,10 +224,12 @@ irrtstar_plan(
     double c_best   = std::numeric_limits<double>::infinity();
     int    iter     = 0;
 
-    for (; iter < crrt_cfg::RRTSTAR_MAX_ITER; ++iter)
+    for (; iter < max_iter; ++iter)
     {
+        if (stop && stop->load(std::memory_order_relaxed))
+            break;
         if (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count()
-            > crrt_cfg::RRTSTAR_TIME_SEC)
+            > time_sec)
             break;
 
         // ── sample ──
@@ -363,31 +283,165 @@ irrtstar_plan(
                 goal_idx = (int)tree.size();
                 tree.push_back({q_goal, new_idx, cg, {}});
                 tree[new_idx].children.push_back(goal_idx);
-                RCLCPP_INFO(node->get_logger(),
-                    "[IRRT*] First solution at iter %d: cost %.3f (%.2f s) — refining...",
-                    iter, cg,
-                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+                if (log)
+                    RCLCPP_INFO(*log,
+                        "[IRRT*] First solution at iter %d: cost %.3f (%.2f s) — refining...",
+                        iter, cg,
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
             } else if (cg < tree[goal_idx].cost) {
                 reparent(tree, goal_idx, new_idx, cg);
             }
         }
         if (goal_idx >= 0 && tree[goal_idx].cost < c_best - 1e-9) {
             c_best = tree[goal_idx].cost;
-            RCLCPP_INFO(node->get_logger(), "[IRRT*] Improved: cost %.3f at iter %d", c_best, iter);
+            if (log) RCLCPP_INFO(*log, "[IRRT*] Improved: cost %.3f at iter %d", c_best, iter);
         }
+        if (goal_idx >= 0 && !refine)
+            break;
     }
 
-    if (goal_idx < 0) {
-        RCLCPP_ERROR(node->get_logger(),
+    IrrtGrowth out;
+    out.iter  = iter;
+    out.nodes = tree.size();
+    if (goal_idx >= 0) {
+        out.cost = tree[goal_idx].cost;
+        for (int i = goal_idx; i >= 0; i = tree[i].parent) out.path.push_back(tree[i].q);
+        std::reverse(out.path.begin(), out.path.end());
+    }
+    return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  INFORMED RRT*
+//  time_sec is the search budget; the iteration cap scales with it, so a
+//  longer budget is not cut short by RRTSTAR_MAX_ITER.
+// ─────────────────────────────────────────────────────────────
+std::optional<moveit::planning_interface::MoveGroupInterface::Plan>
+irrtstar_plan(
+    moveit::planning_interface::MoveGroupInterface& arm_group,
+    rclcpp::Node::SharedPtr node,
+    const std::vector<double>& q_goal,
+    double time_sec = crrt_cfg::RRTSTAR_TIME_SEC)
+{
+    auto t0 = std::chrono::steady_clock::now();
+    const int max_iter = static_cast<int>(
+        crrt_cfg::RRTSTAR_MAX_ITER * std::max(1.0, time_sec / crrt_cfg::RRTSTAR_TIME_SEC));
+
+    auto robot_model = arm_group.getRobotModel();
+    const auto* jmg  = robot_model->getJointModelGroup(crrt_cfg::GROUP_NAME);
+    if (!jmg) {
+        RCLCPP_WARN(node->get_logger(),
+            "[IRRT*] JMG '%s' not found.", crrt_cfg::GROUP_NAME.c_str());
+        return std::nullopt;
+    }
+    const auto& joint_names = jmg->getVariableNames();
+
+    auto current_state = arm_group.getCurrentState(5.0);
+    if (!current_state) {
+        RCLCPP_WARN(node->get_logger(), "[IRRT*] getCurrentState() failed.");
+        return std::nullopt;
+    }
+    JointVec q_start;
+    current_state->copyJointGroupPositions(jmg, q_start);
+
+    // One frozen, padded world for the whole planning command.
+    crrt_internal::ScopedSceneFreeze scene_freeze(node);
+    planning_scene::PlanningScenePtr scene_snapshot =
+        crrt_internal::snapshot_scene(node);
+
+    moveit::core::RobotState rs(robot_model);
+    rs.setToDefaultValues();
+
+    // Start: collision only — arm may not satisfy ee_down at rest
+    if (!is_collision_free(q_start, rs, jmg, scene_snapshot)) {
+        RCLCPP_WARN(node->get_logger(), "[IRRT*] Start state is in collision.");
+        return std::nullopt;
+    }
+    // Goal: full validation including ee_down
+    if (!is_valid(q_goal, rs, jmg, scene_snapshot)) {
+        rs.setJointGroupPositions(jmg, q_goal);
+        rs.updateLinkTransforms();
+        collision_detection::CollisionRequest req;
+        collision_detection::CollisionResult  res;
+        req.group_name = crrt_cfg::GROUP_NAME;
+        req.contacts = true;
+        req.max_contacts = 10;
+        req.max_contacts_per_pair = 1;
+        scene_snapshot->checkCollision(req, res, rs);
+        std::string pairs;
+        for (const auto& [key, _] : res.contacts) pairs += key.first + " <-> " + key.second + "  ";
+        RCLCPP_WARN(node->get_logger(),
+            "[IRRT*] Goal invalid — ee_down=%s, collision=%s %s",
+            satisfies_ee_down(rs) ? "ok" : "FAIL", res.collision ? "YES:" : "NO", pairs.c_str());
+        return std::nullopt;
+    }
+
+    std::vector<std::pair<double,double>> limits;
+    for (const auto* j : jmg->getActiveJointModels()) {
+        const auto& bnd = j->getVariableBounds()[0];
+        limits.push_back({bnd.min_position_, bnd.max_position_});
+    }
+
+    // Diagnostics: start orientation, and whether the straight start->goal segment passes edge_valid's checks.
+    {
+        rs.setJointGroupPositions(jmg, q_start);
+        rs.updateLinkTransforms();
+        const Eigen::Matrix3d R = rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).rotation();
+        const double roll  = std::atan2(R(2,1), R(2,2));
+        const double pitch = std::atan2(-R(2,0), std::hypot(R(2,1), R(2,2)));
+        const double yaw   = std::atan2(R(1,0), R(0,0));
+        const double d     = joint_dist(q_start, q_goal);
+        std::string straight = "VALID";
+        JointVec cur = q_start;
+        while (joint_dist(cur, q_goal) > crrt_cfg::STEP_SIZE) {
+            cur = steer(cur, q_goal, crrt_cfg::STEP_SIZE);
+            if (is_valid(cur, rs, jmg, scene_snapshot)) continue;
+            const int pct = (int)std::lround(100.0 * (1.0 - joint_dist(cur, q_goal) / d));
+            if (!satisfies_ee_down(rs)) {
+                straight = "invalid at " + std::to_string(pct) + "%: ee_down";
+            } else {
+                collision_detection::CollisionRequest req;
+                collision_detection::CollisionResult  res;
+                req.group_name = crrt_cfg::GROUP_NAME;
+                req.contacts = true;
+                req.max_contacts = 10;
+                req.max_contacts_per_pair = 1;
+                scene_snapshot->checkCollision(req, res, rs);
+                straight = "invalid at " + std::to_string(pct) + "%: " +
+                           (res.collision ? "collision" : "within the safety margin");
+                for (const auto& [key, _] : res.contacts) straight += " [" + key.first + " <-> " + key.second + "]";
+            }
+            break;
+        }
+        RCLCPP_INFO(node->get_logger(),
+            "[IRRT*] Start EE roll %.1f pitch %.1f yaw %.1f deg (tol %.1f); start->goal %.2f rad; straight path %s",
+            roll * 180 / M_PI, pitch * 180 / M_PI, yaw * 180 / M_PI, crrt_cfg::EE_ROLL_TOL * 180 / M_PI, d, straight.c_str());
+    }
+    irrt_stats = {};
+
+    auto& viz = crrt_viz::get(node, robot_model, jmg);
+    viz.begin();
+
+    RCLCPP_INFO(node->get_logger(),
+        "[IRRT*] Informed RRT* started (max %d iter / %.1f s, eta %.2f)...",
+        max_iter, time_sec, crrt_cfg::RRTSTAR_ETA);
+
+    std::mt19937 rng(std::random_device{}());
+    const rclcpp::Logger log = node->get_logger();
+    IrrtGrowth growth = irrtstar_grow(q_start, q_goal, time_sec, max_iter, rs, jmg, scene_snapshot, limits,
+                                      rng, true, nullptr, &log, t0);
+
+    if (growth.path.empty()) {
+        RCLCPP_WARN(node->get_logger(),
             "[IRRT*] No solution after %d iters, tree %zu nodes. Steer stopped by: IK %d, not closer %d, "
             "collision %d. Edges rejected: ee_down %d, collision %d.",
-            iter, tree.size(), irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
+            growth.iter, growth.nodes, irrt_stats.ik, irrt_stats.not_closer, irrt_stats.collision,
             irrt_stats.edge_ee_down, irrt_stats.edge_collision);
         return std::nullopt;
         /* Midpoint fallback disabled.
         const auto q_mid = ik_midpoint(q_start, q_goal, robot_model, jmg);
         if (!q_mid) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] No IK for the midpoint.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] No IK for the midpoint.");
             return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(),
@@ -397,13 +451,13 @@ irrtstar_plan(
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 1: start -> midpoint...");
         auto plan1 = crrt_plan_from_to(arm_group, node, q_start, *q_mid);
         if (!plan1) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 1 failed.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] Midpoint Stage 1 failed.");
             return std::nullopt;
         }
         RCLCPP_INFO(node->get_logger(), "[IRRT*] Stage 2: midpoint -> goal...");
         auto plan2 = crrt_plan_from_to(arm_group, node, *q_mid, q_goal);
         if (!plan2) {
-            RCLCPP_ERROR(node->get_logger(), "[IRRT*] Midpoint Stage 2 failed.");
+            RCLCPP_WARN(node->get_logger(), "[IRRT*] Midpoint Stage 2 failed.");
             return std::nullopt;
         }
         // Join the legs (dropping the repeated midpoint), shortcut the whole path so
@@ -435,12 +489,8 @@ irrtstar_plan(
 
     RCLCPP_INFO(node->get_logger(),
         "[IRRT*] Search done: %d iters, %zu nodes, best cost %.3f (direct %.3f).",
-        iter, tree.size(), tree[goal_idx].cost, sampler.c_min);
+        growth.iter, growth.nodes, growth.cost, joint_dist(q_start, q_goal));
 
-    std::vector<JointVec> full_path;
-    for (int i = goal_idx; i >= 0; i = tree[i].parent) full_path.push_back(tree[i].q);
-    std::reverse(full_path.begin(), full_path.end());
-
-    return crrt_finish_path(std::move(full_path), q_start, q_goal, arm_group, node,
+    return crrt_finish_path(std::move(growth.path), q_start, q_goal, arm_group, node,
                             robot_model, jmg, joint_names, scene_snapshot, viz, t0);
 }

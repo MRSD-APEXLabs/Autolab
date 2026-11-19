@@ -103,15 +103,15 @@ controller_server:
     enable_stamped_cmd_vel: false
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker", "dock_staging_checker", "dock_alignment_checker", "dock_position_checker"]
-    controller_plugins: ["FollowPath", "DockPath"]
+    controller_plugins: ["FollowPath", "DockPath", "StagePath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      # At 0.4 m/s, turns and collision-monitor slowdown can consume most of a
-      # stock 0.5 m / 10 s window. Count smaller real translations as progress.
-      # Keep a translation check: endless spinning must still time out.
-      required_movement_radius: 0.15
-      movement_time_allowance: 15.0
+      # Humble shares one checker between transit and precision docking.
+      # A 15 cm radius incorrectly rejects useful centimetre-scale corrections.
+      # The station coordinator retries a stalled translation after 8 s.
+      required_movement_radius: 0.03
+      movement_time_allowance: 20.0
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
@@ -125,7 +125,7 @@ controller_server:
     dock_position_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: false
-      xy_goal_tolerance: 0.07      # 1 cm stopping allowance before the coordinator's 8 cm check
+      xy_goal_tolerance: 0.10      # 2 cm stopping allowance before station verification (12 cm)
       yaw_goal_tolerance: 3.141592653589793  # coordinator verifies the locked odom heading
     dock_alignment_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -149,6 +149,62 @@ controller_server:
       wz_max: 0.0
       vx_std: 0.06
       vy_std: 0.04
+      wz_std: 0.01                 # nonzero avoids division by zero in MPPI; wz_max clamps to zero
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_max: 3.0
+      ay_min: -3.0
+      az_max: 3.5
+      az_min: -3.5
+      prune_distance: 1.5
+      transform_tolerance: 0.2
+      visualize: false
+      regenerate_noises: false
+      retry_attempt_limit: 1
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "PathFollowCritic"]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        near_collision_cost: 253
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 1
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 20.0
+        threshold_to_consider: 1.5
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.05
+
+    # The 0.5 m move to the docking start (station_docking stage_adjust, after the turn): DockPath at 3x its
+    # translation limits and noise; still translation-only. The final park keeps DockPath.
+    StagePath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      motion_model: "Omni"
+      time_steps: 20               # 1 s horizon (0.36 m at vx_max)
+      model_dt: 0.05
+      batch_size: 1000
+      iteration_count: 1
+      temperature: 0.3
+      gamma: 0.015
+      vx_max: 0.36
+      vx_min: -0.18
+      vy_max: 0.18
+      wz_max: 0.0
+      vx_std: 0.18
+      vy_std: 0.12
       wz_std: 0.01                 # nonzero avoids division by zero in MPPI; wz_max clamps to zero
       ax_max: 3.0
       ax_min: -3.0
@@ -487,6 +543,28 @@ behavior_server:
     rotational_acc_lim: 1.0          # gentler ramp to the higher alignment speed
     enable_stamped_cmd_vel: false
 
+dock_behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 20.0
+    behavior_plugins: ["dock_spin"]
+    dock_spin:
+      plugin: "nav2_behaviors::Spin"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    # The downstream 0.12 m/s module-speed floor is ~0.334 rad/s in place.
+    # Keep the final command within this cap while retaining working stiction compensation.
+    max_rotational_vel: 0.35
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 0.2
+    enable_stamped_cmd_vel: false
+
 waypoint_follower:
   ros__parameters:
     loop_rate: 20
@@ -504,9 +582,10 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     scale_velocities: false
     stamp_smoothed_velocity_with_smoothing_time: false
-    # Forward transit remains DiffDrive (vy=0). DockPath permits small lateral corrections.
-    max_velocity: [0.45, 0.06, 1.0]
-    min_velocity: [-0.10, -0.06, -1.0]
+    # Forward transit remains DiffDrive (vy=0). DockPath / StagePath permit lateral corrections (0.06 / 0.18 m/s).
+    # Reverse -0.40: the station back-out (BackUp at docking speed 0.40 m/s); the controllers reverse slower.
+    max_velocity: [0.45, 0.18, 1.0]
+    min_velocity: [-0.40, -0.18, -1.0]
     max_accel: [0.6, 0.5, 1.0]
     max_decel: [-1.5, -0.5, -3.0]
     odom_topic: "odom"

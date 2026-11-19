@@ -993,7 +993,7 @@ class SwerveBridge(Node):
             vy_gain=self._param('yaw_bias_vy_gain', 0.0, 'Lateral velocity to yaw coupling [rad/m].'),
             gain=self._param('yaw_bias_gain', 0.75, 'Fraction of identified yaw bias to counteract.'),
             max_correction=self._param('yaw_bias_max_correction', 0.07,
-                                       'Maximum added yaw correction [rad/s], hard limit 0.15.'),
+                                       'Maximum added yaw correction [rad/s], hard limit 0.30.'),
             model_speed=self._param('yaw_bias_model_speed', 0.30,
                                     'Saturate model inputs above this translation speed [m/s].'),
             command_deadband=self._rotational_deadband,
@@ -1004,7 +1004,9 @@ class SwerveBridge(Node):
                                   'Counter yaw drift only during commanded and measured station translation.')
         hold_controller = StationHeadingHold(yaw_config,
             kp=self._param('station_heading_kp', 1.5, 'Station heading proportional gain [1/s].'),
-            kd=self._param('station_heading_kd', .15, 'Station gyro rate damping gain.'))
+            kd=self._param('station_heading_kd', .15, 'Station gyro rate damping gain.'),
+            accel=self._param('station_heading_accel', yaw_config.correction_accel,
+                              'Station heading correction ramp [rad/s^2], max 1.0.'))
         self._station_heading_hold = hold_controller if station_hold and self._yaw_bias is not None else None
         self._yaw_source = 'unknown'
         self._yaw_lock_seen = False

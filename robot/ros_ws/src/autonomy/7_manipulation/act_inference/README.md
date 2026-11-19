@@ -1,13 +1,24 @@
 # F/T placing inference
 
-This folder includes the runtime and checkpoint used by
-`apple_server_manip/scripts/place_on_opentrons_ft.sh`. No teleop checkout is needed.
-`models/xarm6_placing_act_ft_all_20261105b/` contains `config.pkl`, `dataset_stats.pkl`, and
-`policy_best.ckpt` (11000 steps, all 103 finished demonstrations, no held-out split;
-near-seat frames weighted x4). Both the launcher and ROS node default to this checkpoint.
-The previous `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
+This folder includes the runtime and checkpoints used by `apple_server_manip/scripts/place_on_{opentrons,shaker,base}_ft.sh`.
+No teleop checkout is needed. One placing policy per target, each with `config.pkl`, `dataset_stats.pkl` and
+`policy_best.ckpt` (all finished SpaceMouse demonstrations of that target, no held-out split; near-seat frames
+weighted x4):
+
+| target | checkpoint | demos | held-out check (80:20 run, median end error) |
+|---|---|---|---|
+| `ot2` | `models/xarm6_placing_act_ft_all_20261105b/` | 103, 11000 steps | 1.34 mm |
+| `shaker` | `models/xarm6_shaker_act_ft_20261113/` | 77 (about 8 base parking spots + 28 at newer spots), 10500 steps | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
+| `base` | `models/xarm6_base_act_ft_20261108b/` | 43 (robot base deck bracket; 4 started at the base start pose), 4500 steps | 1.42 mm (x/y 0.74, height 0.84) for the 39-demo version |
+
+The ROS node and the wrapper scripts default to these. The previous OT-2 checkpoints
+`models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
 `models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
-`models/xarm_final_ckpt_placing/` checkpoints remain available by explicit path.
+`models/xarm_final_ckpt_placing/` remain available by explicit path.
+The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261110/` (66 demonstrations, 9000 steps),
+`models/xarm6_shaker_act_ft_20261108c/` (59, 8000 steps), `models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and
+`models/xarm6_shaker_act_ft_20261108/` (49, 6500 steps) are kept too, and so is the previous base
+checkpoint `models/xarm6_base_act_ft_20261108/` (39 demonstrations, 4000 steps).
 
 The new policy uses wrist RGB, metric depth and validity, and the compensated external
 F/T wrench (N, Nm, SDK sensor coordinates). TCP pose is hidden from the model; measured
@@ -37,8 +48,9 @@ ros2 topic echo /act_inference/status
 ros2 service call /act_inference/stop std_srvs/srv/Trigger
 ```
 
-OT-2 and shaker run the same ACT placing policy. `/act_inference/start` remains an alias
-for `/act_inference/start/ot2`. Before either policy executes, the arm's base-frame Euler yaw
+Each target runs its own ACT placing policy (table above); all three are loaded and warmed up at
+startup. `/act_inference/start` remains an alias for `/act_inference/start/ot2`. Before the OT-2 or
+shaker policy executes, the arm's base-frame Euler yaw
 is aligned to **90 degrees** at **9 degrees/s**, holding its current XYZ, roll, and pitch.
 Alignment is skipped when yaw is already within 0.5 degrees. Measured arrival is confirmed
 before starting ACT; a stopped or failed alignment prevents the policy from starting.
@@ -59,7 +71,7 @@ by gripper release and a 100 mm vertical retreat. `done` is published only after
 finishes; it is not an independent placement measurement. Contact detection or cancellation returns `stopped`;
 sensor, inference, camera, workspace, and robot errors return `failed`.
 
-The node defaults now match the F/T placing script: the bundled F/T checkpoint,
+The node defaults now match the F/T placing scripts: the bundled F/T checkpoints,
 60 s maximum duration, 50 Hz control, translation 0.01 m/s, rotation enabled at
 0.15 rad/s, workspace radius 0.15 m, and no final offset. It preloads and warms the
 policy once, then creates a camera/robot session for each ACT run. It selects
@@ -74,7 +86,7 @@ on exit; it never zeroes the sensor or selects force-control mode.
 ros2 launch manipulation_bringup manipulation.launch.xml act_duration_sec:=60.0
 ```
 
-ROS parameters also expose `ckpt_dir`, `robot_ip`, `camera_source`, `ros_namespace`,
+ROS parameters also expose `ckpt_dir` (OT-2), `shaker_ckpt_dir`, `base_ckpt_dir`, `robot_ip`, `camera_source`, `ros_namespace`,
 `select_service` (empty skips switching), `select_timeout`, `control_hz`,
 `translation_speed`, `rotation_speed`, `max_tracking_error`, `enable_rotation`,
 `workspace_radius`, `duration_sec`, `query_interval`, `prediction_timeout`,
@@ -101,48 +113,90 @@ The shared status remains running and the start services stay locked through ope
 retreat. `/act_inference/stop` cancels the opening wait or lift. A stopped/failed policy
 skips release and retreat. Prediction-only runs only log the sequence and read the TCP;
 they send no gripper or motion commands. Base placement uses the same release sequence
-with a **60 mm** lift.
+with a **1.5 s** jaw wait (`base_open_wait_sec`) and a **60 mm** lift at `base_lift_speed_mm_s` (**150 mm/s**,
+speeding up and slowing down at `base_accel_mm_s2`, **500 mm/s^2**).
 
 ## Base placement
 
-`/act_inference/start/base` moves directly to the supplied `arm.get_position()` destination:
+`/act_inference/start/base` places on the base deck by touch (`base_mode:=scripted`, the default; bringup
+`act_base_mode`), without camera or policy, from the executive's `plan_home_offset`. Probing starts at the
+`arm.get_position()` result
 
 ```text
-XYZ (mm):       [32.074207, 257.162689, 40.484722]
-roll/pitch/yaw (degrees): [-179.67395, -1.5738, -0.3]
+XYZ (mm):       [51.565662, 257.200928, 47.687004]
+roll/pitch/yaw (degrees): [179.332982, -2.176667, 1.803213]   (base_pose_mm_deg)
 ```
 
-The first `0` in the SDK result is its success code, not part of the pose. Euler angles
-are converted to the rotation-vector representation used by the servo interface.
-Translation is limited to **15 mm/s**, rotation to **6 degrees/s**, with 50 Hz updates.
-It first moves to the target XY/orientation at **10 mm above the target Z** (50.484722 mm),
-confirms measured arrival, then descends vertically to the target Z (40.484722 mm).
-Both stages use the same slow motion limits and share the timeout. After successful
-arrival, the node opens the gripper, waits **4 seconds**, and lifts **60 mm along base +Z**,
-holding XY and orientation. The lift uses `translation_speed` (default **10 mm/s**).
-It skips camera switching, camera reads, F/T setup, and
-policy inference. The shared node still preloads its ACT checkpoint at startup.
+(the first `0` in the SDK result is its success code; Euler angles become the servo interface's rotation vector).
+Where the plate sits in the gripper varies along X, so a fixed pose only gets it close; the deck's ridge and the
+wrist F/T sensor finish the job:
 
-Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s.
+1. Move to the probing start, rotation **6 degrees/s**, 50 Hz, with measured arrival (held 0.1 s; place_base reads
+   the arm on the 100 Hz `real` report socket). From higher up (home_offset,
+   ~180 mm away): at **150 mm/s** to **20 mm** straight above it first (`base_approach_speed_mm_s`,
+   `base_approach_clearance_mm`), then down the rest at **40 mm/s** (`base_speed_mm_s`); from lower, the whole
+   move at 40 mm/s. Each move speeds up from rest and slows down to stop at **500 mm/s^2** (`base_accel_mm_s2`)
+   instead of jumping to full speed.
+2. Hold still 0.2 s, take the in-air F/T baseline (median over 0.2 s), then descend until
+   |Fz - baseline| > **1.0 N** for 2 consecutive reads: the first **3.5 mm** at **10 mm/s**
+   (`base_probe_fast_mm`, `base_fast_speed_mm_s`; the deck is ~7 mm down), the rest at **2 mm/s**. No touch
+   within **11 mm** below the start fails the run.
+3. Hold at the touch height, re-baseline, then slide along base **-X** until the sideways force
+   |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. The first **12 mm** go at
+   **10 mm/s** (`base_slide_fast_mm`; the ridge is ~19 mm along), the rest at **4 mm/s**. No ridge within
+   **30 mm** fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
+
+The fast parts are force-guarded like the slow ones; a touch or ridge inside them stops the move, only with more
+overshoot. The touch and ridge positions (and how far each is from the start) are printed every run: if either is
+inside its fast part, lower `base_probe_fast_mm` / `base_slide_fast_mm`. Then the node opens the gripper, waits
+**1.5 s**, and lifts **60 mm along base +Z** at `base_lift_speed_mm_s` (**150 mm/s**, ramped at
+`base_accel_mm_s2`).
+
+F/T is `ft_ext_force` (SDK sensor frame, load-compensated) from a second, read-only SDK connection on the fast
+`real` report socket, as visual_servoing reads it; the sensor is never zeroed (that drops the controller into
+state 5), only baselined. Sampling is enabled before the arm is (and switched off again if this run turned it on);
+force mode is refused. A report older than 100 ms, or force readings that never change while holding, fail the run.
+
+`base_debug:=true` (bringup `act_base_debug:=true`) writes every control tick (phase, measured and target XYZ,
+wrench, threshold metric, consecutive hits) to `~/.ros/log/act_inference_base_placement/base_placement_<time>.csv`
+(`base_debug_dir`), prints a trace line every 0.1 s and the F/T baselines. Use it to tune the thresholds.
+
+`base_mode:=policy` runs the base ACT policy instead: it first moves in one straight line to the base start pose
+`[32.055321, 271.166351, 116.803917]` mm, RPY `[-179.675382, -1.57403, -0.737282]` degrees
+(`base_start_pose_mm_deg`, about 80 mm above the bracket, where most base demos started; refused from more than
+200 mm away), then runs the policy like OT-2/shaker (Nano camera, `base_workspace_radius` 0.15 m), followed by
+the same release and 60 mm lift.
+
+Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s (0.1 s in scripted
+place_base and its lift).
 Execution reports `done` after placing, releasing, lifting, and driver handback succeed.
 Cancellation reports `stopped`; robot errors
 or the 180 s timeout report `failed`. The timeout is independent of ACT's `duration_sec`.
 With `execute:=false`, base placement reads the TCP, logs the destination, and returns
 `done` without enabling or commanding the arm.
 
-Node parameters: `base_pose_mm_deg` (six XYZ/RPY values), `base_speed_mm_s` (15.0),
-`base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0).
-Bringup exposes speeds and timeout:
+Node parameters: `base_mode` (`scripted` or `policy`); `base_pose_mm_deg` (six XYZ/RPY values), `base_speed_mm_s`
+(40.0), `base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0, both modes' moves), `base_lift_speed_mm_s`
+(150.0, both modes), `base_accel_mm_s2` (500.0, the lift and the scripted approach); scripted
+`base_approach_speed_mm_s` (150.0), `base_approach_clearance_mm` (20.0); scripted seating
+`base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (4.0), `base_slide_max_mm`
+(30.0), `base_ridge_force_n` (1.0), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
+`base_slide_fast_mm` (12.0), `base_force_count` (2), `base_settle_sec` (0.2), `base_baseline_sec` (0.2),
+`base_open_wait_sec` (1.5, both modes),
+`base_debug` (false), `base_debug_dir`; policy mode `base_ckpt_dir`, `base_start_pose_mm_deg`,
+`base_workspace_radius` (0.15 m). Bringup exposes the mode, debug, speeds and timeout:
 
 ```bash
-ros2 launch manipulation_bringup manipulation.launch.xml \
-  act_base_speed_mm_s:=15.0 act_base_rotation_speed_deg_s:=6.0 act_base_timeout_sec:=180.0
+ros2 launch manipulation_bringup manipulation.launch.xml act_base_mode:=scripted act_base_debug:=true \
+  act_base_speed_mm_s:=40.0 act_base_rotation_speed_deg_s:=6.0 act_base_timeout_sec:=180.0
 ```
 
 ## Standalone script
 
 ```bash
 ./place_on_opentrons_ft.sh                          # prediction only, direct Nano stream
+./place_on_shaker_ft.sh                             # shaker policy (start above the clamp, yaw ~90)
+./place_on_base_ft.sh                               # base policy (start at the base start pose by hand)
 # Execution uses run_act_node.py and the target services above.
 ./place_on_opentrons_ft.sh --camera-source ros      # use running camera/depth nodes
 python3 run_act_inference.py --help
@@ -168,13 +222,10 @@ ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST OMP_NUM_THREADS=2 \
 
 ## Servo timing and diagnostics
 
-The ROS camera now waits for at least two matched RGB/depth pairs, calibration, and a
-usable latest frame before starting policy inference. This avoids applying a zero-cadence
-startup threshold to the first delayed depth frame. Cadence uses capture stamps as well
-as receipt spacing, so queued pairs arriving back-to-back do not look like an unrealistically
-fast stream. The cadence allowance stays capped by `max_frame_age`; permanently old data,
-stalled streams, and future timestamps still fail. Startup is bounded by 10 seconds and
-logs the pair count, capture-to-receipt latency, and bounded frame interval when ready.
+The ROS camera waits for at least two matched RGB/depth pairs and calibration before
+starting policy inference. There is no camera latency (frame age) limit: the newest frame
+is used however old it is; only future timestamps (clock mismatch) fail. Startup is bounded
+by 10 seconds and logs the pair count, capture-to-receipt latency, and frame interval when ready.
 
 Only one publisher is permitted on each Nano RGB/depth input topic. Duplicate bringups
 or orphaned depth nodes interleave timestamps and compete for GPU time; ACT now rejects
