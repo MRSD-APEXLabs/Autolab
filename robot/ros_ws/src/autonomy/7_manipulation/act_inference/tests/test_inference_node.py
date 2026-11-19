@@ -18,11 +18,13 @@ def test_base_release_and_60_mm_retreat_before_handback(move_result, retreat_res
         if move_result == 'error': raise RuntimeError('move failed')
         return move_result
     def retreat(*args, **kwargs):
-        assert kwargs['lift_mm'] == 60.
+        assert kwargs['lift_mm'] == 60. and kwargs['speed_mm_s'] == 40. and kwargs['accel_mm_s2'] == 500.
+        assert kwargs['open_wait_sec'] == 1.5 and kwargs['report_type'] == 'real' and kwargs['arrival_sec'] == .1
         events.append('release_and_lift')
         if retreat_result == 'error': raise RuntimeError('retreat failed')
         return retreat_result
-    node = SimpleNamespace(config=None, base_placement=None, rollout=SimpleNamespace(execute=True), base_mode='scripted',
+    node = SimpleNamespace(config=None, base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5),
+                           rollout=SimpleNamespace(execute=True), base_mode='scripted',
                            runner=SimpleNamespace(status=lambda: dict(target='base'), _check_abort=lambda: None),
                            _base_move_fn=move, _post_placement_fn=retreat,
                            handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
@@ -68,14 +70,17 @@ def test_policy_then_release_only_on_success(outcome, target):
         return outcome
 
     def release(*args, **kwargs):
-        stages.append(f'release/lift {kwargs.get("lift_mm", 100.0):g}')
+        stages.append(f'release/lift {kwargs.get("lift_mm", 100.0):g}'
+                      + (f' at {kwargs["speed_mm_s"]:g}' if 'speed_mm_s' in kwargs else '')
+                      + (f' ramp {kwargs["accel_mm_s2"]:g}' if 'accel_mm_s2' in kwargs else '')
+                      + (f' wait {kwargs["open_wait_sec"]:g} {kwargs["report_type"]}' if 'open_wait_sec' in kwargs else ''))
         return 'done'
 
     node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True),
                            rollouts={t: t + ' rollout' for t in ('ot2', 'shaker', 'base')},
                            _policies={t: t + ' policy' for t in ('ot2', 'shaker', 'base')},
                            _yaw_align_fn=lambda *a, **kw: stages.append('yaw') or 'done',
-                           base_start='start pose',
+                           base_start='start pose', base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5),
                            _base_start_fn=lambda config, pose, **kw: stages.append(pose) or 'done',
                            _rollout_fn=rollout, _post_placement_fn=release)
     if outcome == 'error':
@@ -86,7 +91,7 @@ def test_policy_then_release_only_on_success(outcome, target):
     # Base moves to its start pose (no 90 degree yaw alignment) and lifts 60 mm.
     expected = (['start pose'] if target == 'base' else ['yaw']) + ['policy']
     if outcome == 'done':
-        expected.append('release/lift 60' if target == 'base' else 'release/lift 100')
+        expected.append('release/lift 60 at 40 ramp 500 wait 1.5 real' if target == 'base' else 'release/lift 100')
     assert stages == expected
 
 
@@ -122,7 +127,7 @@ def test_start_stop_and_status_over_ros(target):
     def base_start(config, placement, execute, stop):
         assert target == 'base' and not execute
         assert placement.pose_mm_deg == (32.055321, 271.166351, 116.803917, -179.675382, -1.57403, -0.737282)
-        assert placement.speed_mm_s == 15 and placement.rotation_speed_deg_s == 6
+        assert placement.speed_mm_s == 40 and placement.rotation_speed_deg_s == 6
         aligned.append('start pose')
         return 'done'
 

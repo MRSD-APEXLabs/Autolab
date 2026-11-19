@@ -15,26 +15,39 @@ from .rollout import limit_action
 from .control_rate import ControlRate
 
 DEFAULT_DEBUG_DIR = '~/.ros/log/act_inference_base_placement'
+BASE_ARRIVAL_SEC = .1   # place_base and its lift: measured arrival held this long (100 Hz 'real' reports)
 
 
 @dataclass(frozen=True)
 class BasePlacementConfig:
     pose_mm_deg: tuple = (51.565662, 257.200928, 47.687004, 179.332982, -2.176667, 1.803213)   # probing start
-    speed_mm_s: float = 15.0
+    speed_mm_s: float = 40.0
     rotation_speed_deg_s: float = 6.0
+    # From above (place_base starts at home_offset, ~180 mm away) the move to the probing start goes at
+    # approach_speed_mm_s to approach_clearance_mm straight above it, then down the rest at speed_mm_s.
+    approach_speed_mm_s: float = 150.0
+    approach_clearance_mm: float = 20.0
+    lift_speed_mm_s: float = 150.0        # the lift after the release (node: release_and_lift)
+    # Both approach moves and the lift speed up and slow down at this rate instead of jumping to full speed.
+    accel_mm_s2: float = 500.0
     timeout_sec: float = 180.0
     # F/T seating (run_base_placement): from pose_mm_deg, descend until |Fz - in-air baseline| > touch_force_n,
     # then slide along base -X until the sideways force |(Fx, Fy) - baseline after the touch| > ridge_force_n
-    # (the plate edge meets the ridge).
+    # (the plate edge meets the ridge). The first probe_fast_mm of the descent and slide_fast_mm of the slide
+    # (before the deck, ~7 mm down, and the ridge, ~19 mm along) go at fast_speed_mm_s, still force-guarded.
     probe_speed_mm_s: float = 2.0
     probe_depth_mm: float = 11.0          # no touch this far below the start fails the run
     touch_force_n: float = 1.0
-    slide_speed_mm_s: float = 2.0
+    slide_speed_mm_s: float = 4.0
     slide_max_mm: float = 30.0            # no ridge after this much -X travel fails the run
     ridge_force_n: float = 1.0
+    fast_speed_mm_s: float = 10.0
+    probe_fast_mm: float = 3.5
+    slide_fast_mm: float = 12.0
     force_count: int = 2                  # consecutive 50 Hz reads above a threshold that count as contact
-    settle_sec: float = 0.5               # still before each F/T baseline
-    baseline_sec: float = 0.3             # F/T baseline: median over this window
+    settle_sec: float = 0.2               # still before each F/T baseline
+    baseline_sec: float = 0.2             # F/T baseline: median over this window
+    open_wait_sec: float = 1.5            # jaw travel after the open command, before the lift (node: release_and_lift)
     debug: bool = False                   # per-tick CSV + 10 Hz console trace of pose and force
     debug_dir: str = DEFAULT_DEBUG_DIR
 
@@ -44,11 +57,18 @@ class BasePlacementConfig:
             raise ValueError('base_pose_mm_deg must contain six finite XYZ/RPY values')
         for name in ('speed_mm_s', 'rotation_speed_deg_s', 'timeout_sec', 'probe_speed_mm_s', 'probe_depth_mm',
                      'touch_force_n', 'slide_speed_mm_s', 'slide_max_mm', 'ridge_force_n',
-                     'settle_sec', 'baseline_sec'):
+                     'settle_sec', 'baseline_sec', 'approach_speed_mm_s', 'lift_speed_mm_s', 'accel_mm_s2',
+                     'fast_speed_mm_s', 'open_wait_sec'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'base {name} must be finite and positive')
-        if self.probe_speed_mm_s > self.speed_mm_s or self.slide_speed_mm_s > self.speed_mm_s:
-            raise ValueError('base probe/slide speeds must not exceed speed_mm_s')
+        for name in ('approach_clearance_mm', 'probe_fast_mm', 'slide_fast_mm'):
+            if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
+                raise ValueError(f'base {name} must be finite and non-negative')
+        if (self.probe_speed_mm_s > self.speed_mm_s or self.slide_speed_mm_s > self.speed_mm_s
+                or self.fast_speed_mm_s > self.speed_mm_s):
+            raise ValueError('base probe/slide/fast speeds must not exceed speed_mm_s')
+        if self.probe_fast_mm >= self.probe_depth_mm or self.slide_fast_mm >= self.slide_max_mm:
+            raise ValueError('base probe_fast_mm/slide_fast_mm must be below probe_depth_mm/slide_max_mm')
         if int(self.force_count) != self.force_count or self.force_count < 1:
             raise ValueError('base force_count must be a positive integer')
 
@@ -149,11 +169,15 @@ class _Trace:
 def run_base_placement(config, placement, execute=False, stop=None, ft_factory=None):
     """Seat the plate on the base deck by touch, starting from the fixed pose `placement.pose_mm_deg`.
 
-    1. Move to the probing start `placement.pose_mm_deg` (measured arrival).
-    2. Hold still, take the in-air F/T baseline, descend at probe_speed_mm_s until |dFz| > touch_force_n.
-    3. Hold at the touch height, re-baseline, slide along base -X at slide_speed_mm_s until the sideways force
-       |(dFx, dFy)| > ridge_force_n: the plate edge is against the ridge. Then step back to the measured X
-       (no push left on the ridge) and finish; the node then releases and lifts.
+    1. Move to the probing start `placement.pose_mm_deg` (measured arrival). From higher than approach_clearance_mm
+       above it: at approach_speed_mm_s to that clearance straight above it first, then down at speed_mm_s. Both
+       moves speed up and slow down at accel_mm_s2.
+    2. Hold still, take the in-air F/T baseline, descend (probe_fast_mm at fast_speed_mm_s, then probe_speed_mm_s)
+       until |dFz| > touch_force_n.
+    3. Hold at the touch height, re-baseline, slide along base -X (slide_fast_mm at fast_speed_mm_s, then
+       slide_speed_mm_s) until the sideways force |(dFx, dFy)| > ridge_force_n: the plate edge is against the
+       ridge. Then step back to the measured X (no push left on the ridge) and finish; the node then releases and
+       lifts.
 
     No touch within probe_depth_mm below the start, or no ridge within slide_max_mm, fails the run.
     Prediction only reads the initial TCP and logs the plan. No camera, policy inference, or gripper commands.
@@ -164,19 +188,29 @@ def run_base_placement(config, placement, execute=False, stop=None, ft_factory=N
         return 'stopped'
     motion = replace(config.motion, translation_speed=placement.speed_mm_s / 1000,
                      rotation_speed=math.radians(placement.rotation_speed_deg_s))
-    robot = XArm6Robot(config.robot_ip, motion, read_only=not execute)
+    approach = replace(motion, translation_speed=max(placement.approach_speed_mm_s, placement.speed_mm_s) / 1000)
+    accel = placement.accel_mm_s2 / 1000
+    # The servo cap is the fastest move. 'real' reports: the measured pose is <=10 ms old, not up to 200 ms.
+    robot = XArm6Robot(config.robot_ip, approach, read_only=not execute, report_type='real')
     ft = trace = None
     try:
         robot.connect()
         initial = robot.initialize_target_pose()
         start = placement.target_pose()
         start[3:] = continuous_rotvec(start[3:], initial[3:])
+        above = start.copy()
+        above[2] += placement.approach_clearance_mm / 1000
+        from_above = initial[2] > above[2]
         if stop.is_set():
             return 'stopped'
         print(f'Base placement {"EXECUTE" if execute else "PREDICTION ONLY"}: '
-              f'start_mm_rpy_deg={list(placement.pose_mm_deg)} at {placement.speed_mm_s} mm/s, '
-              f'descend until |dFz| > {placement.touch_force_n:g} N, '
-              f'slide -X until |dFxy| > {placement.ridge_force_n:g} N'
+              f'start_mm_rpy_deg={list(placement.pose_mm_deg)} at {placement.speed_mm_s} mm/s'
+              + (f' ({placement.approach_speed_mm_s} mm/s to {placement.approach_clearance_mm:g} mm above it)'
+                 if from_above else '') + f', {placement.accel_mm_s2:g} mm/s^2 ramps, '
+              f'descend ({placement.probe_fast_mm:g} mm at {placement.fast_speed_mm_s:g} mm/s, then '
+              f'{placement.probe_speed_mm_s:g} mm/s) until |dFz| > {placement.touch_force_n:g} N, '
+              f'slide -X ({placement.slide_fast_mm:g} mm at {placement.fast_speed_mm_s:g} mm/s, then '
+              f'{placement.slide_speed_mm_s:g} mm/s) until |dFxy| > {placement.ridge_force_n:g} N'
               f'{" (debug)" if placement.debug else ""}', flush=True)
         if not execute:
             return 'done'
@@ -186,7 +220,14 @@ def run_base_placement(config, placement, execute=False, stop=None, ft_factory=N
         ft.connect()
         robot.enable()
         deadline = time.monotonic() + placement.timeout_sec
-        result = _move_goals(robot, initial, (start,), motion, stop, placement.timeout_sec, 'Base placement')
+        if from_above:
+            result = _move_goals(robot, initial, (above,), approach, stop, placement.timeout_sec, 'Base placement',
+                                 accel=accel, arrival_sec=BASE_ARRIVAL_SEC)
+            if result != 'done':
+                return result
+            initial = above   # the commanded target the arm now holds
+        result = _move_goals(robot, initial, (start,), motion, stop, max(0., deadline - time.monotonic()),
+                             'Base placement', accel=accel, arrival_sec=BASE_ARRIVAL_SEC)
         if result != 'done':
             return result
         return _seat(robot, ft, start, placement, motion, stop, deadline, trace)
@@ -218,7 +259,7 @@ def _seat(robot, ft, start, placement, motion, stop, deadline, trace):
     touch = lambda wrench: abs(wrench[2] - air[2])
     descent = placement.probe_depth_mm / 1000
     found = _guarded_move(ctx, target, 2, -1, placement.probe_speed_mm_s, descent, touch,
-                          placement.touch_force_n, 'descend')
+                          placement.touch_force_n, 'descend', placement.fast_speed_mm_s, placement.probe_fast_mm / 1000)
     if found is None:
         return 'stopped'
     target, measured, value = found
@@ -234,7 +275,7 @@ def _seat(robot, ft, start, placement, motion, stop, deadline, trace):
     trace.note(f'contact baseline F_N={np.round(rest, 4).tolist()}')
     ridge = lambda wrench: math.hypot(wrench[0] - rest[0], wrench[1] - rest[1])
     found = _guarded_move(ctx, target, 0, -1, placement.slide_speed_mm_s, placement.slide_max_mm / 1000, ridge,
-                          placement.ridge_force_n, 'slide')
+                          placement.ridge_force_n, 'slide', placement.fast_speed_mm_s, placement.slide_fast_mm / 1000)
     if found is None:
         return 'stopped'
     target, measured, value = found
@@ -284,16 +325,20 @@ def _hold(ctx, target, goal, speed_mm_s, seconds, phase):
     return target, np.median(samples, axis=0)
 
 
-def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, threshold, phase):
+def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, threshold, phase,
+                  fast_mm_s=None, fast_travel=0.):
     """Step the target along base axis `axis` (0 X, 2 Z) by `direction` at `speed_mm_s` for at most `travel` m,
-    until `metric(wrench)` exceeds `threshold` for placement.force_count consecutive ticks.
+    until `metric(wrench)` exceeds `threshold` for placement.force_count consecutive ticks. The first
+    `fast_travel` m go at `fast_mm_s` instead, with the same force check.
 
     Returns (target, measured pose, metric) at detection, or None if stopped. Reaching the end of travel (and
     0.5 s for the TCP to catch up) without contact fails.
     """
     target = target.copy()
-    end = target[axis] + direction * travel
+    origin = target[axis]
+    end = origin + direction * travel
     step = speed_mm_s / 1000 * ctx.period
+    fast_step = (fast_mm_s or speed_mm_s) / 1000 * ctx.period
     hits, end_since = 0, None
     while True:
         now = time.monotonic()
@@ -315,7 +360,9 @@ def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, thre
                 raise RuntimeError(f'Base placement: no contact during {phase} within {travel * 1000:.1f} mm '
                                    f'(last {value:.2f} N, threshold {threshold:g} N)')
         else:
-            target[axis] += direction * min(step, remaining)
+            fast_left = fast_travel - (target[axis] - origin) * direction
+            this_step = min(fast_step, fast_left) if fast_left > 1e-9 else step
+            target[axis] += direction * min(this_step, remaining)
         ctx.robot.servo(target, ctx.period, measured=measured)
         ctx.rate.wait()
 
@@ -358,8 +405,12 @@ def move_to_base_policy_start(config, placement, execute=False, stop=None, max_d
         robot.close()
 
 
-def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xyz_tolerance=None):
-    """Follow ordered waypoints, requiring measured arrival before advancing."""
+def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xyz_tolerance=None, accel=None,
+                arrival_sec=.3):
+    """Follow ordered waypoints, requiring measured arrival (1 mm / 0.5 degrees for `arrival_sec`) before advancing.
+
+    `accel` (m/s^2): the translation speeds up from rest at this rate and slows down to stop at each waypoint,
+    up to motion.translation_speed. None: full speed at once (rotation is never ramped)."""
     target = initial.copy()
     period = 1 / motion.loop_hz
     radius = max(float(np.linalg.norm(goal[:3] - initial[:3])) for goal in goals) + 1e-6
@@ -367,6 +418,7 @@ def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xy
     rate = ControlRate(period, time.monotonic, stop.wait)
     for goal in goals:
         arrived_since = None
+        speed = 0.
         while True:
             tick = time.monotonic()
             if stop.is_set():
@@ -387,11 +439,17 @@ def _move_goals(robot, initial, goals, motion, stop, timeout_sec, label, hold_xy
                                Rotation.from_rotvec(target[3:]).inv()).magnitude() < 1e-8)
             if target_at_goal and position_error <= .001 and rotation_error <= math.radians(.5):
                 arrived_since = tick if arrived_since is None else arrived_since
-                if tick - arrived_since >= .3:
+                if tick - arrived_since >= arrival_sec:
                     break
             else:
                 arrived_since = None
-            target = limit_action(target, goal, motion, period, initial, True, radius)
+            step_motion = motion
+            if accel is not None:
+                remaining = float(np.linalg.norm(goal[:3] - target[:3]))
+                speed = min(motion.translation_speed, speed + accel * period, math.sqrt(2 * accel * remaining))
+                step_motion = replace(motion, translation_speed=min(motion.translation_speed,
+                                                                    max(speed, accel * period)))
+            target = limit_action(target, goal, step_motion, period, initial, True, radius)
             if stop.is_set():
                 return 'stopped'
             robot.servo(target, period, measured=measured)

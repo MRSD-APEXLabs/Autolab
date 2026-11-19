@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from behavior_tree_msgs.msg import LabMachineCommand, ManipulationCommand, Status
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String
+from std_msgs.msg import Empty, String
 
 from routine_executor.state_machine import RoutineStateMachine
 from routine_executor.step_config import STEPS, KNOWN_STEPS
@@ -15,6 +15,8 @@ STEP_MSG_CLASSES = {
     'string': String,
     'pose': PoseStamped,
 }
+
+NAV_CANCEL_TOPIC = '/nav/cancel'
 
 STATUS_QOS = rclpy.qos.QoSProfile(
     reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
@@ -50,6 +52,8 @@ class RoutineExecutorNode(Node):
 
         # Robot command publishers (keyed by (robot, topic_suffix))
         self._cmd_pubs: dict = {}
+        # Cancel stops a navigation step on the robot (nav_api's topic, not under /<robot>/)
+        self._nav_cancel_pub = self.create_publisher(Empty, NAV_CANCEL_TOPIC, 10)
 
         # Subscribe to all known action status topics for the default robot
         self._status_subs: dict = {}  # step_name -> subscription
@@ -165,10 +169,25 @@ class RoutineExecutorNode(Node):
             if self._wait_timer is not None and not self._wait_timer.is_canceled():
                 self._wait_timer.cancel()
                 self._wait_timer = None
+            step_name = self._sm.current_step_name()
             self._sm.cancel()
             self.get_logger().info('Routine cancelled')
+            self._stop_step_on_robot(step_name)
         else:
             self.get_logger().warn('Cancel received but no routine is running')
+
+    def _stop_step_on_robot(self, step_name: str) -> None:
+        """Stop the cancelled step's action on the robot too (a wait or lab machine step has no stop)."""
+        stop = STEPS.get(step_name, {}).get('stop')
+        if stop is None:
+            return
+        topic, stop_msg = stop()
+        if topic == NAV_CANCEL_TOPIC:
+            pub = self._nav_cancel_pub
+        else:
+            pub = self._get_cmd_pub(self._robot, topic, type(stop_msg))
+        pub.publish(stop_msg)
+        self.get_logger().info(f'Stopping step "{step_name}" on the robot ({pub.topic_name})')
 
     def _on_pause_cmd(self, msg: String) -> None:
         if self._sm.state == 'running':

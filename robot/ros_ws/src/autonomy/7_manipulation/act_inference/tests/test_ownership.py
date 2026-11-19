@@ -213,7 +213,8 @@ def test_restore_only_after_all_motion_succeeds(result, target, base_mode):
     def run(*args, **kwargs):
         if result == 'error': raise RuntimeError('motion failed')
         return result
-    node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None, base_placement=None, base_mode=base_mode,
+    node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None,
+                           base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5), base_mode=base_mode,
                            runner=SimpleNamespace(status=lambda: dict(target=target), _check_abort=check),
                            _run_policy=run, _base_move_fn=run, _post_placement_fn=run,
                            handoff=SimpleNamespace(finish=lambda check: calls.append('finish')))

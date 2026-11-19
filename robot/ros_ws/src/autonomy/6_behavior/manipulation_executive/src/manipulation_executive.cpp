@@ -26,6 +26,8 @@ ManipulationExecutive::ManipulationExecutive()
 
     camera_select_service_   = param("camera_select_service",   rclcpp::ParameterValue("/camera_hub/select_zedx")).as_string();
     camera_select_timeout_s_ = param("camera_select_timeout_s", rclcpp::ParameterValue(45.0)).as_double();
+    wrist_camera_select_service_ =
+        param("wrist_camera_select_service", rclcpp::ParameterValue("/camera_hub/select_zedx_nano")).as_string();
 
     servo_.name            = "Visual servo";
     servo_.node            = "visual_servo_node";
@@ -83,12 +85,14 @@ ManipulationExecutive::ManipulationExecutive()
     planning_cmd_pub_ = this->create_publisher<std_msgs::msg::String>("/planning_command", 10);
 
     // Planning state subscriber — sets result flag read by run_planning() in its async thread.
-    // Only SUCCESS and ERROR update the flag; IDLE/PLANNING/EXECUTING are ignored.
+    // Only SUCCESS and ERROR update the flag; EXECUTING sets planning_executing_ (for the camera
+    // switch ahead of time); IDLE/PLANNING are ignored.
     planning_state_sub_ = this->create_subscription<std_msgs::msg::String>(
         "/planning_state", 10,
         [this](const std_msgs::msg::String::SharedPtr msg) {
-            if      (msg->data == "SUCCESS") planning_result_.store(1);
-            else if (msg->data == "ERROR")   planning_result_.store(2);
+            if      (msg->data == "SUCCESS")   planning_result_.store(1);
+            else if (msg->data == "ERROR")     planning_result_.store(2);
+            else if (msg->data == "EXECUTING") planning_executing_.store(true);
         });
 
     // Command subscription
@@ -101,6 +105,8 @@ ManipulationExecutive::ManipulationExecutive()
     io_group_ = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     camera_select_client_ = this->create_client<Trigger>(
         camera_select_service_, rmw_qos_profile_services_default, io_group_);
+    wrist_camera_select_client_ = this->create_client<Trigger>(
+        wrist_camera_select_service_, rmw_qos_profile_services_default, io_group_);
     setup_remote(servo_);
     setup_remote(act_);
     // <prefix>/<target>: base for place_base, a lab machine for place
@@ -111,8 +117,8 @@ ManipulationExecutive::ManipulationExecutive()
             act_start_prefix_ + "/" + target, rmw_qos_profile_services_default, io_group_);
     }
 
-    RCLCPP_INFO(this->get_logger(), "Camera select: %s | servo: %s, %s, %s | ACT: %s/<target>, %s, %s",
-                camera_select_service_.c_str(), servo_.start_service.c_str(),
+    RCLCPP_INFO(this->get_logger(), "Camera select: %s (wrist ahead of time: %s) | servo: %s, %s, %s | ACT: %s/<target>, %s, %s",
+                camera_select_service_.c_str(), wrist_camera_select_service_.c_str(), servo_.start_service.c_str(),
                 servo_.stop_service.c_str(), servo_.status_topic.c_str(),
                 act_start_prefix_.c_str(), act_.stop_service.c_str(), act_.status_topic.c_str());
 
@@ -122,6 +128,19 @@ ManipulationExecutive::ManipulationExecutive()
         std::bind(&ManipulationExecutive::timer_callback, this));
 }
 
+static const char* phase_name(ManipulationExecutive::ManipPhase p)
+{
+    switch (p) {
+        case ManipulationExecutive::ManipPhase::IDLE:             return "IDLE";
+        case ManipulationExecutive::ManipPhase::SELECTING_CAMERA: return "SELECTING_CAMERA";
+        case ManipulationExecutive::ManipPhase::PLANNING:         return "PLANNING";
+        case ManipulationExecutive::ManipPhase::RUNNING_ACT:      return "RUNNING_ACT";
+        case ManipulationExecutive::ManipPhase::SERVOING:         return "SERVOING";
+        case ManipulationExecutive::ManipPhase::PLANNING_SAFE:    return "PLANNING_SAFE";
+        default:                                                   return "UNKNOWN";
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Command callback — arms the BT conditions so the tree activates the action
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +148,21 @@ ManipulationExecutive::ManipulationExecutive()
 void ManipulationExecutive::command_callback(
     const behavior_tree_msgs::msg::ManipulationCommand::SharedPtr msg)
 {
+    if (msg->type == "cancel") {
+        // Stop the manipulation where it is: no condition stays set (so nothing restarts it later),
+        // the async waits return (a running servo / ACT gets its stop), the active action fails on the
+        // next tick instead of advancing, and the planner ends its trajectory and drops its plan.
+        cancel_requested_ = true;
+        abort_.store(true);
+        for (auto* c : conditions_) c->set(false);
+        std_msgs::msg::String stop;
+        stop.data = "stop";
+        planning_cmd_pub_->publish(stop);
+        RCLCPP_WARN(this->get_logger(), "Cancel received (phase %s) — stopping the manipulation",
+                    phase_name(manip_phase_));
+        return;
+    }
+
     if (manip_phase_ != ManipPhase::IDLE) {
         RCLCPP_WARN(this->get_logger(),
                     "Manipulation in progress — ignoring new command");
@@ -150,6 +184,7 @@ void ManipulationExecutive::command_callback(
                     msg->type.c_str());
         return;
     }
+    cancel_requested_ = false;
     for (auto* c : conditions_) c->set(c == it->second);
     RCLCPP_INFO(this->get_logger(), "Received %s command (object: %s, machine: %s)",
                 msg->type.c_str(), object_type_.c_str(), target_machine_.c_str());
@@ -195,19 +230,6 @@ void ManipulationExecutive::status_callback(RemoteRun& run, const std_msgs::msg:
 // Timer callback — 20 Hz
 // ─────────────────────────────────────────────────────────────────────────────
 
-static const char* phase_name(ManipulationExecutive::ManipPhase p)
-{
-    switch (p) {
-        case ManipulationExecutive::ManipPhase::IDLE:             return "IDLE";
-        case ManipulationExecutive::ManipPhase::SELECTING_CAMERA: return "SELECTING_CAMERA";
-        case ManipulationExecutive::ManipPhase::PLANNING:         return "PLANNING";
-        case ManipulationExecutive::ManipPhase::RUNNING_ACT:      return "RUNNING_ACT";
-        case ManipulationExecutive::ManipPhase::SERVOING:         return "SERVOING";
-        case ManipulationExecutive::ManipPhase::PLANNING_SAFE:    return "PLANNING_SAFE";
-        default:                                                   return "UNKNOWN";
-    }
-}
-
 void ManipulationExecutive::timer_callback()
 {
     tick_manip(place_action_,          ManipType::PLACE);
@@ -235,6 +257,33 @@ void ManipulationExecutive::start_select_camera()
     pending_ = std::async(std::launch::async, &ManipulationExecutive::select_camera, this);
 }
 
+// The hub takes ~2 s to switch to the wrist camera and ~5 s back to the ZED X. Switching while the arm
+// moves means the servo / ACT run or the next plan finds its camera already streaming (their own
+// select then returns at once). The reply is only logged: the step that needs the camera still
+// selects it and fails if it can't.
+void ManipulationExecutive::preselect_camera(const rclcpp::Client<Trigger>::SharedPtr& client)
+{
+    const std::string service = client->get_service_name();
+    if (!client->service_is_ready()) {
+        RCLCPP_WARN(this->get_logger(), "%s is not available — not switching the camera ahead of time",
+                    service.c_str());
+        return;
+    }
+    RCLCPP_INFO(this->get_logger(), "Switching the camera hub ahead of time: %s", service.c_str());
+    client->async_send_request(
+        std::make_shared<Trigger::Request>(),
+        [this, service](rclcpp::Client<Trigger>::SharedFuture future) {
+            const auto response = future.get();
+            if (response->success) {
+                RCLCPP_INFO(this->get_logger(), "%s (ahead of time): %s", service.c_str(),
+                            response->message.c_str());
+            } else {
+                RCLCPP_WARN(this->get_logger(), "%s (ahead of time) failed: %s", service.c_str(),
+                            response->message.c_str());
+            }
+        });
+}
+
 bt::Condition* ManipulationExecutive::condition_for(ManipType type)
 {
     switch (type) {
@@ -253,6 +302,15 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
         return;
     }
 
+    // Cancelled: fail instead of advancing (or starting), until the BT deactivates the action
+    if (cancel_requested_) {
+        if (!manip_terminal_) {
+            RCLCPP_WARN(this->get_logger(), "Manipulation cancelled — FAILURE");
+            fail_manip(action);
+        }
+        return;
+    }
+
     if (manip_terminal_) return;
 
     // ── New activation ────────────────────────────────────────────────────────
@@ -262,6 +320,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
         // within ~100 ms; drain it before clearing the flag for this run.
         if (pending_.valid()) pending_.wait();
         abort_.store(false);
+        wrist_preselected_ = false;
         const char* type_name =
             (type == ManipType::PLACE)      ? "place"      :
             (type == ManipType::PICK_BASE)  ? "pick_base"  :
@@ -276,6 +335,9 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::run_planning,
                                   this, "home_offset");
+            // pick_base servos with the wrist camera right after home_offset (place_base's
+            // scripted placement uses no camera)
+            if (type == ManipType::PICK_BASE) preselect_camera(wrist_camera_select_client_);
         } else {
             // every other plan reads /inspect/* → base camera first
             start_select_camera();
@@ -296,6 +358,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
             RCLCPP_INFO(this->get_logger(), "Base camera streaming — triggering planning");
             manip_phase_ = ManipPhase::PLANNING;
             in_flight_   = true;
+            planning_executing_.store(false);
             // place goes to target_machine's AprilTag, pick to the detected well plate
             pending_ = std::async(std::launch::async,
                                   &ManipulationExecutive::run_planning,
@@ -307,6 +370,13 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
 
     // ── PLANNING ──────────────────────────────────────────────────────────────
     if (manip_phase_ == ManipPhase::PLANNING) {
+        // place / pick: once the arm moves to the tag / plate, the planner has read its cloud and
+        // detection, so the ACT / servo run that follows can have the wrist camera
+        if ((manip_type_ == ManipType::PLACE || manip_type_ == ManipType::PICK) &&
+            !wrist_preselected_ && planning_executing_.load()) {
+            wrist_preselected_ = true;
+            preselect_camera(wrist_camera_select_client_);
+        }
         if (pending_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             in_flight_ = false;
             if (!pending_.get()) {
@@ -353,6 +423,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "ACT complete — planning safe position");
+            preselect_camera(camera_select_client_);   // the next place / pick plans with the ZED X
             manip_phase_ = ManipPhase::PLANNING_SAFE;
             in_flight_   = true;
             pending_ = std::async(std::launch::async,
@@ -373,6 +444,7 @@ void ManipulationExecutive::tick_manip(bt::Action* action, ManipType type)
                 fail_manip(action);
                 return;
             }
+            preselect_camera(camera_select_client_);   // the next place / pick plans with the ZED X
             if (manip_type_ == ManipType::PICK_BASE) {
                 // pick_base ends here — no safe-home planning needed
                 RCLCPP_INFO(this->get_logger(), "Servo complete — pick_base SUCCESS");

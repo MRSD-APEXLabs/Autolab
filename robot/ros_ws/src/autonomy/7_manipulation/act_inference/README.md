@@ -113,7 +113,8 @@ The shared status remains running and the start services stay locked through ope
 retreat. `/act_inference/stop` cancels the opening wait or lift. A stopped/failed policy
 skips release and retreat. Prediction-only runs only log the sequence and read the TCP;
 they send no gripper or motion commands. Base placement uses the same release sequence
-with a **60 mm** lift.
+with a **1.5 s** jaw wait (`base_open_wait_sec`) and a **60 mm** lift at `base_lift_speed_mm_s` (**150 mm/s**,
+speeding up and slowing down at `base_accel_mm_s2`, **500 mm/s^2**).
 
 ## Base placement
 
@@ -130,15 +131,26 @@ roll/pitch/yaw (degrees): [179.332982, -2.176667, 1.803213]   (base_pose_mm_deg)
 Where the plate sits in the gripper varies along X, so a fixed pose only gets it close; the deck's ridge and the
 wrist F/T sensor finish the job:
 
-1. Move to the probing start at **15 mm/s**, rotation **6 degrees/s**, 50 Hz, with measured arrival.
-2. Hold still 0.5 s, take the in-air F/T baseline (median over 0.3 s), then descend at **2 mm/s** until
-   |Fz - baseline| > **1.0 N** for 2 consecutive reads. No touch within **11 mm** below the start fails the run.
-3. Hold at the touch height, re-baseline, then slide along base **-X** at **2 mm/s** until the sideways force
-   |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. No ridge within **30 mm**
-   fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
+1. Move to the probing start, rotation **6 degrees/s**, 50 Hz, with measured arrival (held 0.1 s; place_base reads
+   the arm on the 100 Hz `real` report socket). From higher up (home_offset,
+   ~180 mm away): at **150 mm/s** to **20 mm** straight above it first (`base_approach_speed_mm_s`,
+   `base_approach_clearance_mm`), then down the rest at **40 mm/s** (`base_speed_mm_s`); from lower, the whole
+   move at 40 mm/s. Each move speeds up from rest and slows down to stop at **500 mm/s^2** (`base_accel_mm_s2`)
+   instead of jumping to full speed.
+2. Hold still 0.2 s, take the in-air F/T baseline (median over 0.2 s), then descend until
+   |Fz - baseline| > **1.0 N** for 2 consecutive reads: the first **3.5 mm** at **10 mm/s**
+   (`base_probe_fast_mm`, `base_fast_speed_mm_s`; the deck is ~7 mm down), the rest at **2 mm/s**. No touch
+   within **11 mm** below the start fails the run.
+3. Hold at the touch height, re-baseline, then slide along base **-X** until the sideways force
+   |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. The first **12 mm** go at
+   **10 mm/s** (`base_slide_fast_mm`; the ridge is ~19 mm along), the rest at **4 mm/s**. No ridge within
+   **30 mm** fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
 
-The touch and ridge positions (and how far each is from the start) are printed every run. Then the node opens the
-gripper, waits **4 seconds**, and lifts **60 mm along base +Z** at `translation_speed` (default **10 mm/s**).
+The fast parts are force-guarded like the slow ones; a touch or ridge inside them stops the move, only with more
+overshoot. The touch and ridge positions (and how far each is from the start) are printed every run: if either is
+inside its fast part, lower `base_probe_fast_mm` / `base_slide_fast_mm`. Then the node opens the gripper, waits
+**1.5 s**, and lifts **60 mm along base +Z** at `base_lift_speed_mm_s` (**150 mm/s**, ramped at
+`base_accel_mm_s2`).
 
 F/T is `ft_ext_force` (SDK sensor frame, load-compensated) from a second, read-only SDK connection on the fast
 `real` report socket, as visual_servoing reads it; the sensor is never zeroed (that drops the controller into
@@ -155,7 +167,8 @@ wrench, threshold metric, consecutive hits) to `~/.ros/log/act_inference_base_pl
 200 mm away), then runs the policy like OT-2/shaker (Nano camera, `base_workspace_radius` 0.15 m), followed by
 the same release and 60 mm lift.
 
-Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s.
+Measured arrival at each goal requires feedback within 1 mm and 0.5 degrees for 0.3 s (0.1 s in scripted
+place_base and its lift).
 Execution reports `done` after placing, releasing, lifting, and driver handback succeed.
 Cancellation reports `stopped`; robot errors
 or the 180 s timeout report `failed`. The timeout is independent of ACT's `duration_sec`.
@@ -163,15 +176,19 @@ With `execute:=false`, base placement reads the TCP, logs the destination, and r
 `done` without enabling or commanding the arm.
 
 Node parameters: `base_mode` (`scripted` or `policy`); `base_pose_mm_deg` (six XYZ/RPY values), `base_speed_mm_s`
-(15.0), `base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0, both modes' moves); scripted seating
-`base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (2.0), `base_slide_max_mm`
-(30.0), `base_ridge_force_n` (1.0), `base_force_count` (2), `base_settle_sec` (0.5), `base_baseline_sec` (0.3),
+(40.0), `base_rotation_speed_deg_s` (6.0), `base_timeout_sec` (180.0, both modes' moves), `base_lift_speed_mm_s`
+(150.0, both modes), `base_accel_mm_s2` (500.0, the lift and the scripted approach); scripted
+`base_approach_speed_mm_s` (150.0), `base_approach_clearance_mm` (20.0); scripted seating
+`base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (4.0), `base_slide_max_mm`
+(30.0), `base_ridge_force_n` (1.0), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
+`base_slide_fast_mm` (12.0), `base_force_count` (2), `base_settle_sec` (0.2), `base_baseline_sec` (0.2),
+`base_open_wait_sec` (1.5, both modes),
 `base_debug` (false), `base_debug_dir`; policy mode `base_ckpt_dir`, `base_start_pose_mm_deg`,
 `base_workspace_radius` (0.15 m). Bringup exposes the mode, debug, speeds and timeout:
 
 ```bash
 ros2 launch manipulation_bringup manipulation.launch.xml act_base_mode:=scripted act_base_debug:=true \
-  act_base_speed_mm_s:=15.0 act_base_rotation_speed_deg_s:=6.0 act_base_timeout_sec:=180.0
+  act_base_speed_mm_s:=40.0 act_base_rotation_speed_deg_s:=6.0 act_base_timeout_sec:=180.0
 ```
 
 ## Standalone script

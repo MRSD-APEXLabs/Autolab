@@ -3,6 +3,7 @@
 // │  /task_planner/task_type         std_msgs/String            │
 // │  /joint_states                   sensor_msgs/JointState     │
 // │  /planning_command               std_msgs/String            │
+// │    plan_* commands; "stop" ends the motion (see below)      │
 // │                                                             │
 // │  PUBLISHED TOPICS                                           │
 // │  /planning_state                 std_msgs/String            │
@@ -56,6 +57,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <atomic>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -68,6 +70,10 @@ static constexpr double WS_Y_MIN = -0.50;
 static constexpr double WS_Y_MAX =  0.50;
 static constexpr double WS_Z_MIN =  0.90;
 static constexpr double WS_Z_MAX =  1.30;
+
+// /planning_command "stop" (manipulation_executive's cancel) sets this until the next command arrives. It ends the
+// trajectory that is executing (MoveGroupInterface::stop) and keeps the current command's plan from being executed.
+static std::atomic<bool> stop_requested{false};
 
 static constexpr double ARM_PLANNING_TIME_SEC = 15.0;
 static constexpr int INPUT_TIMEOUT_SEC = 5;
@@ -105,6 +111,11 @@ static const std::array<std::array<double, 3>, 6> GOAL_NUDGES = {{
     {0.02, 0.0, 0.0}, {-0.02, 0.0, 0.0}, {0.0, 0.02, 0.0}, {0.0, -0.02, 0.0}}};  // around
 // The arm this close to the goal (joint space, rad) already counts as there: SUCCESS without moving.
 static constexpr double ALREADY_THERE_RAD = 0.01;
+// plan_home_offset's joint goal. The arm there is out of the base camera's view.
+static const JointVec HOME_OFFSET_JOINTS = {1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284};
+// plan_wellplate takes a fresh cloud only with the arm this close to HOME_OFFSET_JOINTS (joint space, rad);
+// elsewhere (e.g. a retried pick, arm still at the OT-2) the arm would be in the cloud, so the map is reused.
+static constexpr double FRESH_CLOUD_HOME_RAD = 0.05;
 
 
 
@@ -836,6 +847,11 @@ std::optional<MotionPlan> plan_and_publish_rrt(
         RCLCPP_INFO(node->get_logger(), "[Path Planning] Plan published to RViz.");
 
         // ── Execute ──────────────────────────────────────────────
+        if (stop_requested)
+        {
+            RCLCPP_WARN(node->get_logger(), "[Path Planning] Stop requested; not executing the plan.");
+            return std::nullopt;
+        }
         {
             std_msgs::msg::String s;
             s.data = "EXECUTING";
@@ -988,6 +1004,7 @@ void command_callback(const std_msgs::msg::String::SharedPtr msg)
 {
     std::lock_guard<std::mutex> lock(cmd_mutex);
     received_command = msg->data;
+    stop_requested = false;   // a stop only applies to the commands before it
 }
 
 int main(int argc, char *argv[])
@@ -1086,7 +1103,7 @@ int main(int argc, char *argv[])
             std::atomic_store(&latest_obstacle_cloud, msg);
         });
 
-    // move_group's octomap reads this topic (sensors_3d.yaml). TEMP: plan_wellplate and
+    // move_group's octomap reads this topic (sensors_3d.yaml). TEMP: plan_wellplate (arm at home_offset) and
     // plan_april_<id> clear the octomap and re-freeze a fresh cloud; other plans reuse it.
     auto frozen_cloud_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>(
         "/zed_pointcloud_frozen", rclcpp::SensorDataQoS());
@@ -1094,7 +1111,14 @@ int main(int argc, char *argv[])
     auto clear_octomap_client = node->create_client<std_srvs::srv::Empty>("/clear_octomap");
 
     auto command_sub = node->create_subscription<std_msgs::msg::String>(
-        "/planning_command", 10, command_callback);
+        "/planning_command", 10, [&arm_group, &node](const std_msgs::msg::String::SharedPtr msg) {
+            if (msg->data != "stop")
+                return command_callback(msg);
+            stop_requested = true;
+            arm_group.stop();   // move_group ends the trajectory that is executing, if any
+            RCLCPP_WARN(node->get_logger(), "Stop requested: the executing trajectory is stopped and the current "
+                        "command's plan will not be executed.");
+        });
 
     auto planning_state_pub = node->create_publisher<std_msgs::msg::String>("/planning_state", 10);
 
@@ -1234,7 +1258,9 @@ int main(int argc, char *argv[])
         return std::nullopt;
     };
 
-    rclcpp::Rate rate(1);
+    // 20 Hz: a new command starts within 50 ms (was up to 1 s). IDLE is still published once a second.
+    rclcpp::Rate rate(20);
+    auto last_idle_publish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     while (rclcpp::ok())
     {
         std::string cmd;
@@ -1259,6 +1285,12 @@ int main(int argc, char *argv[])
                 }
             }
 
+            if (cmd != "idle" && stop_requested)
+            {
+                finish_plan(std::nullopt, "stop requested");
+                continue;
+            }
+
             // Everything below reads the planner's own scene copy.
             if (cmd.rfind("plan_", 0) == 0)
             {
@@ -1270,8 +1302,26 @@ int main(int argc, char *argv[])
                 }
             }
 
-            // TEMP: fresh cloud for plan_wellplate / plan_april_<id>. Assumes the arm is out of the camera's view.
-            if (cmd == "plan_wellplate" || cmd.rfind("plan_april_", 0) == 0)
+            // plan_wellplate takes a fresh cloud (here and as its fallback) only with the arm at home_offset, out of
+            // the camera's view; elsewhere it plans with the current map.
+            bool wellplate_fresh_cloud = false;
+            if (cmd == "plan_wellplate")
+            {
+                JointVec q_now;
+                if (auto current_state = arm_group.getCurrentState(5.0))
+                    current_state->copyJointGroupPositions(crrt_cfg::GROUP_NAME, q_now);
+                if (q_now.size() != HOME_OFFSET_JOINTS.size())
+                    RCLCPP_WARN(node->get_logger(), "No current arm state; reusing the current octomap (no fresh cloud).");
+                else if (const double d = joint_dist(q_now, HOME_OFFSET_JOINTS); d > FRESH_CLOUD_HOME_RAD)
+                    RCLCPP_WARN(node->get_logger(), "Arm %.2f rad from home_offset, maybe in the camera's view; reusing the "
+                                "current octomap (no fresh cloud).", d);
+                else
+                    wellplate_fresh_cloud = true;
+            }
+
+            // TEMP: fresh cloud for plan_wellplate (arm at home_offset) / plan_april_<id>. Assumes the arm is out
+            // of the camera's view.
+            if ((cmd == "plan_wellplate" && wellplate_fresh_cloud) || cmd.rfind("plan_april_", 0) == 0)
             {
                 // Drop the cached cloud and wait for one that arrives after this command.
                 std::atomic_store(&latest_obstacle_cloud, sensor_msgs::msg::PointCloud2::SharedPtr{});
@@ -1408,7 +1458,9 @@ int main(int argc, char *argv[])
 
                 geometry_msgs::msg::Pose pregrasp_pose = target_position;
 
-                const double PREGRASP_Z_OFFSET = 0.03;
+                // 40 mm above the earlier 0.03: back at this hover after the grasp (visual servo return_to_start), the
+                // held plate (wellplate_link) clears the voxels of where it stood, so plan_home_offset can start
+                const double PREGRASP_Z_OFFSET = 0.07;
                 pregrasp_pose.position.z += PREGRASP_Z_OFFSET;
 
                 const double PREGRASP_Y_OFFSET = 0.0; //  0.1;
@@ -1423,7 +1475,8 @@ int main(int argc, char *argv[])
                 publish_state("PLANNING");
                 PlanOptions opts;
                 opts.ignore_wellplate_link = true;   // the gripper is empty for a pick; see search()
-                opts.refresh_cloud = refresh_cloud_fallback;
+                if (wellplate_fresh_cloud)
+                    opts.refresh_cloud = refresh_cloud_fallback;
                 auto rrt_plan_opt = plan_and_publish_rrt(
                     task_type, pregrasp_pose,
                     arm_group, node, planning_state_pub, opts);
@@ -1463,13 +1516,15 @@ int main(int argc, char *argv[])
             }
             else if (cmd == "plan_home_offset")
             {
-                const JointVec home_offset_joints = {1.6284, -0.3927, -0.5812, 0.0, 0.9738, 1.6284};
-
                 publish_state("PLANNING");
                 // A joint goal: the fallbacks are the longer searches (no goal nudges, no cloud refresh).
-                auto rrt_plan_opt = find_plan(arm_group, node, home_offset_joints, std::nullopt, PlanOptions{});
+                auto rrt_plan_opt = find_plan(arm_group, node, HOME_OFFSET_JOINTS, std::nullopt, PlanOptions{});
 
                 if (rrt_plan_opt && !rrt_plan_opt->trajectory_.joint_trajectory.points.empty()) {
+                    if (stop_requested) {
+                        finish_plan(std::nullopt, "stop requested; the plan was not executed");
+                        continue;
+                    }
                     publish_state("EXECUTING");
                     if (arm_group.execute(*rrt_plan_opt) != moveit::core::MoveItErrorCode::SUCCESS) {
                         finish_plan(std::nullopt, "execution failed (not retried)");
@@ -1479,9 +1534,15 @@ int main(int argc, char *argv[])
                 }
                 finish_plan(rrt_plan_opt);
             }
-            else
+            else if (cmd != "idle")
+            {
+                // Clear it: it would otherwise be re-read (and logged, and a controller switch node made) 20x a second.
+                finish_plan(std::nullopt, "unknown command '" + cmd + "'");
+            }
+            else if (std::chrono::steady_clock::now() - last_idle_publish >= std::chrono::seconds(1))
             {
                 publish_state("IDLE");
+                last_idle_publish = std::chrono::steady_clock::now();
             }
         }
         catch (const std::exception &e)

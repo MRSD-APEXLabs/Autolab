@@ -20,13 +20,15 @@ def held_from(value):
     return lambda v, arm: (400, 200) if v >= value else (0, 0)
 
 
-def run(start=START, fsr=held_from(130), prepare=None, hook=None, camera=None, ft=None, **config):
+def run(start=START, fsr=held_from(130), prepare=None, hook=None, camera=None, ft=None, gripper_start=None, **config):
     config.setdefault('dry_run', False)
     config.setdefault('return_to_start', True)  # exercise the optional return in the original simulations
     config.setdefault('gripper', GripperConfig(**LEGACY_GRIPPER))
     config = ServoConfig(**config)
     clock = FakeClock()
     arm = FakeArm(clock, start, read_only=config.dry_run, fsr=fsr, ft=ft)
+    if gripper_start is not None:
+        arm.gripper_values.append(gripper_start)   # the gripper's last target before the run
     runner = ServoRunner(arm, MOUNT, config, clock=clock.time, sleep=clock.sleep, prepare=prepare)
     cam = Camera(runner, MOUNT, CENTER, np.radians(LONG_DEG), **(camera or {}))
 
@@ -202,7 +204,7 @@ def test_close_makes_one_move_to_close_start_then_steps():
     assert status['result'] == 'grasped', status
     assert arm.gripper_values == [0, 130, 140, 150, 160, 170, 180, 220]   # open, one move, steps of 10, squeeze
     jump = next(e for e in arm.events if e[1:] == ('gripper', 130))
-    assert reads[0] - jump[0] == pytest.approx(130 / 80.0)                 # 0 -> 130 at probe_gripper_rate
+    assert reads[0] - jump[0] == pytest.approx(130 / 200.0)                # 0 -> 130 at probe_gripper_rate
 
 
 def test_closing_steps_wait_step_settle(monkeypatch):
@@ -220,8 +222,8 @@ def test_closing_steps_wait_step_settle(monkeypatch):
     assert settles == [(0, 0.0), (50, 0.0)] + [(v, 0.15) for v in range(60, 140, 10)] + [(170, 0.0)]
 
 
-@pytest.mark.parametrize('close_settle', [4.0, 60.0])
-def test_the_alignment_runs_while_the_gripper_opens_and_the_tare_waits_for_it(close_settle):
+@pytest.mark.parametrize('gripper_start, rate', [(0, 200.0), (850, 10.0)])
+def test_the_alignment_runs_while_the_gripper_opens_and_the_tare_waits_for_it(gripper_start, rate):
     reads, phases = [], {}
 
     def fsr(value, arm):
@@ -231,16 +233,18 @@ def test_the_alignment_runs_while_the_gripper_opens_and_the_tare_waits_for_it(cl
     def hook(t, runner):
         phases.setdefault(runner.status()['phase'], t + 1000.0)
 
-    status, arm = run(fsr=fsr, hook=hook, gripper=GripperConfig(close_settle=close_settle))
+    status, arm = run(fsr=fsr, hook=hook, gripper=GripperConfig(), gripper_start=gripper_start,
+                      probe_gripper_rate=rate, probe_gripper_margin=0.5)
     assert status['result'] == 'grasped', status
     opened = next(e[0] for e in arm.events if e[1:] == ('gripper', 0))
     assert phases['servoing'] - opened < 0.1                    # no wait before aligning
     tare = reads[0]
-    assert tare >= opened + close_settle - 1e-6                 # the unloaded tare once the jaws are open
-    if close_settle == 4.0:
+    wait = gripper_start / rate + 0.5                            # the jaws' travel from their last target
+    assert tare >= opened + wait - 1e-6                          # the unloaded tare once the jaws are open
+    if gripper_start == 0:
         assert tare - phases['descending'] < 0.1                # the alignment took longer: no wait after it
     else:
-        assert tare == pytest.approx(opened + close_settle, abs=0.1)   # only the rest of the wait
+        assert tare == pytest.approx(opened + wait, abs=0.1)     # only the rest of the wait
 
 
 @pytest.mark.parametrize('use_ft, lines', [(False, 0), (True, 4)])
@@ -775,11 +779,11 @@ def test_probe_closes_on_the_way_down_and_touches_only_once_the_jaws_are_there(m
     reopen = next(i for i, e in enumerate(events) if i > close and e[1:] == ('gripper', 0))
     approach, descent = [e for e in events[close + 1:] if e[1] == 'move'][:2]
     assert approach[0] == pytest.approx(events[close][0]) and approach[2] == 30.0   # the arm moves down at once...
-    closed = events[close][0] + 550 / 80.0 + 1.0                                     # 0 -> 550 at 80 units/s + 1 s
+    closed = events[close][0] + 550 / 200.0 + 0.5                                     # 0 -> 550 at 200 units/s + 0.5 s
     assert descent[0] == pytest.approx(closed, abs=0.05)          # ...and touches once the jaws are there, not 2 s later
     after_open = next(e for e in events[reopen + 1:] if e[1] == 'move')
-    assert after_open[0] - events[reopen][0] >= 550 / 80.0 + 1.0 - 1e-6   # open before lowering over the plate
-    assert status['probe_gripper_wait_s'] == pytest.approx(550 / 80.0 + 1.0, abs=0.01)
+    assert after_open[0] - events[reopen][0] >= 550 / 200.0 + 0.5 - 1e-6   # open before lowering over the plate
+    assert status['probe_gripper_wait_s'] == pytest.approx(550 / 200.0 + 0.5, abs=0.01)
 
 
 def test_probe_opens_to_probe_open_and_the_close_starts_there():
@@ -797,9 +801,9 @@ def test_probe_opens_to_probe_open_and_the_close_starts_there():
     events = arm.events
     reopen = next(i for i, e in enumerate(events) if e[1:] == ('gripper', 80))
     lower = next(e for e in events[reopen + 1:] if e[1] == 'move')
-    assert lower[0] - events[reopen][0] >= (550 - 80) / 80.0 + 1.0 - 1e-6
+    assert lower[0] - events[reopen][0] >= (550 - 80) / 200.0 + 0.5 - 1e-6
     jump = next(e for e in events if e[1:] == ('gripper', 130))
-    assert reads[0] - jump[0] == pytest.approx((130 - 80) / 80.0)  # first FSR read once the jaws are at close_start
+    assert reads[0] - jump[0] == pytest.approx((130 - 80) / 200.0)  # first FSR read once the jaws are at close_start
 
 
 def test_probe_retry_waits_for_the_gripper_to_open():
@@ -808,7 +812,7 @@ def test_probe_retry_waits_for_the_gripper_to_open():
     assert (status['result'], status['attempt']) == ('grasped', 2), status
     closes = [i for i, e in enumerate(arm.events) if e[1:] == ('gripper', 550)]
     retry_open = next(e for e in arm.events[closes[0] + 1:] if e[1:] == ('gripper', 0))
-    assert arm.events[closes[1]][0] - retry_open[0] >= 550 / 80.0 + 1.0 - 1e-6
+    assert arm.events[closes[1]][0] - retry_open[0] >= 550 / 200.0 + 0.5 - 1e-6
 
 
 # -- probe tilt: level the closed fingertips with a leaning plate by tilt-and-retouch --------------------------

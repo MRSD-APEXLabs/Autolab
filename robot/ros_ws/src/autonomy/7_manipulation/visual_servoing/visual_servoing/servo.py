@@ -120,9 +120,10 @@ class ServoConfig:
     probe_contact: bool = False
     probe_close: int = 550              # gripper value for the closed-finger probe (closes while the arm moves down)
     probe_open: int = 0                 # gripper value the probe opens to before the grasp descent; the close starts there
-    probe_gripper_rate: float = 80.0    # gripper units/s; the jaws report no position, so each probe close/open
-    probe_gripper_margin: float = 1.0   # waits travel / rate + margin s (350 units needed > 1.5 s, 4 s was enough);
-                                        # the jump to gripper.close_start waits travel / rate
+    probe_gripper_rate: float = 200.0   # gripper units/s; the jaws report no position, so each probe close/open and
+    probe_gripper_margin: float = 0.5   # the start's open wait travel / rate + margin s (firmware rev4, 2026-11-19:
+                                        # up to ~209 units/s after a 0.17 s ramp); the jump to gripper.close_start
+                                        # waits travel / rate
     probe_lift: float = 0.005           # m above the touch while the gripper opens
     probe_reposition_speed: float = 15.0  # mm/s off the touch to probe_lift, the turn to the grasp tilt, down to grip
     probe_depth: float = 0.010          # m below the expected plate top the probe may go (also min_tip_z)
@@ -355,10 +356,12 @@ class ServoRunner:
                 self.arm.position_mode()
                 if cfg.grasp:
                     self.arm.gripper_setup()
+                    before = self.arm.gripper_position()   # the last target: where the jaws went (None: unknown)
                     self.arm.gripper_open()
                     if cfg.gripper.use_fsr:
                         # finish opening before the unloaded tare (_grasp waits for the rest): align meanwhile
-                        self._open_until = self.clock() + cfg.gripper.close_settle
+                        travel = before if before is not None else 1000
+                        self._open_until = self.clock() + travel / cfg.probe_gripper_rate + cfg.probe_gripper_margin
                 if cfg.level_at_start:
                     self.arm.move_flange(level_pose(start_pose), cfg.level_speed)
             for attempt in range(cfg.max_retries + 1):

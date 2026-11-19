@@ -86,11 +86,12 @@
       # Gripper value the probe opens to before lowering over the plate (a retry still opens fully, for the tare).
       # Contact is at ~180 (FSR_CALIBRATION.md) and 10 units move each jaw ~0.5 mm: 80 leaves ~5 mm per jaw.
       probe_open: 80
-      # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin (550 units: 7.9 s):
-      # the close runs while the arm moves down to final_segment, the open before it moves again. The jump to
-      # gripper.close_start waits travel / rate. Time a 0 -> 550 close on the bench and set rate from it.
-      probe_gripper_rate: 80.0        # gripper units/s
-      probe_gripper_margin: 1.0       # s
+      # The gripper reports no jaw position, so each probe close/open (and the open at the start of a run) waits
+      # travel / rate + margin (500 units: 3.0 s): the close runs while the arm moves down to final_segment, the open
+      # before it moves again. The jump to gripper.close_start waits travel / rate. Firmware rev4 (2026-11-19) ramps
+      # from 625 to 2000 steps/s (65 -> ~209 units/s) in 0.17 s; the old firmware ran at 65 units/s throughout.
+      probe_gripper_rate: 200.0       # gripper units/s
+      probe_gripper_margin: 0.5       # s
       probe_lift: 0.005               # m above the touch while the gripper opens
       # mm/s off the touch to probe_lift, the turn to the grasp tilt and the open fingers down to probe_grip_depth
       # (was final_speed 3); touches stay at final_speed / probe_touch_speed
@@ -130,7 +131,7 @@
       # (FSR_CALIBRATION.md): 130 stops ~2.5 mm per jaw short of a centred plate.
       close_start: 130
       step: 10
-      step_settle: 0.15               # s after each step before the FSR read (10 units: ~0.13 s at probe_gripper_rate 80)
+      step_settle: 0.12               # s after each step before the FSR read (10 units: ~0.11 s on firmware rev4)
       max_close: 350
       samples: 100
       rate: 2.0
@@ -140,7 +141,7 @@
       target_pressure: [60, 60]
       stop_pressure: [150, 150]
       final_squeeze: 65               # after the main grip settles, add 65 as the last gripper action before lifting
-      final_squeeze_settle: 1.0       # wait for the final squeeze adjustment before moving the arm
+      final_squeeze_settle: 0.5       # wait for the final squeeze adjustment before moving the arm (65 units: ~0.43 s)
       nudge_mm: 0.5
       nudge_speed: 5.0
       fsr_nudge_sign: [1, -1]         # flange finger axis: + unloads FSR1 (measured), - unloads FSR2

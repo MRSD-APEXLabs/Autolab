@@ -17,6 +17,7 @@ beforeEach(() => {
 
 test('renders all subsystem panels', () => {
   render(<DebugConsole />);
+  expect(screen.getByText('Full Sequence')).toBeInTheDocument();
   expect(screen.getByText('Navigation')).toBeInTheDocument();
   expect(screen.getByText('Planning')).toBeInTheDocument();
   expect(screen.getByText('Perception')).toBeInTheDocument();

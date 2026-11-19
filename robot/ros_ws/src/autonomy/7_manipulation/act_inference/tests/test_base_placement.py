@@ -51,10 +51,13 @@ def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, 
         return [.2 + fx + noise, -.1 + noise, -.3 - fz + noise, 0., 0., 0.]
 
     class Robot:
-        def __init__(self, ip, motion, read_only):
+        report_types = []
+
+        def __init__(self, ip, motion, read_only, report_type='rich'):
             self.previous = initial.copy()
             self.motion = motion
             self.read_only = read_only
+            Robot.report_types.append(report_type)
 
         @property
         def pose(self):
@@ -86,7 +89,7 @@ def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, 
 
         def servo(self, target, period, measured):
             assert not self.read_only
-            assert np.linalg.norm(target[:3] - self.previous[:3]) <= .015 * period + 1e-10
+            assert np.linalg.norm(target[:3] - self.previous[:3]) <= self.motion.translation_speed * period + 1e-10
             angle = (Rotation.from_rotvec(target[3:]) *
                      Rotation.from_rotvec(self.previous[3:]).inv()).magnitude()
             assert angle <= self.motion.rotation_speed * period + 1e-10
@@ -149,22 +152,31 @@ def test_touch_then_slide_to_the_ridge(monkeypatch, capsys):
     approach = placement.target_pose()
     assert bp.run_base_placement(InferenceConfig(), placement, execute=True, stop=stop) == 'done'
     assert calls == ['connect', 'ft_prepare', 'ft_connect', 'enable', 'ft_close', 'close']
+    assert bp.XArm6Robot.report_types == ['real']   # 100 Hz measured pose, not the 5 Hz rich report
     deck_z = approach[2] - .008
     goals, held = phases(commands, approach)
-    assert len(held) >= 15 + 40   # measured arrival, then settle + in-air baseline, before descending
+    assert len(held) >= 5 + 20   # measured arrival (0.1 s), then settle + in-air baseline (0.4 s), before descending
+    # from about the start's height: one move at speed_mm_s, no fast approach
+    assert np.linalg.norm(np.diff(goals[:held[0] + 1, :3], axis=0), axis=1).max() <= .04 / 50 + 1e-10
     seating = goals[held[-1] + 1:]
     descent = seating[seating[:, 0] == approach[0]]
     slide = seating[seating[:, 0] < approach[0]]
-    # descend straight down at 2 mm/s to the deck (5 N/mm: 1 N above the baseline is 0.2 mm into it)
+    # descend straight down, 3.5 mm at 10 mm/s then 2 mm/s, to the deck (5 N/mm: 1 N above the baseline is
+    # 0.2 mm into it)
     np.testing.assert_allclose(descent[:, 1], approach[1], atol=1e-10)
     assert np.all(np.diff(descent[:, 2]) <= 1e-12)
-    assert np.abs(np.diff(descent[:, 2])).max() == pytest.approx(.002 / 50)
+    down = np.abs(np.diff(np.r_[approach[2], descent[:, 2]]))
+    fast = approach[2] - descent[:, 2] <= .0035 + 1e-10
+    assert down[fast].max() == pytest.approx(.010 / 50) and down[~fast].max() == pytest.approx(.002 / 50)
+    assert approach[2] - descent[fast][-1, 2] == pytest.approx(.0035)
     touch_z = descent[-1, 2]
     assert deck_z - .0004 < touch_z < deck_z - .0002
     # then along -X at the touch height until the ridge (1.0 N is 0.2 mm into it), and no further
     np.testing.assert_allclose(slide[:, 1:3], np.tile([approach[1], touch_z], (len(slide), 1)), atol=1e-10)
     assert np.all(np.diff(slide[:, 0]) <= 1e-12)
-    assert np.abs(np.diff(slide[:, 0])).max() == pytest.approx(.002 / 50)
+    side = np.abs(np.diff(np.r_[approach[0], slide[:, 0]]))
+    fast = approach[0] - slide[:, 0] <= .012 + 1e-10    # 12 mm at 10 mm/s, then 4 mm/s
+    assert side[fast].max() == pytest.approx(.010 / 50) and side[~fast].max() == pytest.approx(.004 / 50)
     ridge_x = approach[0] - .013
     assert ridge_x - .0004 < slide[:, 0].min() < ridge_x - .0002
     np.testing.assert_allclose(Rotation.from_rotvec(seating[:, 3:]).as_rotvec(),
@@ -172,6 +184,33 @@ def test_touch_then_slide_to_the_ridge(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'touch at z=' in out and 'mm below the start' in out and 'ridge at x=' in out
     assert '[base debug]' not in out
+
+
+def test_from_above_fast_to_the_clearance_then_straight_down_to_the_start(monkeypatch):
+    stop = ClockStop()
+    placement, calls, commands = setup_robot(monkeypatch, stop, initial_pose=HOME_POSE)
+    start = placement.target_pose()
+    assert bp.run_base_placement(InferenceConfig(), placement, execute=True, stop=stop) == 'done'
+    goals = np.asarray(commands)
+    at = lambda point: np.flatnonzero(np.all(np.isclose(goals[:, :3], point, atol=1e-10, rtol=0), axis=1))
+    above = at(start[:3] + [0., 0., .02])
+    held = at(start[:3])
+    assert len(above) >= 5 and above[-1] < held[0]   # measured arrival 20 mm above before going down
+    fast = np.vstack([HOME_POSE[:3], goals[:above[0] + 1, :3]])
+    steps = np.linalg.norm(np.diff(fast, axis=0), axis=1)
+    assert steps.max() == pytest.approx(.15 / 50)
+    # speeds up from rest and slows down to a stop at 500 mm/s^2 (one tick adds at most 0.5 * 0.02 m/s)
+    ramp = .5 * (1 / 50) ** 2
+    assert steps[0] == pytest.approx(ramp) and np.diff(steps).max() <= ramp + 1e-10
+    assert np.all(np.diff(steps[-10:]) <= 1e-12) and steps[-1] <= 2 * ramp
+    down = goals[above[-1]:held[0] + 1, :3]
+    np.testing.assert_allclose(down[:, :2], np.tile(start[:2], (len(down), 1)), atol=1e-10)   # straight down
+    down_steps = np.abs(np.diff(down[:, 2]))
+    assert down_steps.max() == pytest.approx(.04 / 50)
+    assert np.diff(down_steps[down_steps > 0]).max() <= ramp + 1e-10 and down_steps[-1] <= 2 * ramp
+    assert np.all(np.diff(down[:, 2]) <= 1e-12)
+    assert np.all(goals[:held[0] + 1, 2] >= start[2] - 1e-10)   # never below the start before probing
+    assert len(held) >= 5 + 20 and goals[-1, 0] < start[0]     # then the same seating
 
 
 def test_prediction_only_never_enables_servos_or_opens_ft(monkeypatch):
@@ -304,8 +343,12 @@ def test_timeout_requires_measured_arrival_and_closes(monkeypatch):
 @pytest.mark.parametrize('changes', [{'pose_mm_deg': (1, 2)}, {'speed_mm_s': 0},
                                      {'rotation_speed_deg_s': float('nan')}, {'timeout_sec': -1},
                                      {'probe_depth_mm': 0}, {'touch_force_n': -1}, {'ridge_force_n': float('nan')},
-                                     {'probe_speed_mm_s': 20},
-                                     {'slide_speed_mm_s': 20}, {'force_count': 0}, {'force_count': 1.5}])
+                                     {'probe_speed_mm_s': 50},
+                                     {'slide_speed_mm_s': 50}, {'force_count': 0}, {'force_count': 1.5},
+                                     {'approach_speed_mm_s': 0}, {'approach_clearance_mm': -1},
+                                     {'lift_speed_mm_s': float('nan')}, {'accel_mm_s2': 0},
+                                     {'fast_speed_mm_s': 50}, {'fast_speed_mm_s': 0}, {'probe_fast_mm': -1},
+                                     {'probe_fast_mm': 11}, {'slide_fast_mm': 30}, {'open_wait_sec': 0}])
 def test_invalid_configuration(changes):
     with pytest.raises(ValueError):
         bp.BasePlacementConfig(**changes)
@@ -334,7 +377,7 @@ def test_base_policy_start_is_one_straight_move_from_home_offset(monkeypatch):
     path = np.asarray(commands)[:, :3] - home_offset[:3]
     direction = (goal[:3] - home_offset[:3]) / np.linalg.norm(goal[:3] - home_offset[:3])
     assert np.abs(path - np.outer(path @ direction, direction)).max() < 1e-9   # straight line: no hover or detour
-    assert stop.now >= np.linalg.norm(goal[:3] - home_offset[:3]) / .015 + .3
+    assert stop.now >= np.linalg.norm(goal[:3] - home_offset[:3]) / .04 + .3
 
 
 def test_base_policy_start_refuses_a_far_start(monkeypatch):

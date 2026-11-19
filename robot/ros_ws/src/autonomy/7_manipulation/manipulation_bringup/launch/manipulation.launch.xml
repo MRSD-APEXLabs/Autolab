@@ -25,7 +25,7 @@
   <arg name="act_base_mode" default="scripted"
        description="place_base: scripted (fixed pose seated by F/T touch and ridge, no camera) or policy (base ACT policy from home_offset)"/>
   <arg name="act_base_debug" default="false" description="scripted place_base: log pose and F/T every tick (CSV + console)"/>
-  <arg name="act_base_speed_mm_s" default="15.0" description="base placement translation speed in mm/s"/>
+  <arg name="act_base_speed_mm_s" default="40.0" description="base placement translation speed in mm/s"/>
   <arg name="act_base_rotation_speed_deg_s" default="6.0" description="base placement rotation speed in degrees/s"/>
   <arg name="act_base_timeout_sec" default="180.0" description="base placement timeout, separate from ACT duration"/>
 

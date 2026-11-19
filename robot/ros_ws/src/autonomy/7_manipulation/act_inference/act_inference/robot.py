@@ -24,10 +24,13 @@ def continuous_rotvec(vector, reference):
 
 
 class XArm6Robot:
-    def __init__(self, robot_ip, motion, dry_run=False, api_factory=None, read_only=False):
+    def __init__(self, robot_ip, motion, dry_run=False, api_factory=None, read_only=False, report_type='rich'):
+        """report_type 'rich' reports pose/state at 5 Hz; 'real' at 100 Hz (it carries no error code: faults show
+        as a stopped state and as failed servo commands)."""
         self.robot_ip, self.motion, self.dry_run = robot_ip, motion, dry_run
         self._factory, self._arm = api_factory, None
         self.read_only = read_only
+        self.report_type = report_type
         self._target = np.zeros(6)
         self._reference = None
         self._enabled = False
@@ -55,7 +58,7 @@ class XArm6Robot:
             from xarm.wrapper import XArmAPI
             self._factory = XArmAPI
         try:
-            self._arm = self._factory(self.robot_ip, is_radian=True, enable_report=True, report_type='rich')
+            self._arm = self._factory(self.robot_ip, is_radian=True, enable_report=True, report_type=self.report_type)
         except Exception as exc:   # the SDK raises a bare Exception when the socket does not connect
             raise RuntimeError(f'xArm connection to {self.robot_ip} failed: {exc}') from exc
         if not self._arm.connected:

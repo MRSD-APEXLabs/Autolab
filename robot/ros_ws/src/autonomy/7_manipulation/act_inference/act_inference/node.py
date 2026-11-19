@@ -45,8 +45,13 @@ up to `duration_sec` and closes the arm again. OT-2/shaker first align yaw to 90
 there), then open the gripper and lift 100 mm after a successful policy run. Base first moves straight to
 `base_start_pose_mm_deg` (~80 mm above the bracket at yaw ~0, where its demos started) instead of aligning
 yaw, then runs its policy and lifts 60 mm (`base_mode:=policy`). `base_mode:=scripted` (the default) places on
-the base without camera or policy: move to a fixed XYZ/RPY probing start, descend until the
-wrist F/T sensor feels the deck (Fz), slide along -X until it feels the ridge (Fx/Fy), then release and lift 60 mm;
+the base without camera or policy: move to a fixed XYZ/RPY probing start (`base_approach_speed_mm_s` 150 to
+`base_approach_clearance_mm` 20 above it, then `base_speed_mm_s` 40, both ramped at `base_accel_mm_s2` 500),
+descend until the wrist F/T sensor feels the deck (Fz), slide along -X until it feels the ridge (Fx/Fy) (the
+first `base_probe_fast_mm` 3.5 / `base_slide_fast_mm` 12 of them at `base_fast_speed_mm_s` 10, the rest at
+`base_probe_speed_mm_s` 2 / `base_slide_speed_mm_s` 4), then release (`base_open_wait_sec` 1.5 for the jaws)
+and lift 60 mm
+(both modes at `base_lift_speed_mm_s`, 150, ramped at `base_accel_mm_s2`);
 `base_debug:=true` logs every tick of it. All targets share one runner, stop service, and status topic. With
 execute:=false the arm is only read.
 """
@@ -70,7 +75,8 @@ from std_srvs.srv import Trigger
 from controller_manager_msgs.srv import ListControllers, SwitchController
 
 from .config import InferenceConfig, MotionConfig, RolloutConfig
-from .base_placement import (BASE_POLICY_START_MM_DEG, HOME_OFFSET_JOINTS, TELEOP_HOME, BasePlacementConfig,
+from .base_placement import (BASE_ARRIVAL_SEC, BASE_POLICY_START_MM_DEG, HOME_OFFSET_JOINTS, TELEOP_HOME,
+                             BasePlacementConfig,
                              align_policy_yaw, clear_arm_errors, jog_base_rz, jog_base_xyz, move_home,
                              move_to_base_policy_start, run_base_placement, teleop_base_xyz)
 from .post_placement import release_and_lift
@@ -87,10 +93,21 @@ DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
                  'base': MODELS / 'xarm6_base_act_ft_20261108b'}
 DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
 BASE_LIFT_MM = 60.0
-# BasePlacementConfig F/T seating fields, exposed as base_<name> parameters.
-BASE_SEATING_PARAMS = {'probe_speed_mm_s': float, 'probe_depth_mm': float, 'touch_force_n': float, 'slide_speed_mm_s': float,
-                       'slide_max_mm': float, 'ridge_force_n': float, 'force_count': int, 'settle_sec': float,
+# BasePlacementConfig approach, lift and F/T seating fields, exposed as base_<name> parameters.
+BASE_SEATING_PARAMS = {'approach_speed_mm_s': float, 'approach_clearance_mm': float, 'lift_speed_mm_s': float,
+                       'accel_mm_s2': float, 'open_wait_sec': float,
+                       'probe_speed_mm_s': float, 'probe_depth_mm': float, 'touch_force_n': float, 'slide_speed_mm_s': float,
+                       'slide_max_mm': float, 'ridge_force_n': float, 'fast_speed_mm_s': float, 'probe_fast_mm': float,
+                       'slide_fast_mm': float, 'force_count': int, 'settle_sec': float,
                        'baseline_sec': float, 'debug': bool, 'debug_dir': str}
+
+
+def base_lift_args(placement):
+    """release_and_lift arguments after a base placement (BasePlacementConfig `placement`)."""
+    return {'lift_mm': BASE_LIFT_MM, 'speed_mm_s': placement.lift_speed_mm_s, 'accel_mm_s2': placement.accel_mm_s2,
+            'open_wait_sec': placement.open_wait_sec, 'report_type': 'real', 'arrival_sec': BASE_ARRIVAL_SEC}
+
+
 TELEOP_TARGET = 'jog_teleop'
 CLEAR_ERRORS_TARGET = 'clear_errors'
 
@@ -172,7 +189,7 @@ class ActInferenceNode(Node):
         self._rollout_fn = rollout_fn
         self.base_placement = BasePlacementConfig(
             pose_mm_deg=tuple(param('base_pose_mm_deg', list(BasePlacementConfig().pose_mm_deg))),
-            speed_mm_s=float(param('base_speed_mm_s', 15.0)),
+            speed_mm_s=float(param('base_speed_mm_s', 40.0)),
             rotation_speed_deg_s=float(param('base_rotation_speed_deg_s', 6.0)),
             timeout_sec=float(param('base_timeout_sec', 180.0)),
             **{name: kind(param(f'base_{name}', getattr(BasePlacementConfig, name)))
@@ -304,7 +321,7 @@ class ActInferenceNode(Node):
             result = self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
             if result == 'done' and not stop.is_set():
                 result = self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop,
-                                                 lift_mm=BASE_LIFT_MM)
+                                                 **base_lift_args(self.base_placement))
         else:
             result = self._run_policy(stop, target)
         if result == 'done' and not stop.is_set() and self.rollout.execute:
@@ -324,7 +341,7 @@ class ActInferenceNode(Node):
             return result
         if stop.is_set():
             return 'stopped'
-        lift = {'lift_mm': BASE_LIFT_MM} if target == 'base' else {}
+        lift = base_lift_args(self.base_placement) if target == 'base' else {}
         return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, **lift)
 
     def _jog(self, stop, move):
