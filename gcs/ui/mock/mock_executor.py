@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""Mock routine executor: drive the APEX experiment UI with no robot and no ROS.
+
+Stands in for everything behind the MQTT broker that the experiment flow needs:
+
+* routine_executor   — listens on cmd/routine_executor/*, publishes ros2/routine_executor/status
+                       at 1 Hz. Uses the REAL RoutineStateMachine and the real step list /
+                       required params from step_config.py, so start/pause/cancel/retry behave
+                       like prod.
+* the robot          — each dispatched step "runs" for --step-time seconds (wait steps use
+                       their time_s), then succeeds or fails per --fail-step / --fail-rate.
+* manipulation exec. — pick/place steps publish ros2/<robot>/behavior/manipulation_phase and
+                       ros2/planning_state like the real executive.
+* lab_machine exec.  — each aspirate in an ot2 step attaches a clog-detection clip_id.
+* clog detection     — fake HTTP service on :8100 (GET /result/<clip_id>) for the Clog check card.
+
+See README.md in this folder for how to run it alongside the UI dev server.
+"""
+
+import argparse
+import ast
+import importlib.util
+import json
+import random
+import sys
+import threading
+import time
+import uuid
+from collections import defaultdict, deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EXECUTOR_PKG = REPO_ROOT / 'gcs' / 'ros_ws' / 'src' / 'routine_executor' / 'routine_executor'
+
+STATUS_TOPIC = 'ros2/routine_executor/status'
+CMD_PREFIX = 'cmd/routine_executor/'
+PLANNING_STATE_TOPIC = 'ros2/planning_state'
+MANIP_STEPS = {'pick', 'place', 'pick_base', 'place_base'}
+# Fraction of a manipulation step at which each phase starts (names from manipulation_executive.cpp).
+MANIP_PHASES = [(0.0, 'SELECTING_CAMERA'), (0.15, 'PLANNING'), (0.35, 'RUNNING_ACT'),
+                (0.6, 'SERVOING'), (0.85, 'PLANNING_SAFE')]
+FAIL_AT_FRACTION = 0.5  # an injected failure fires halfway through the step
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+RoutineStateMachine = _load_module(
+    'routine_executor_state_machine', EXECUTOR_PKG / 'state_machine.py').RoutineStateMachine
+
+
+def load_step_specs(path=EXECUTOR_PKG / 'step_config.py'):
+    """Read {step_name: {'required_params', 'msg_type'}} out of step_config.py without importing it
+    (it imports ROS message types). Parsed with ast, so it never drifts from the real executor."""
+    tree = ast.parse(Path(path).read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == 'STEPS' for t in node.targets):
+            specs = {}
+            for key, value in zip(node.value.keys, node.value.values):
+                fields = {k.value: v for k, v in zip(value.keys, value.values)}
+                specs[key.value] = {
+                    'required_params': ast.literal_eval(fields['required_params']),
+                    'msg_type': ast.literal_eval(fields['msg_type']),
+                }
+            return specs
+    raise RuntimeError(f'No STEPS dict found in {path}')
+
+
+def _ros_string(data):
+    """How ros2_mqtt_bridge serialises a std_msgs/String."""
+    return json.dumps({'data': data})
+
+
+def _log(msg):
+    print(f'[mock] {msg}', flush=True)
+
+
+class FakeAnomalyStore:
+    """Clog-detection jobs whose status advances with time: recording → queued → running → done."""
+
+    RECORDING_S, QUEUED_S, RUNNING_S = 3.0, 2.0, 5.0
+
+    def __init__(self, clock=time.monotonic, clog_clips=()):
+        self._clock = clock
+        self._clog = set(clog_clips)  # 1-based clip numbers (across the whole session) to flag
+        self._jobs = {}
+        self._lock = threading.Lock()
+
+    def add(self, clip_id, step):
+        with self._lock:
+            n = len(self._jobs) + 1
+            self._jobs[clip_id] = {'created': self._clock(), 'n': n, 'step': json.dumps(step)}
+
+    def result(self, clip_id):
+        with self._lock:
+            job = self._jobs.get(clip_id)
+        if job is None:
+            return None
+        elapsed = self._clock() - job['created']
+        out = {'clip_id': clip_id, 'step': job['step']}
+        t1 = self.RECORDING_S
+        t2 = t1 + self.QUEUED_S
+        t3 = t2 + self.RUNNING_S
+        if elapsed < t1:
+            out['status'] = 'recording'
+        elif elapsed < t2:
+            out.update(status='queued', queue_position=1)
+        elif elapsed < t3:
+            out.update(status='running',
+                       stage='extracting' if elapsed < (t2 + t3) / 2 else 'inference')
+        else:
+            clog = job['n'] in self._clog
+            out.update(status='done', anomaly_detected=clog,
+                       severity='moderate' if clog else None,
+                       summary='Mock: flow interrupted mid-aspirate' if clog
+                       else 'Mock: aspirate looked normal')
+        return out
+
+    def jobs(self):
+        with self._lock:
+            ids = list(self._jobs)
+        return [self.result(i) for i in ids]
+
+
+def start_anomaly_server(store, host='0.0.0.0', port=8100):
+    """Serve the fake clog-detection API in a daemon thread. Returns the server (call .shutdown())."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self._cors()
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _cors(self):
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self._cors()
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path.startswith('/result/'):
+                job = store.result(self.path[len('/result/'):])
+                if job is None:
+                    self._send(404, {'error': 'unknown clip_id'})
+                else:
+                    self._send(200, job)
+            elif self.path == '/jobs':
+                self._send(200, store.jobs())
+            elif self.path == '/health':
+                self._send(200, {'ok': True, 'mock': True})
+            else:
+                self._send(404, {'error': 'not found'})
+
+        def do_POST(self):
+            if self.path.startswith('/recording/'):
+                self._send(200, {'ok': True, 'mock': True})
+            else:
+                self._send(404, {'error': 'not found'})
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer((host, port), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+class MockExecutor:
+    """Mirrors routine_executor/node.py, with the robot replaced by timers.
+
+    Thread-safe entry points: handle(), force_fail(), force_success() only queue work; step()
+    (called from one loop) does it. Status goes out via status_message().
+    """
+
+    def __init__(self, specs, step_time=3.0, clock=time.monotonic, anomaly_store=None,
+                 fail_steps=None, fail_rate=0.0, rng=None):
+        self._specs = specs
+        self._step_time = step_time
+        self._clock = clock
+        self._store = anomaly_store
+        self._fail_steps = dict(fail_steps or {})  # step name -> fail the first N attempts
+        self._fail_rate = fail_rate
+        self._rng = rng or random.Random()
+        self._queue = deque()
+        self._lock = threading.Lock()
+        self._sm = RoutineStateMachine([])
+        self._robot = 'robot_1'
+        self._attempts = defaultdict(int)  # step index -> attempts dispatched this run
+        self._active = None
+        self._last_phase = None
+        self._last_phase_t = None
+
+    # -- inputs ---------------------------------------------------------------------------------
+
+    def handle(self, topic, payload):
+        with self._lock:
+            self._queue.append(('mqtt', topic, payload))
+
+    def force_fail(self):
+        with self._lock:
+            self._queue.append(('force', 'fail', None))
+
+    def force_success(self):
+        with self._lock:
+            self._queue.append(('force', 'success', None))
+
+    # -- outputs --------------------------------------------------------------------------------
+
+    def status_message(self):
+        return STATUS_TOPIC, _ros_string(json.dumps(self._sm.to_dict()))
+
+    def status(self):
+        return self._sm.to_dict()
+
+    # -- loop -----------------------------------------------------------------------------------
+
+    def step(self):
+        """Process queued commands, advance the fake robot, dispatch. Returns [(topic, payload)]."""
+        out = []
+        with self._lock:
+            pending = list(self._queue)
+            self._queue.clear()
+        for kind, a, b in pending:
+            if kind == 'mqtt':
+                self._on_command(a, b)
+            else:
+                self._finish_active(a, out)
+
+        now = self._clock()
+        if self._active is not None:
+            self._advance_active(now, out)
+
+        if self._sm.state == 'running' and self._sm.needs_dispatch:
+            self._dispatch(now)
+            self._advance_active(now, out)
+
+        self._publish_phase(now, out)
+        return out
+
+    # -- commands (same rules as node.py) -------------------------------------------------------
+
+    def _on_command(self, topic, payload):
+        cmd = topic[len(CMD_PREFIX):] if topic.startswith(CMD_PREFIX) else topic
+        if cmd == 'start_routine_cmd':
+            self._on_start(payload)
+        elif cmd == 'cancel':
+            if self._sm.state in ('running', 'paused'):
+                self._sm.cancel()
+                self._active = None
+                _log('routine cancelled')
+            else:
+                _log('cancel received but no routine is running')
+        elif cmd == 'pause':
+            if self._sm.state == 'running':
+                self._sm.pause()
+                _log('paused (current step keeps running, next step held)')
+            else:
+                _log(f'pause received but state is {self._sm.state}')
+        elif cmd == 'resume':
+            if self._sm.state == 'paused':
+                self._sm.resume()
+                _log('resumed')
+            else:
+                _log(f'resume received but state is {self._sm.state}')
+        elif cmd == 'retry':
+            if self._sm.retry():
+                _log(f'retrying from step {self._sm.current_step_idx + 1} '
+                     f'"{self._sm.current_step_name()}"')
+            else:
+                _log(f'retry received but state is {self._sm.state}')
+        else:
+            _log(f'ignoring unknown command topic {topic}')
+
+    def _on_start(self, payload):
+        try:
+            routine = json.loads(payload)
+        except json.JSONDecodeError as e:
+            _log(f'ERROR invalid JSON in start_routine_cmd: {e}')
+            return
+        if self._sm.state in ('running', 'paused'):
+            _log(f'routine already active (state={self._sm.state}) — ignoring start command')
+            return
+        steps = routine.get('steps', [])
+        if not steps:
+            _log('ERROR start_routine_cmd received empty steps list')
+            return
+        unknown = [s.get('name') for s in steps if s.get('name') not in self._specs]
+        if unknown:
+            _log(f'ERROR unknown steps: {unknown}. Known: {list(self._specs)}')
+            return
+        for s in steps:
+            missing = [p for p in self._specs[s['name']]['required_params'] if p not in s]
+            if missing:
+                _log(f'ERROR step "{s["name"]}" missing required params: {missing}')
+                return
+        self._robot = routine.get('robot', 'robot_1')
+        self._sm = RoutineStateMachine(steps, max_retries=int(routine.get('max_retries', 3)))
+        self._attempts.clear()
+        self._active = None
+        self._sm.start()
+        _log(f'starting routine: {len(steps)} steps, robot={self._robot}, '
+             f'max_retries={self._sm.max_retries}')
+
+    # -- fake robot -----------------------------------------------------------------------------
+
+    def _dispatch(self, now):
+        idx = self._sm.current_step_idx
+        step = self._sm.current_step()
+        name = step['name']
+        self._sm.acknowledge_dispatch()
+        self._attempts[idx] += 1
+        attempt = self._attempts[idx]
+
+        duration = (float(step.get('time_s', 0)) if self._specs[name]['msg_type'] == 'wait'
+                    else self._step_time)
+        fail = name != 'wait' and (attempt <= self._fail_steps.get(name, 0)
+                                   or self._rng.random() < self._fail_rate)
+        clips = []
+        if name == 'ot2':
+            aspirates = [a for a in _ot2_actions(step) if a.get('action') == 'aspirate']
+            clips = [((k + 1) / (len(aspirates) + 1) * duration, a)
+                     for k, a in enumerate(aspirates)]
+        self._active = {
+            'idx': idx, 'name': name, 'started': now, 'duration': duration,
+            'finish_at': duration * FAIL_AT_FRACTION if fail else duration,
+            'outcome': 'fail' if fail else 'success', 'clips': clips,
+        }
+        _log(f'step {idx + 1}/{len(self._sm.steps)} "{name}" dispatched '
+             f'(attempt {attempt}, {duration:.1f}s{", WILL FAIL" if fail else ""})')
+
+    def _advance_active(self, now, out):
+        act = self._active
+        if act is None:
+            return
+        elapsed = now - act['started']
+        while act['clips'] and act['clips'][0][0] <= elapsed:
+            _, action = act['clips'].pop(0)
+            self._add_clip(action)
+        if act['name'] in MANIP_STEPS:
+            phase = _manip_phase(elapsed / act['duration'] if act['duration'] else 1.0)
+            if phase != 'PLANNING' and act.get('planned') is None and elapsed > 0:
+                act['planned'] = True
+                out.append((PLANNING_STATE_TOPIC, _ros_string('SUCCESS')))
+        if elapsed >= act['finish_at']:
+            self._finish_active(act['outcome'], out)
+
+    def _finish_active(self, outcome, out):
+        act = self._active
+        if act is None or self._sm.state not in ('running', 'paused'):
+            _log(f'nothing running to force {outcome}')
+            return
+        self._active = None
+        if outcome == 'success':
+            for _, action in act['clips']:  # forced early: still attach the remaining aspirates
+                self._add_clip(action)
+            self._sm.on_success()
+            _log(f'step "{act["name"]}" succeeded')
+        else:
+            if act['name'] in MANIP_STEPS:
+                out.append((PLANNING_STATE_TOPIC, _ros_string('ERROR')))
+            self._sm.on_failure()
+            _log(f'step "{act["name"]}" FAILED (attempt {self._sm.retry_count}/'
+                 f'{self._sm.max_retries}) → state={self._sm.state}')
+
+    def _add_clip(self, action):
+        clip_id = f'mock-{uuid.uuid4().hex[:8]}'
+        if self._store is not None:
+            self._store.add(clip_id, action)
+        if self._sm.add_recording(clip_id):
+            _log(f'attached clog-detection clip {clip_id} ({action.get("resource_name")} '
+                 f'wells {action.get("well_indices")})')
+
+    def _publish_phase(self, now, out):
+        act = self._active
+        if act is not None and act['name'] in MANIP_STEPS:
+            elapsed = now - act['started']
+            phase = _manip_phase(elapsed / act['duration'] if act['duration'] else 1.0)
+        else:
+            phase = 'IDLE'
+        if phase != self._last_phase or self._last_phase_t is None or now - self._last_phase_t >= 1.0:
+            out.append((f'ros2/{self._robot}/behavior/manipulation_phase', _ros_string(phase)))
+            self._last_phase = phase
+            self._last_phase_t = now
+
+
+def _manip_phase(fraction):
+    current = MANIP_PHASES[0][1]
+    for start, name in MANIP_PHASES:
+        if fraction >= start:
+            current = name
+    return current
+
+
+def _ot2_actions(step):
+    params = step.get('parameters_json', {})
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except json.JSONDecodeError:
+            return []
+    return params.get('steps', []) if isinstance(params, dict) else []
+
+
+# ----------------------------------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------------------------------
+
+def _parse_fail_steps(values):
+    out = {}
+    for v in values or []:
+        name, _, n = v.partition(':')
+        out[name] = int(n) if n else 10 ** 6  # no count: every attempt fails, UI retries included
+    return out
+
+
+def _make_mqtt_client(transport):
+    try:
+        import paho.mqtt.client as mqtt
+    except ImportError:
+        sys.exit('Install paho-mqtt first:  pip3 install paho-mqtt')
+    client_id = f'mock-executor-{uuid.uuid4().hex[:6]}'
+    try:
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, transport=transport)
+    except AttributeError:  # paho-mqtt < 2.0
+        return mqtt.Client(client_id=client_id, transport=transport)
+
+
+def _stdin_loop(ex, stop):
+    help_text = 'keys: f=fail current step  s=succeed current step  p=print status  q=quit'
+    _log(help_text)
+    for line in sys.stdin:
+        key = line.strip().lower()
+        if key == 'f':
+            ex.force_fail()
+        elif key == 's':
+            ex.force_success()
+        elif key == 'p':
+            _log(json.dumps(ex.status(), indent=2))
+        elif key == 'q':
+            stop.set()
+            return
+        elif key:
+            _log(help_text)
+    # stdin closed (backgrounded / piped): keep running, Ctrl-C to stop
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--broker-host', default='localhost')
+    p.add_argument('--broker-port', type=int, default=9001,
+                   help='9001 = WebSocket listener (same as the UI); use 1883 with --transport tcp')
+    p.add_argument('--transport', choices=['websockets', 'tcp'], default='websockets')
+    p.add_argument('--step-time', type=float, default=3.0,
+                   help='seconds each non-wait step takes (default 3)')
+    p.add_argument('--fail-step', action='append', metavar='NAME[:N]',
+                   help='fail the first N attempts of every NAME step (no N = always fail). '
+                        'e.g. --fail-step pick:3 exhausts max_retries=3, then a UI retry succeeds')
+    p.add_argument('--fail-rate', type=float, default=0.0, help='random failure probability per attempt')
+    p.add_argument('--seed', type=int, help='seed for --fail-rate')
+    p.add_argument('--clog', type=int, action='append', default=[], metavar='N',
+                   help='flag the Nth clip of the session as a suspected clog (repeatable)')
+    p.add_argument('--anomaly-port', type=int, default=8100)
+    p.add_argument('--no-anomaly', action='store_true',
+                   help="don't start the fake clog service (tests the 'unreachable' banner)")
+    args = p.parse_args()
+
+    store = FakeAnomalyStore(clog_clips=args.clog)
+    if not args.no_anomaly:
+        start_anomaly_server(store, port=args.anomaly_port)
+        _log(f'fake clog-detection service on http://0.0.0.0:{args.anomaly_port}')
+
+    ex = MockExecutor(load_step_specs(), step_time=args.step_time, anomaly_store=store,
+                      fail_steps=_parse_fail_steps(args.fail_step), fail_rate=args.fail_rate,
+                      rng=random.Random(args.seed))
+
+    client = _make_mqtt_client(args.transport)
+
+    def on_connect(c, *_):
+        c.subscribe(CMD_PREFIX + '#')
+        _log(f'connected to {args.broker_host}:{args.broker_port} ({args.transport}); '
+             f'listening on {CMD_PREFIX}#')
+
+    client.on_connect = on_connect
+    client.on_message = lambda _c, _u, msg: ex.handle(msg.topic, msg.payload.decode())
+    try:
+        client.connect(args.broker_host, args.broker_port, keepalive=30)
+    except OSError as e:
+        sys.exit(f'Cannot reach MQTT broker at {args.broker_host}:{args.broker_port}: {e}\n'
+                 'Start one first (see README.md).')
+    client.loop_start()
+
+    stop = threading.Event()
+    threading.Thread(target=_stdin_loop, args=(ex, stop), daemon=True).start()
+    next_status = 0.0
+    try:
+        while not stop.is_set():
+            for topic, payload in ex.step():
+                client.publish(topic, payload)
+            now = time.monotonic()
+            if now >= next_status:
+                client.publish(*ex.status_message())
+                next_status = now + 1.0
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+
+if __name__ == '__main__':
+    main()
