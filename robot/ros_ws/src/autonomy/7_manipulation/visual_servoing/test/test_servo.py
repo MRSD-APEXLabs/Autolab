@@ -163,6 +163,95 @@ def test_final_squeeze_is_after_main_settling_and_immediately_before_lift(monkey
     assert lift[2] - squeeze[2] >= grip.final_squeeze_settle
 
 
+def test_grip_settle_ends_once_the_fsrs_stop_changing():
+    grip = GripperConfig(grip_settle_tolerance=15, grip_settle_count=2)
+    status, arm = run(gripper=grip)
+    assert status['result'] == 'grasped', status
+    assert status['grip_settle_steady'] is True
+    assert status['grip_settle_s'] == pytest.approx(0.6)        # three 0.2 s medians: the first, then two steady ones
+    contact = next(e[0] for e in arm.events if e[1:] == ('gripper', 130))
+    squeeze = next(e[0] for e in arm.events if e[1:] == ('gripper', 170))
+    assert squeeze - contact < grip.close_settle
+
+
+def test_grip_settle_is_capped_at_close_settle_while_the_fsrs_creep():
+    first = []
+
+    def creeping(value, arm):                  # once both pads press, FSR1 rises 10 counts per 0.2 s median
+        if value < 130:
+            return (0, 0)
+        first.append(arm.clock.time())
+        return (400 + int(50 * (first[-1] - first[0])), 200)
+
+    grip = GripperConfig(close_settle=2.0, grip_settle_tolerance=5, grip_settle_count=2)
+    status, arm = run(fsr=creeping, gripper=grip)
+    assert status['result'] == 'grasped', status
+    assert status['grip_settle_steady'] is False
+    assert grip.close_settle <= status['grip_settle_s'] <= grip.close_settle + 0.2 + 1e-6
+
+
+def test_close_makes_one_move_to_close_start_then_steps():
+    reads = []
+
+    def fsr(value, arm):
+        if value == 130 and not reads:
+            reads.append(arm.clock.time())
+        return held_from(180)(value, arm)
+
+    status, arm = run(fsr=fsr, gripper=GripperConfig(close_start=130))
+    assert status['result'] == 'grasped', status
+    assert arm.gripper_values == [0, 130, 140, 150, 160, 170, 180, 220]   # open, one move, steps of 10, squeeze
+    jump = next(e for e in arm.events if e[1:] == ('gripper', 130))
+    assert reads[0] - jump[0] == pytest.approx(130 / 80.0)                 # 0 -> 130 at probe_gripper_rate
+
+
+def test_closing_steps_wait_step_settle(monkeypatch):
+    settles = []
+    original = FakeArm.gripper_set
+
+    def command(arm, value, settle=0.5):
+        settles.append((value, settle))
+        return original(arm, value, settle)
+
+    monkeypatch.setattr(FakeArm, 'gripper_set', command)
+    status, arm = run(gripper=GripperConfig(step_settle=0.15))
+    assert status['result'] == 'grasped', status
+    # open and the move to close_start wait their own way; the squeeze waits final_squeeze_settle
+    assert settles == [(0, 0.0), (50, 0.0)] + [(v, 0.15) for v in range(60, 140, 10)] + [(170, 0.0)]
+
+
+@pytest.mark.parametrize('close_settle', [4.0, 60.0])
+def test_the_alignment_runs_while_the_gripper_opens_and_the_tare_waits_for_it(close_settle):
+    reads, phases = [], {}
+
+    def fsr(value, arm):
+        reads.append(arm.clock.time())
+        return held_from(130)(value, arm)
+
+    def hook(t, runner):
+        phases.setdefault(runner.status()['phase'], t + 1000.0)
+
+    status, arm = run(fsr=fsr, hook=hook, gripper=GripperConfig(close_settle=close_settle))
+    assert status['result'] == 'grasped', status
+    opened = next(e[0] for e in arm.events if e[1:] == ('gripper', 0))
+    assert phases['servoing'] - opened < 0.1                    # no wait before aligning
+    tare = reads[0]
+    assert tare >= opened + close_settle - 1e-6                 # the unloaded tare once the jaws are open
+    if close_settle == 4.0:
+        assert tare - phases['descending'] < 0.1                # the alignment took longer: no wait after it
+    else:
+        assert tare == pytest.approx(opened + close_settle, abs=0.1)   # only the rest of the wait
+
+
+@pytest.mark.parametrize('use_ft, lines', [(False, 0), (True, 4)])
+def test_closing_freely_reads_the_ft_only_with_use_ft(caplog, use_ft, lines):
+    caplog.set_level('INFO', logger='visual_servoing.servo')
+    status, arm = run(ft=wrench(fz=-1.5), gripper=GripperConfig(**dict(TWO_FINGERS, use_ft=use_ft, ft_samples=1)))
+    assert status['result'] == 'grasped', status
+    balance = [r for r in caplog.records if r.getMessage().startswith('F/T balance')]
+    assert len(balance) == lines                    # gripper 50, 70, 90, 110 touch nothing; 130 presses both pads
+
+
 def test_unconfirmed_squeeze_readback_prevents_lifting(monkeypatch):
     monkeypatch.setattr(FakeArm, 'gripper_position', lambda arm: 130)
     status, arm = run(gripper=GripperConfig())
@@ -632,6 +721,14 @@ def test_probe_touches_the_plate_top_then_opens_and_lowers_a_quarter_plate(top):
     assert np.allclose(tip(grasp[0])[:2], tip(above[0])[:2])           # straight down over the plate
 
 
+def test_probe_lifts_and_lowers_to_grip_at_probe_reposition_speed():
+    status, arm = probe_run(probe_ft(), probe_reposition_speed=12.0)
+    assert status['result'] == 'grasped', status
+    level, above, fast, probe, up, grasp = arm.moves[:6]
+    assert (fast[1], probe[1]) == (8.0, 2.0)                          # the touch keeps final_speed, probe_touch_speed
+    assert (up[1], grasp[1]) == (12.0, 12.0)
+
+
 def test_probe_ignores_a_single_fz_spike():
     reads = []
     spike = lambda arm: (reads.append(1) or len(reads)) == 3          # third read during the probe only
@@ -661,17 +758,48 @@ def test_probe_needs_the_ft_sensor():
     assert arm.gripper_values == [0, 550]                             # never closed on the plate
 
 
-def test_probe_waits_for_the_gripper_before_moving_the_arm():
+def test_probe_closes_on_the_way_down_and_touches_only_once_the_jaws_are_there(monkeypatch):
+    original = FakeArm.move_flange
+
+    def move(arm, pose, speed_mm_s, acc_mm_s2=500.0, wait=True):
+        seconds = float(np.linalg.norm(pose[:3, 3] - arm.pose[:3, 3])) * 1000.0 / speed_mm_s
+        original(arm, pose, speed_mm_s, acc_mm_s2, wait)
+        if wait:
+            arm.clock.sleep(seconds)                    # a blocking move takes its time (the approach: 60 mm, 2 s)
+
+    monkeypatch.setattr(FakeArm, 'move_flange', move)
     status, arm = probe_run(probe_ft())
     assert status['result'] == 'grasped', status
     events = arm.events
     close = next(i for i, e in enumerate(events) if e[1:] == ('gripper', 550))
     reopen = next(i for i, e in enumerate(events) if i > close and e[1:] == ('gripper', 0))
-    after_close = next(e for e in events[close + 1:] if e[1] == 'move')
+    approach, descent = [e for e in events[close + 1:] if e[1] == 'move'][:2]
+    assert approach[0] == pytest.approx(events[close][0]) and approach[2] == 30.0   # the arm moves down at once...
+    closed = events[close][0] + 550 / 80.0 + 1.0                                     # 0 -> 550 at 80 units/s + 1 s
+    assert descent[0] == pytest.approx(closed, abs=0.05)          # ...and touches once the jaws are there, not 2 s later
     after_open = next(e for e in events[reopen + 1:] if e[1] == 'move')
-    assert after_close[0] - events[close][0] >= 550 / 80.0 + 1.0 - 1e-6        # 0 -> 550 at 80 units/s + 1 s
-    assert after_open[0] - events[reopen][0] >= 550 / 80.0 + 1.0 - 1e-6
+    assert after_open[0] - events[reopen][0] >= 550 / 80.0 + 1.0 - 1e-6   # open before lowering over the plate
     assert status['probe_gripper_wait_s'] == pytest.approx(550 / 80.0 + 1.0, abs=0.01)
+
+
+def test_probe_opens_to_probe_open_and_the_close_starts_there():
+    reads = []
+
+    def fsr(value, arm):
+        if value == 130 and not reads:
+            reads.append(arm.clock.time())
+        return held_from(150)(value, arm)
+
+    gripper = GripperConfig(**dict(TWO_FINGERS, ft_samples=1, close_start=130))
+    status, arm = run(fsr=fsr, ft=probe_ft(), gripper=gripper, probe_contact=True, probe_open=80)
+    assert status['result'] == 'grasped', status
+    assert arm.gripper_values == [0, 550, 80, 130, 150, 180]       # open, probe, part-open, one move, step, squeeze
+    events = arm.events
+    reopen = next(i for i, e in enumerate(events) if e[1:] == ('gripper', 80))
+    lower = next(e for e in events[reopen + 1:] if e[1] == 'move')
+    assert lower[0] - events[reopen][0] >= (550 - 80) / 80.0 + 1.0 - 1e-6
+    jump = next(e for e in events if e[1:] == ('gripper', 130))
+    assert reads[0] - jump[0] == pytest.approx((130 - 80) / 80.0)  # first FSR read once the jaws are at close_start
 
 
 def test_probe_retry_waits_for_the_gripper_to_open():
@@ -685,6 +813,7 @@ def test_probe_retry_waits_for_the_gripper_to_open():
 
 # -- probe tilt: level the closed fingertips with a leaning plate by tilt-and-retouch --------------------------
 FINGER_HALF = 0.012     # closed fingertips sit +-12 mm from the tip centre along flange y
+REPOSITION = ServoConfig().probe_reposition_speed   # mm/s of the moves off the last touch and down to grip
 STIFFNESS = 3000.0      # N/m of plate contact per fingertip
 
 
@@ -742,7 +871,7 @@ def test_probe_tilt_levels_the_fingertips_and_grasps_at_that_tilt(lean):
     assert abs(status['probe_tilt_deg'] + lean) <= 0.5, status
     assert status['probe_tilt_touches'] >= 2
     closing = next(i for i, v in enumerate(arm.gripper_values) if v == 50)
-    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]               # the last final-speed move: the grasp
+    grasp_move = [m for m in arm.moves if m[1] == REPOSITION][-1][0]        # the last reposition move: the grasp
     assert tool_tilt_deg(grasp_move) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
     lift = next(m for m in arm.moves if m[1] == 50.0)[0]
     assert tool_tilt_deg(lift) == pytest.approx(status['probe_tilt_deg'], abs=0.05)   # the lift keeps the tilt
@@ -768,7 +897,7 @@ def test_probe_tilt_bisects_the_bracket_and_ends_at_the_interpolated_zero():
     assert touched == [0.0, -1.0, -2.0, -3.0, -4.0, -3.5, -3.25]
     assert status['probe_tilt_touches'] == len(touched)
     assert status['probe_tilt_deg'] == pytest.approx(-3.3, abs=0.1)                 # between -3.5 and -3.25
-    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]
+    grasp_move = [m for m in arm.moves if m[1] == REPOSITION][-1][0]
     assert tool_tilt_deg(grasp_move) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
 
 
@@ -776,7 +905,7 @@ def test_probe_tilt_beyond_the_cap_falls_back_to_the_level_grasp():
     status, arm = tilt_run(20.0, probe_tilt_max_deg=8.0)
     assert status['result'] == 'grasped', status
     assert status['probe_tilt_result'] == 'cap' and status['probe_tilt_deg'] == 0.0
-    grasp_move = [m for m in arm.moves if m[1] == 8.0][-1][0]
+    grasp_move = [m for m in arm.moves if m[1] == REPOSITION][-1][0]
     assert abs(tool_tilt_deg(grasp_move)) < 1e-6
     assert max(abs(tool_tilt_deg(m[0])) for m in arm.moves) <= 8.0 + 1e-6
     # the fallback grasp height is the first, level touch
@@ -823,6 +952,72 @@ def test_retry_after_a_tilted_grasp_relevels_before_aligning():
     assert (status['result'], status['attempt']) == ('grasped', 2), status
     assert servo_tilts and max(abs(v) for v in servo_tilts) < 1e-6      # the second servo starts straight down
     assert abs(status['probe_tilt_deg'] + 6.0) <= 0.5                   # and the second probe tilts again
+
+
+# -- probe roll: stay on the first fingertip and rotate about it ---------------------------------------------
+def roll_run(lean_deg, offset=FINGER_HALF, gravity=0.2, **config):
+    gripper = config.pop('gripper', GripperConfig(**dict(TWO_FINGERS, ft_samples=1, ft_tilt_deadband_nm=0.005)))
+    return run(fsr=held_from(130), ft=tilted_plate_ft(lean_deg, gravity_nm_per_rad=gravity), gripper=gripper,
+               probe_contact=True, probe_tilt=True, probe_pivot_offset=offset, **config)
+
+
+def rolling_fz(log):
+    """hook: the plate's Fz at every pose read while the probe rolls."""
+    def hook(t, runner):
+        if runner.status().get('phase') == 'probe rolling':
+            log.append(runner.arm.ft(runner.arm)[2])
+    return hook
+
+
+@pytest.mark.parametrize('lean', [6.0, -9.0, 3.3])
+def test_probe_roll_stays_on_the_first_fingertip_and_grasps_at_the_plates_tilt(lean):
+    fz = []
+    status, arm = roll_run(lean, hook=rolling_fz(fz))
+    assert (status['result'], status['attempt']) == ('grasped', 1), status
+    assert status['probe_tilt_result'] == 'rolled' and status['probe_roll_result'] == 'crossed', status
+    assert abs(status['probe_tilt_deg'] + lean) <= 0.3, status
+    assert status['probe_tilt_touches'] == 1
+    assert [speed for _, speed in arm.moves].count(2.0) == 1          # one touch descent: no lift and retouch
+    assert len(fz) > 10 and min(fz) > 0.5                              # the first fingertip never left the plate
+    grasp_move = [m for m in arm.moves if m[1] == REPOSITION][-1][0]
+    assert tool_tilt_deg(grasp_move) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
+    lift = next(m for m in arm.moves if m[1] == 50.0)[0]
+    assert tool_tilt_deg(lift) == pytest.approx(status['probe_tilt_deg'], abs=0.05)
+
+
+def test_probe_roll_subtracts_the_gripper_weight_measured_in_the_air():
+    # ten times the default weight torque: more than the second fingertip's contact torque over the roll
+    status, arm = roll_run(4.0, gravity=2.0)
+    assert status['result'] == 'grasped', status
+    assert status['probe_roll_gravity_nm_per_deg'] == pytest.approx(np.radians(2.0), rel=0.01)
+    assert status['probe_tilt_result'] == 'rolled' and abs(status['probe_tilt_deg'] + 4.0) <= 0.3, status
+
+
+def test_probe_roll_on_a_flat_plate_touches_once_without_rolling():
+    status, arm = roll_run(0.0)
+    assert status['result'] == 'grasped', status
+    assert status['probe_tilt_result'] == 'balanced' and status['probe_tilt_deg'] == 0.0
+    assert 'probe_roll_result' not in status
+    tilted = [m for m in arm.moves if abs(tool_tilt_deg(m[0])) > 1e-6]
+    assert len(tilted) == 1 and tool_tilt_deg(tilted[0][0]) == pytest.approx(5.0)   # only the calibration tilt,
+    assert tip(tilted[0][0])[2] == pytest.approx(CENTER[2] + 0.02)                  # in the air above the plate
+
+
+def test_a_pivot_that_lifts_the_first_fingertip_rolls_back_and_retouches():
+    # 2 mm instead of 12: the touching fingertip is 10 mm outside the pivot and rises as the tool rolls
+    status, arm = roll_run(6.0, offset=0.002)
+    assert status['result'] == 'grasped', status
+    assert status['probe_roll_result'] == 'lost'
+    assert status['probe_tilt_result'] == 'balanced' and status['probe_tilt_touches'] >= 2, status
+    assert abs(status['probe_tilt_deg'] + 6.0) <= 0.5
+
+
+def test_probe_roll_over_the_force_cap_rolls_back_and_retouches():
+    fz = []
+    status, arm = roll_run(6.0, probe_roll_max_n=1.2, hook=rolling_fz(fz))
+    assert status['result'] == 'grasped', status
+    assert status['probe_roll_result'] == 'force'
+    assert status['probe_tilt_result'] == 'balanced' and status['probe_tilt_touches'] >= 2, status
 
 
 def test_nudge_slides_along_the_tilted_finger_axis():

@@ -75,18 +75,26 @@
       approach_speed: 30.0            # mm/s down to final_segment above the grasp height
       final_segment: 0.02
       final_speed: 3.0                # mm/s
-      # Probe the plate top by touch (7_manipulation/README.md "Probe contact"): close to probe_close, descend from final_segment
-      # above the camera's plate top until Fz rises (gripper.ft_probe_contact_n for gripper.ft_contact_count reads),
-      # lift probe_lift, open, re-zero the F/T, lower to probe_grip_depth below the touch, close as usual.
+      # Probe the plate top by touch (7_manipulation/README.md "Probe contact"): close to probe_close on the way down to
+      # final_segment above the camera's plate top, descend until Fz rises (gripper.ft_probe_contact_n for
+      # gripper.ft_contact_count reads), lift probe_lift, open to probe_open, re-zero the F/T, lower to probe_grip_depth
+      # below the touch, close as usual from probe_open.
       # No touch within probe_depth: the attempt fails and max_retries re-aligns and probes again.
       # Needs the F/T sensor (whatever gripper.use_ft says); replaces depth while on.
       probe_contact: true
       probe_close: 500                # gripper value of the closed-finger probe
-      # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin before the arm
-      # moves (550 units: 7.9 s). Time a 0 -> 550 close on the bench and set rate from it.
+      # Gripper value the probe opens to before lowering over the plate (a retry still opens fully, for the tare).
+      # Contact is at ~180 (FSR_CALIBRATION.md) and 10 units move each jaw ~0.5 mm: 80 leaves ~5 mm per jaw.
+      probe_open: 80
+      # The gripper reports no jaw position, so each probe close/open waits travel / rate + margin (550 units: 7.9 s):
+      # the close runs while the arm moves down to final_segment, the open before it moves again. The jump to
+      # gripper.close_start waits travel / rate. Time a 0 -> 550 close on the bench and set rate from it.
       probe_gripper_rate: 80.0        # gripper units/s
       probe_gripper_margin: 1.0       # s
       probe_lift: 0.005               # m above the touch while the gripper opens
+      # mm/s off the touch to probe_lift, the turn to the grasp tilt and the open fingers down to probe_grip_depth
+      # (was final_speed 3); touches stay at final_speed / probe_touch_speed
+      probe_reposition_speed: 15.0
       probe_depth: 0.010              # m below the expected plate top before giving up
       probe_grip_depth: 0.0075        # m below the touched plate top the fingertips close (bench 2026-11-06: = old plate_height 0.03 / 4)
       # Touches go at final_speed to probe_slow_margin above the expected contact (camera top, then the last touch),
@@ -102,6 +110,14 @@
       probe_tilt_max_touches: 15
       probe_tilt_lift: 0.002          # m above the last touch before each tilt step
       probe_tilt_settle: 0.3          # s still before each F/T read of the seek
+      # Roll instead of lift and retouch (README "Probe tilt"): after the first touch, rotate about the fingertip that
+      # touched so the other one comes down at probe_touch_speed, until the tilt torque crosses zero.
+      # probe_pivot_offset: MEASURE with the gripper at probe_close: distance along the finger axis from the tool's
+      # centre line to where one fingertip touches the plate (half the fingertip spacing; a flat pad: its edge facing
+      # the other finger). +-1-2 mm is enough for leans up to ~5 deg. 0: lift and retouch.
+      probe_pivot_offset: 0.0275      # m (measured: 55 mm between the fingertips at 500)
+      probe_roll_calibration_deg: 5.0 # one tilt in the air first: the gripper's weight on the torque per degree
+      probe_roll_max_n: 12.0          # N of |dFz| while rolling: roll back and lift and retouch (one touch ~3 N, both ~6 N)
       lift: 0.10
       lift_speed: 50.0
       max_retries: 3                  # one grasp attempt per start command; keep the gripper closed afterwards
@@ -110,8 +126,11 @@
       return_speed: 100.0
 
     gripper:                          # the Camera-Edge FSR close (config.py values)
-      close_start: 50
+      # One move from open (or grasp.probe_open) to here, then step at a time. Contact is at ~180
+      # (FSR_CALIBRATION.md): 130 stops ~2.5 mm per jaw short of a centred plate.
+      close_start: 130
       step: 10
+      step_settle: 0.15               # s after each step before the FSR read (10 units: ~0.13 s at probe_gripper_rate 80)
       max_close: 350
       samples: 100
       rate: 2.0
@@ -129,7 +148,12 @@
       max_nudges: 10
       use_fsr: true
       close_offset: 350               # 350 held the plate on the arm (2026-09-22)
-      close_settle: 4.0               # s for the main grip to settle before the final +40 command
+      close_settle: 4.0               # s cap for the main grip to settle before the final squeeze
+      # The settle ends early once grip_settle_count FSR medians (fsr_samples, ~0.2 s each) in a row each differ
+      # from the one before by <= grip_settle_tolerance ADC counts on both pads; -1: always close_settle.
+      # Starting values, not measured: check grip_settle_s / grip_settle_steady in the status.
+      grip_settle_tolerance: 15
+      grip_settle_count: 2
       tare_samples: 25                # unloaded median over 1.2 s at the hover pose (0: raw pressures)
       fsr_polarity: [1, 1]
       fsr_samples: 5                  # reject isolated false contacts

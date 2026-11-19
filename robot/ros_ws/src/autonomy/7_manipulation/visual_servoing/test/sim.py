@@ -16,6 +16,24 @@ INTRINSICS = Intrinsics(243.3, 243.3, 241.8, 152.9, 480, 300)   # the recorded 4
 PLATE = (0.12776, 0.08548)
 
 
+def rotation_vector(r):
+    """Axis * angle of rotation matrix `r` (angle < pi)."""
+    angle = float(np.arccos(np.clip((np.trace(r) - 1.0) / 2.0, -1.0, 1.0)))
+    if angle < 1e-12:
+        return np.zeros(3)
+    return np.array([r[2, 1] - r[1, 2], r[0, 2] - r[2, 0], r[1, 0] - r[0, 1]]) * angle / (2.0 * np.sin(angle))
+
+
+def rotation(vector):
+    """Rotation matrix of axis * angle `vector` (Rodrigues)."""
+    angle = float(np.linalg.norm(vector))
+    if angle < 1e-12:
+        return np.eye(3)
+    k = np.asarray(vector) / angle
+    skew = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    return np.eye(3) + np.sin(angle) * skew + (1.0 - np.cos(angle)) * skew @ skew
+
+
 class FakeClock:
     """Simulated time: sleep() advances it at once, so a run of minutes takes milliseconds."""
 
@@ -67,11 +85,15 @@ class FakeArm:
         dt = max(0.0, min(now, expiry) - self._last)
         self._last = now
         if self._moving is not None:
+            # as the controller's linear move: the TCP in a straight line at `speed`, the orientation turning with it
             start, target, speed, t0 = self._moving
-            distance = np.linalg.norm(target[:3, 3] - start[:3, 3])
+            a, b = start @ self._offset, target @ self._offset
+            distance = np.linalg.norm(b[:3, 3] - a[:3, 3])
             done = 1.0 if distance == 0.0 else min(1.0, (now - t0) * speed / distance)
-            self.pose = target.copy()
-            self.pose[:3, 3] = start[:3, 3] + done * (target[:3, 3] - start[:3, 3])
+            tcp = b.copy()
+            tcp[:3, 3] = a[:3, 3] + done * (b[:3, 3] - a[:3, 3])
+            tcp[:3, :3] = a[:3, :3] @ rotation(done * rotation_vector(a[:3, :3].T @ b[:3, :3]))
+            self.pose = tcp @ inverse(self._offset)
             if done >= 1.0:
                 self._moving = None
         if dt > 0.0 and self.mode == MODE_VELOCITY:
