@@ -10,3 +10,12 @@ build.log
 output.txt
 robot/ros_ws_nav/
 robot/ros_ws/src/autonomy/7_manipulation/act_inference/**/*.jpg
+
+# Local runtime state, recordings, and backups
+/gcs/ot2_state/
+/behavior_debug_*/
+/.gcs-retry-backup-*/
+/compose.gcs-local.before-ot2.yaml
+**/*.before-*
+**/*.bkp
+/mqtt_ros2_bridge.py_09152026
