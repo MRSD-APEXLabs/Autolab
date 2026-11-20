@@ -71,6 +71,9 @@ LabMachineExecutive::LabMachineExecutive()
     // ROS2 parameters
     this->declare_parameter<std::string>("ot2_base_url",     "http://192.168.1.100:8000");
     this->declare_parameter<std::string>("ot2_host",         "192.168.1.100");
+    // Wrapper calls block until the OT-2 finishes (travel to safe Z + aspirate + retract), which
+    // routinely exceeds 30 s.
+    this->declare_parameter<int>("ot2_command_timeout_s", 300);
     this->declare_parameter<std::string>("shaker_base_url",  "http://192.168.1.101:8080");
     this->declare_parameter<std::string>("shaker_endpoint",  "/pwm");
     // d3:4b tip-check service, run after each aspirate. Empty disables the check.
@@ -80,6 +83,9 @@ LabMachineExecutive::LabMachineExecutive()
 
     this->get_parameter("ot2_base_url",     ot2_base_url_);
     this->get_parameter("ot2_host",         ot2_host_);
+    int ot2_timeout = 300;
+    this->get_parameter("ot2_command_timeout_s", ot2_timeout);
+    ot2_command_timeout_s_ = std::max(1, ot2_timeout);
     this->get_parameter("shaker_base_url",  shaker_base_url_);
     this->get_parameter("shaker_endpoint",  shaker_endpoint_);
     this->get_parameter("tip_check_base_url", tip_check_cfg_.base_url);
@@ -195,7 +201,9 @@ bool LabMachineExecutive::http_post(const std::string& url,
 bool LabMachineExecutive::http_post_capture(const std::string& url,
                                             const std::string& body,
                                             const std::string& content_type,
-                                            std::string* response)
+                                            std::string* response,
+                                            long timeout_s,
+                                            std::string* error)
 {
     CURL* curl = curl_easy_init();
     if (!curl) return false;
@@ -209,7 +217,7 @@ bool LabMachineExecutive::http_post_capture(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS,     body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,  static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        timeout_s);
     if (response) {
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, collect_response);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA,     response);
@@ -224,15 +232,30 @@ bool LabMachineExecutive::http_post_capture(const std::string& url,
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    return (res == CURLE_OK) && (http_code >= 200) && (http_code < 300);
+    const bool ok = (res == CURLE_OK) && (http_code >= 200) && (http_code < 300);
+    if (!ok && error) {
+        *error = (res != CURLE_OK) ? std::string(curl_easy_strerror(res))
+                                   : "HTTP " + std::to_string(http_code);
+    }
+    return ok;
+}
+
+bool LabMachineExecutive::ot2_post(const std::string& path, const std::string& body) {
+    std::string response, error;
+    if (http_post_capture(ot2_base_url_ + path, body, "application/json", &response,
+                          ot2_command_timeout_s_, &error))
+        return true;
+    RCLCPP_ERROR(this->get_logger(), "OT-2 POST %s failed (%s, timeout %lds): %s", path.c_str(),
+                 error.c_str(), ot2_command_timeout_s_, response.substr(0, 500).c_str());
+    return false;
 }
 
 bool LabMachineExecutive::home_ot2() {
-    return http_post(ot2_base_url_ + "/robot/home", "{}", "application/json");
+    return ot2_post("/robot/home", "{}");
 }
 
 bool LabMachineExecutive::disconnect_ot2() {
-    return http_post(ot2_base_url_ + "/robot/disconnect", "{}", "application/json");
+    return ot2_post("/robot/disconnect", "{}");
 }
 
 // Converts OT-2 step action name to REST endpoint path.
@@ -464,8 +487,7 @@ bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step, int inde
         if (action.empty()) return false;
         nlohmann::json body = s;  // step object minus the "action" key
         body.erase("action");
-        return http_post(ot2_base_url_ + action_to_endpoint(action), body.dump(),
-                         "application/json");
+        return ot2_post(action_to_endpoint(action), body.dump());
     };
     lab_machine::TipCheckFn check;
     if (!tip_check_cfg_.base_url.empty())

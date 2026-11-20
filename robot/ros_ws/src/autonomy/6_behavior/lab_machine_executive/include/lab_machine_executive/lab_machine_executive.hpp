@@ -49,6 +49,7 @@ class LabMachineExecutive : public rclcpp::Node {
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;
     std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
+    long ot2_command_timeout_s_ = 300;  // per-step wrapper call; blocks until the OT-2 finishes the move
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
     lab_machine::TipCheckConfig tip_check_cfg_;  // d3:4b tip check after each aspirate
@@ -85,6 +86,10 @@ class LabMachineExecutive : public rclcpp::Node {
     static bool http_post_capture(const std::string& url,
                                   const std::string& body,
                                   const std::string& content_type,
-                                  std::string* response);
+                                  std::string* response,
+                                  long timeout_s = 30,
+                                  std::string* error = nullptr);
+    // POST to the OT-2 wrapper with ot2_command_timeout_s_; logs why a call failed.
+    bool ot2_post(const std::string& path, const std::string& body);
     static std::string action_to_endpoint(const std::string& action);
 };
