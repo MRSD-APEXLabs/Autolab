@@ -4,6 +4,7 @@ No hardware driver or joystick process is created. Use an isolated container and
 ROS domain, with SWERVE_NAV_FORCE_SIM=1. Production launch behavior is unchanged.
 """
 import importlib.util
+import os
 from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch.actions import ExecuteProcess
@@ -32,7 +33,8 @@ def generate_launch_description():
                 if executable in omitted:
                     continue
             actions.append(action)
-        args = ['python3', str(Path(__file__).with_name('sim_world.py')), '--ros-args',
+        simulator = 'sim_station_drift.py' if os.environ.get('SWERVE_TEST_APPROACH_DRIFT') == '1' else 'sim_world.py'
+        args = ['python3', str(Path(__file__).with_name(simulator)), '--ros-args',
                 '-r', '__node:=sim_world', '-p', f'map_yaml:={share / "maps/best.yaml"}']
         for name, key in [('start_x', 'x'), ('start_y', 'y'), ('start_yaw', 'yaw')]:
             args += ['-p', f'{name}:={context.launch_configurations[key]}']

@@ -72,11 +72,16 @@ private:
     bool              in_flight_{false};
     // Set when the BT deactivates the action mid-flight; the async waits bail out.
     std::atomic<bool> abort_{false};
+    // A "cancel" command: the active action fails and does not advance; cleared by the next command.
+    bool              cancel_requested_{false};
+    // The wrist camera was already selected ahead of time during this run's plan
+    bool              wrist_preselected_{false};
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::map<std::string, int64_t> april_tags_;            // target_machine → AprilTag id
     std::string                    camera_select_service_;
     double                         camera_select_timeout_s_;
+    std::string                    wrist_camera_select_service_;
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::CallbackGroup::SharedPtr io_group_;   // service clients + servo status
@@ -85,8 +90,11 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr  planning_cmd_pub_;
     // 0=unknown/waiting, 1=SUCCESS, 2=ERROR
     std::atomic<int> planning_result_{0};
+    // the planner reported EXECUTING: it has its plan, so it reads no camera from here on
+    std::atomic<bool> planning_executing_{false};
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr planning_state_sub_;
     rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr camera_select_client_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr wrist_camera_select_client_;
     RemoteRun servo_;
     RemoteRun act_;
     // ACT start services by target: <act_start_prefix_>/<target>, target = base or a lab machine
@@ -104,6 +112,8 @@ private:
     void reset_manip();
     void fail_manip(bt::Action* action);
     void start_select_camera();
+    // Switches the camera hub ahead of the step that needs it; doesn't wait for the switch
+    void preselect_camera(const rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr& client);
     bt::Condition* condition_for(ManipType type);
     // Creates the run's clients and status subscription (io_group_)
     void setup_remote(RemoteRun& run);

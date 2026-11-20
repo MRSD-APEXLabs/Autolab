@@ -34,6 +34,7 @@ def build_config(param):
         weak_size_tolerance=float(param('servo.weak_size_tolerance', base.weak_size_tolerance)),
         filter_alpha=float(param('servo.filter_alpha', base.filter_alpha)),
         filter_gate=float(param('servo.filter_gate', base.filter_gate)),
+        filter_orientation_gate_deg=float(param('servo.filter_orientation_gate_deg', base.filter_orientation_gate_deg)),
         grasp=bool(param('grasp.enable', base.grasp)),
         grasp_depth=float(param('grasp.depth', base.grasp_depth)),
         approach_speed=float(param('grasp.approach_speed', base.approach_speed)),
@@ -41,9 +42,11 @@ def build_config(param):
         final_speed=float(param('grasp.final_speed', base.final_speed)),
         probe_contact=bool(param('grasp.probe_contact', base.probe_contact)),
         probe_close=int(param('grasp.probe_close', base.probe_close)),
+        probe_open=int(param('grasp.probe_open', base.probe_open)),
         probe_gripper_rate=float(param('grasp.probe_gripper_rate', base.probe_gripper_rate)),
         probe_gripper_margin=float(param('grasp.probe_gripper_margin', base.probe_gripper_margin)),
         probe_lift=float(param('grasp.probe_lift', base.probe_lift)),
+        probe_reposition_speed=float(param('grasp.probe_reposition_speed', base.probe_reposition_speed)),
         probe_depth=float(param('grasp.probe_depth', base.probe_depth)),
         probe_grip_depth=float(param('grasp.probe_grip_depth', base.probe_grip_depth)),
         probe_touch_speed=float(param('grasp.probe_touch_speed', base.probe_touch_speed)),
@@ -55,6 +58,9 @@ def build_config(param):
         probe_tilt_max_touches=int(param('grasp.probe_tilt_max_touches', base.probe_tilt_max_touches)),
         probe_tilt_lift=float(param('grasp.probe_tilt_lift', base.probe_tilt_lift)),
         probe_tilt_settle=float(param('grasp.probe_tilt_settle', base.probe_tilt_settle)),
+        probe_pivot_offset=float(param('grasp.probe_pivot_offset', base.probe_pivot_offset)),
+        probe_roll_calibration_deg=float(param('grasp.probe_roll_calibration_deg', base.probe_roll_calibration_deg)),
+        probe_roll_max_n=float(param('grasp.probe_roll_max_n', base.probe_roll_max_n)),
         lift=float(param('grasp.lift', base.lift)),
         lift_speed=float(param('grasp.lift_speed', base.lift_speed)),
         max_retries=int(param('grasp.max_retries', base.max_retries)),
@@ -80,6 +86,9 @@ def build_config(param):
             use_fsr=bool(param('gripper.use_fsr', grip.use_fsr)),
             close_offset=int(param('gripper.close_offset', grip.close_offset)),
             close_settle=float(param('gripper.close_settle', grip.close_settle)),
+            step_settle=float(param('gripper.step_settle', grip.step_settle)),
+            grip_settle_tolerance=int(param('gripper.grip_settle_tolerance', grip.grip_settle_tolerance)),
+            grip_settle_count=int(param('gripper.grip_settle_count', grip.grip_settle_count)),
             tare_samples=int(param('gripper.tare_samples', grip.tare_samples)),
             fsr_polarity=tuple(int(v) for v in param('gripper.fsr_polarity', list(grip.fsr_polarity))),
             fsr_samples=int(param('gripper.fsr_samples', grip.fsr_samples)),
@@ -138,10 +147,13 @@ def build_config(param):
         raise ValueError('gripper.ft_contact_count must be >= 1')
     if grip.ft_report_type not in ('', 'normal', 'rich', 'real'):
         raise ValueError("gripper.ft_report_type must be '', 'normal', 'rich' or 'real'")
-    if not (all(np.isfinite(v) and v > 0 for v in (config.probe_touch_speed, config.probe_slow_margin))):
-        raise ValueError('grasp.probe_touch_speed and grasp.probe_slow_margin must be > 0')
-    if not 0 <= config.probe_close <= 1000:
-        raise ValueError('grasp.probe_close must be a gripper value 0..1000')
+    if not (all(np.isfinite(v) and v > 0 for v in (config.probe_touch_speed, config.probe_slow_margin,
+                                                    config.probe_reposition_speed))):
+        raise ValueError('grasp.probe_touch_speed, grasp.probe_slow_margin and grasp.probe_reposition_speed must be > 0')
+    if not (0 <= config.probe_close <= 1000 and 0 <= config.probe_open <= 1000):
+        raise ValueError('grasp.probe_close and grasp.probe_open must be gripper values 0..1000')
+    if not np.isfinite(grip.step_settle) or grip.step_settle < 0 or grip.grip_settle_count < 1:
+        raise ValueError('gripper.step_settle must be >= 0 and gripper.grip_settle_count >= 1')
     if not all(np.isfinite(v) and v > 0 for v in (config.probe_lift, config.probe_depth, config.probe_grip_depth)):
         raise ValueError('grasp.probe_lift, grasp.probe_depth and grasp.probe_grip_depth must be > 0')
     if not (np.isfinite(config.probe_gripper_rate) and config.probe_gripper_rate > 0
@@ -157,6 +169,10 @@ def build_config(param):
                          'probe_tilt_max_touches >= 1)')
     if config.probe_tilt_max_deg > 30.0:
         raise ValueError('grasp.probe_tilt_max_deg must be <= 30')
+    if not (np.isfinite(config.probe_pivot_offset) and config.probe_pivot_offset >= 0
+            and 0 < config.probe_roll_calibration_deg <= 30 and config.probe_roll_max_n > grip.ft_probe_contact_n):
+        raise ValueError('grasp.probe_pivot_offset must be >= 0, grasp.probe_roll_calibration_deg 0..30 and '
+                         'grasp.probe_roll_max_n above gripper.ft_probe_contact_n')
     return config
 
 

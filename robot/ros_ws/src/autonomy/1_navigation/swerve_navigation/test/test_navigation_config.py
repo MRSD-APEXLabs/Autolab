@@ -113,11 +113,14 @@ def test_transit_horizon_and_speeds_fit_local_window_and_bridge(params):
     assert linear * controller['model_dt'] * controller['time_steps'] + .5 < min(local['width'], local['height']) / 2
 
 
-def test_fast_mode_preserves_docking_steering_and_ramps(params):
+def test_fast_mode_preserves_docking_steering_and_rotation_ramp(params, request):
     base = yaml.safe_load((BRINGUP / 'config/nav2_params.yaml').read_text())
     server = params['controller_server']['ros__parameters']
-    assert server['DockPath'] == base['controller_server']['ros__parameters']['DockPath']
-    assert params['velocity_smoother']['ros__parameters']['max_accel'][0] == .6
+    for name in ('DockPath', 'StagePath'):
+        assert server[name] == base['controller_server']['ros__parameters'][name]
+    # Fast transit ramps up at the bridge's 1.2 m/s^2 accel cap; rotation keeps its ramp.
+    fast = request.node.callspec.params['params'][1] == 'fast'
+    assert params['velocity_smoother']['ros__parameters']['max_accel'][0] == (1.2 if fast else .6)
     assert params['velocity_smoother']['ros__parameters']['max_accel'][2] == 1.
     assert params['collision_monitor']['ros__parameters']['PolygonStop'] == base['collision_monitor']['ros__parameters']['PolygonStop']
     slow = params['collision_monitor']['ros__parameters']['PolygonSlow']
@@ -125,6 +128,25 @@ def test_fast_mode_preserves_docking_steering_and_ramps(params):
         assert slow['holonomic']
         assert slow['normal']['points'] == base['collision_monitor']['ros__parameters']['PolygonSlow']['points']
         assert slow['fast_transit']['linear_min'] > server['DockPath']['vx_max']
+
+
+def test_station_legs_before_the_park_are_fast_and_executable(params):
+    # The move to the docking start (StagePath) runs at 3x the final park (DockPath), the back-out (BackUp at
+    # the docking speed) at 4x the old 0.10 m/s; the velocity smoother must pass them unclipped in every mode.
+    from swerve_navigation.station_docking import load_docking_config
+    server = params['controller_server']['ros__parameters']
+    dock, stage = server['DockPath'], server['StagePath']
+    assert 'StagePath' in server['controller_plugins']
+    for key in ('vx_max', 'vx_min', 'vy_max'):
+        assert stage[key] == pytest.approx(3 * dock[key])
+    assert stage['wz_max'] == 0.0 and stage['motion_model'] == 'Omni'
+    assert stage['critics'] == dock['critics'] and stage['CostCritic'] == dock['CostCritic']
+    smoother = params['velocity_smoother']['ros__parameters']
+    assert stage['vx_max'] <= smoother['max_velocity'][0]
+    assert stage['vy_max'] <= min(smoother['max_velocity'][1], -smoother['min_velocity'][1])
+    back_out = load_docking_config(BRINGUP / 'maps/best.locations.yaml').speed
+    assert back_out == pytest.approx(0.40)
+    assert -back_out >= smoother['min_velocity'][0]
 
 
 @pytest.mark.parametrize('motion,selection,expected', [
@@ -157,3 +179,37 @@ def test_omni_position_corrections_are_not_penalized_for_strafing():
     assert controller['PathAngleCritic']['enabled'] is False
     assert controller['PreferForwardCritic']['enabled'] is False
     assert controller['vy_max'] > 0.
+
+
+def _launch_module():
+    spec = importlib.util.spec_from_file_location('navigation_launch', BRINGUP / 'launch/navigation.launch.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_saved_pose_round_trip_only_for_its_map(tmp_path):
+    from swerve_navigation.nav_api import save_pose
+    module = _launch_module()
+    pose_file = str(tmp_path / 'nav_state/last_pose.yaml')
+    best, other = str(BRINGUP / 'maps/best.yaml'), str(BRINGUP / 'maps/map.yaml')
+    assert module.initial_pose('', '', '', pose_file, best) == (
+        (0.0, 0.0, 0.0), 'map origin (no saved pose for this map)')
+    save_pose(pose_file, best, 1.25, -0.5, 3.0)
+    assert module.initial_pose('', '', '', pose_file, best) == ((1.25, -0.5, 3.0), f'saved pose {pose_file}')
+    assert module.load_saved_pose(pose_file, other) is None
+    # any explicit argument wins; the ones left out are 0
+    assert module.initial_pose('2.0', '', '', pose_file, best) == ((2.0, 0.0, 0.0), 'launch arguments')
+    assert module.initial_pose('0', '0', '0', pose_file, best) == ((0.0, 0.0, 0.0), 'launch arguments')
+    assert module.initial_pose('', '', '', '', best)[0] == (0.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize('text', ['', 'not: [valid', 'x: 1.0\n', 'map: {m}\nx: nan\ny: 0\nyaw: 0\n',
+                                  'map: {m}\nx: a\ny: 0\nyaw: 0\n', '- just a list\n'])
+def test_unreadable_saved_pose_falls_back_to_the_map_origin(tmp_path, text):
+    module = _launch_module()
+    best = str(BRINGUP / 'maps/best.yaml')
+    path = tmp_path / 'last_pose.yaml'
+    path.write_text(text.format(m=best))
+    assert module.initial_pose('', '', '', str(path), best) == (
+        (0.0, 0.0, 0.0), 'map origin (no saved pose for this map)')

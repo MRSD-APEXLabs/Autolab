@@ -18,6 +18,7 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--undock-only', action='store_true')
+    parser.add_argument('--inject-heading-drift', action='store_true')
     args = parser.parse_args()
     assert os.environ.get('SWERVE_NAV_FORCE_SIM') == '1'
     assert os.environ.get('ROS_DOMAIN_ID') in ('78', '79')
@@ -33,13 +34,17 @@ def main():
                              'maps/best.locations.yaml').read_text())['locations']
     rclpy.init()
     node = rclpy.create_node('autolab_station_regression')
-    state = {'pose': None, 'api': '', 'mission': {}, 'parking_yaw': 0.}
+    if args.inject_heading_drift:
+        os.environ['SWERVE_TEST_APPROACH_DRIFT'] = '1'
+    state = {'pose': None, 'api': '', 'mission': {}, 'parking_yaw': 0., 'fine_yaw': 0., 'fine_seen': False}
     history, premature = [], []
     latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
     def mission(msg):
         state['mission'] = json.loads(msg.data)
+        if state['mission'].get('state') == 'dock_align':
+            state['fine_seen'] = True
         print(msg.data, flush=True)
 
     def api(msg):
@@ -56,6 +61,8 @@ def main():
     def cmd(msg):
         if state['mission'].get('state') in ('dock', 'undock', 'stage_adjust'):
             state['parking_yaw'] = max(state['parking_yaw'], abs(msg.angular.z))
+        if state['mission'].get('state') == 'dock_align':
+            state['fine_yaw'] = max(state['fine_yaw'], abs(msg.angular.z))
 
     node.create_subscription(String, '/station_docking/result', mission, latched)
     node.create_subscription(String, '/nav/state', api, latched)
@@ -110,6 +117,9 @@ def main():
         assert state['mission'].get('success') is True
         assert wait(lambda: state['api'] == 'SUCCEEDED', 3.), 'undock API outcome not delivered'
         assert state['parking_yaw'] == 0., state
+        if args.inject_heading_drift:
+            assert state['fine_seen'] and 0. < state['fine_yaw'] <= .351, state
+            report['fine_correction_max_rad_s'] = state['fine_yaw']
         report['passed'] = True
     except (Exception, KeyboardInterrupt) as exc:
         report['error'] = str(exc)

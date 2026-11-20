@@ -36,6 +36,9 @@ Placing runs the ACT placing policy where it used to wait at the placement pose:
 
 The executive starts the ACT step with `/act_inference/start/<target>`: `target_machine` (`ot2`, `shaker`) for `place`,
 `base` for `place_base`. It succeeds only for the results in the executive's `act_success_results` (`done` by default).
+`ot2` and `shaker` run their own placing policy, trained on SpaceMouse demos of that target (`act_inference/README.md`).
+`base` (`act_base_mode:=scripted`, the default) places by touch instead: fixed pose, F/T touch-down, slide to the ridge;
+`act_base_mode:=policy` runs the base ACT policy.
 
 `manipulation_executive` calls `/visual_servo/start`, follows `/visual_servo/status` until that run ends and
 counts it as a success only for the results in its `servo_success_results` parameter (`grasped`, `aligned`,
@@ -122,13 +125,16 @@ Roll it out in two stages:
 `grasp.probe_contact: true` finds the plate top by touch instead of trusting the camera's height (`grasp.depth`
 is then unused). After the F/T zero and FSR tare at the hover:
 
-1. close the gripper to `grasp.probe_close` (550) so the closed fingers form a probe;
-2. move to `final_segment` above the camera's plate top, then descend at `final_speed` until Fz departs from its
+1. close the gripper to `grasp.probe_close` (550) so the closed fingers form a probe, while the arm moves to
+   `final_segment` above the camera's plate top (the jaws have closed before the in-air F/T baseline);
+2. descend at `final_speed` until Fz departs from its
    pre-probe median by more than `gripper.ft_probe_contact_n` for `gripper.ft_contact_count` reads in a row, and halt
    (final_speed down to `probe_slow_margin` above the camera's plate top, then `probe_touch_speed`).
    The plate-top height is the fingertip height at the *first* of those reads (the halt lands slightly deeper);
-3. lift `grasp.probe_lift` (5 mm), open the gripper fully, wait `close_settle`, and re-zero the F/T sensor;
-4. lower to `grasp.probe_grip_depth` (7.5 mm, tuned on the bench) below the touch and run the usual closing routine.
+3. lift `grasp.probe_lift` (5 mm) at `grasp.probe_reposition_speed` (15 mm/s), open the gripper to `grasp.probe_open` (yaml 80: ~5 mm per jaw clear of the
+   plate), wait for the jaws (travel / `probe_gripper_rate` + `probe_gripper_margin`), and re-zero the F/T sensor;
+4. lower at `probe_reposition_speed` to `grasp.probe_grip_depth` (7.5 mm, tuned on the bench) below the touch and run the usual closing routine,
+   which starts from `probe_open`: one move to `gripper.close_start`, then `gripper.step` at a time.
 
 No touch within `grasp.probe_depth` below the camera's plate top (or `min_tip_z`) fails the attempt:
 `max_retries` lifts, opens, re-aligns and probes again. The probe needs the F/T sensor whatever
@@ -155,10 +161,20 @@ the fingers until both touch, and keeps that tilt for the grasp and the lift:
    tilt, open, re-zero, lower `probe_grip_depth` below the touch and close as usual. FSR nudges and F/T tracking
    slide along the tilted finger axis.
 
+**Roll** (`probe_pivot_offset` > 0, measured: from the tool's centre line along the finger axis to where one closed
+fingertip touches the plate). The fingertip that touched first stays on the plate: before the first touch, one tilt of
+`probe_roll_calibration_deg` in the air measures how much the gripper's weight moves onto the torque per degree; after
+it, the tool rotates about that fingertip in `probe_tilt_step_deg` legs, the other fingertip coming down at
+`probe_touch_speed`, while the F/T is read continuously with that weight subtracted. Once the tilt torque crosses zero
+(both touch) it halts and returns to the tilt interpolated at the crossing; the grasp keeps it (`probe_tilt_result:
+rolled`). If the touching fingertip comes off (a wrong `probe_pivot_offset` lifts it) or |dFz| passes
+`probe_roll_max_n` (one presses it in), it rolls back onto the first touch and lifts and retouches as above
+(`probe_roll_result`: `crossed`, `cap`, `lost`, `force`; `probe_roll_gravity_nm_per_deg`).
+
 More than `probe_tilt_max_deg`, `probe_tilt_max_touches` touches or a touch that finds nothing: the level grasp from
 the first touch (as without probe_tilt). A retry re-levels the tool before aligning again. Only the tilt across the
 fingers is measured; a lean along the pads stays. Status fields: `probe_tilt_result` (`balanced`, `converged`,
-`cap`, `max_touches`, `lost`), `probe_tilt_deg`, `probe_tilt_torque_nm`, `probe_tilt_touches`,
+`rolled`, `cap`, `max_touches`, `lost`), `probe_tilt_deg`, `probe_tilt_torque_nm`, `probe_tilt_touches`,
 `probe_first_contact_tip_mm`. Calibrate `ft_tilt_torque_sign` and the deadband first with
 `tools/probe_tilt_check.py` (`watch`, then `seek`), which runs the same seek interactively.
 

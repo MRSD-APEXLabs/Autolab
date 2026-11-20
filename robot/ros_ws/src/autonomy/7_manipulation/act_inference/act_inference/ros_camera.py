@@ -21,10 +21,6 @@ from .cameras import CameraFrame
 ENCODINGS = {'bgr8': (np.uint8, 3), 'rgb8': (np.uint8, 3), '16UC1': (np.uint16, 1), 'mono16': (np.uint16, 1)}
 
 
-class StaleCameraFrame(RuntimeError):
-    """A valid image/depth pair is too old to use; startup may wait for its replacement."""
-
-
 class ImageDepthPairs:
     """Exact-stamp matching that preserves newer halves when messages arrive out of order."""
 
@@ -135,28 +131,20 @@ class RosDepthCamera:
     def _wait_until_ready(self):
         """Learn a bounded frame cadence before accepting startup data from a busy ROS pipeline."""
         deadline = time.monotonic() + self.start_timeout
-        last_stale = None
         while not self._stop.is_set():
             self.check_mode()
-            # A first frame can arrive >300 ms after capture while inference/camera
-            # workers start. With no second frame, interval_s is still zero and the
-            # normal cadence allowance cannot yet be estimated.
             if self.frames_received >= 2 and self.calibration is not None:
-                try:
-                    self.latest()
-                except StaleCameraFrame as exc:
-                    last_stale = exc
-                else:
-                    logging.getLogger(__name__).info(
-                        'ROS camera ready: %d pairs, capture-to-receipt %.0f ms, bounded cadence %.0f ms',
-                        self.frames_received, self.latency_s * 1000, self.interval_s * 1000)
-                    self._check_publishers()
-                    return
+                self.latest()
+                logging.getLogger(__name__).info(
+                    'ROS camera ready: %d pairs, capture-to-receipt %.0f ms, bounded cadence %.0f ms',
+                    self.frames_received, self.latency_s * 1000, self.interval_s * 1000)
+                self._check_publishers()
+                return
             if time.monotonic() > deadline:
                 raise TimeoutError(f'No usable camera stream on {self._topic("depth/image_rect")} and '
                                    f'{self._topic("left/image_rect_color")} within {self.start_timeout:g} s '
-                                   f'({self.frames_received} matched pairs; need at least 2 and calibration). '
-                                   f'Last stale frame: {last_stale}; check depth rate and ROS_DOMAIN_ID')
+                                   f'({self.frames_received} matched pairs; need at least 2 and calibration); '
+                                   f'check depth rate and ROS_DOMAIN_ID')
             self._stop.wait(0.01)
         raise RuntimeError('Camera stopped while waiting for startup frames')
 
@@ -240,19 +228,12 @@ class RosDepthCamera:
     def latest(self):
         self.check_mode()
         with self._lock:
-            frame, interval = self._latest, self.interval_s
+            frame = self._latest
         if frame is None:
             raise RuntimeError('No camera frame')
         age = time.monotonic() - frame.captured_monotonic
-        # As in NanoStreamCamera: depth is computed after capture and a frame stays current until the
-        # next one arrives, so allow two depth frame intervals on top of the transport budget.
-        allowance = 2 * interval + 0.05
         if age < -0.01:
             raise RuntimeError(f'Camera frame clock mismatch: age={age:.3f}s')
-        if age > self.max_age + allowance:
-            raise StaleCameraFrame(f'Camera frame stale: age={age:.3f}s, limit={self.max_age + allowance:.3f}s '
-                                   f'(bounded depth interval {1000 * interval:.0f} ms, '
-                                   f'{self.frames_received} matched pairs)')
         return frame
 
     def stop(self):

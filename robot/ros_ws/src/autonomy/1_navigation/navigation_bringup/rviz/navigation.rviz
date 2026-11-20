@@ -490,7 +490,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -3.0149974822998047
+      Angle: 0.11500437557697296
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549

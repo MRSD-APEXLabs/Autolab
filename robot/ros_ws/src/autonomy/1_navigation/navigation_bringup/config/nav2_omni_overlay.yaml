@@ -39,6 +39,6 @@ velocity_smoother:
   ros__parameters:
     # Allow transit strafing beyond the base configuration's small docking limit.
     max_velocity: [0.45, 0.20, 1.0]
-    min_velocity: [-0.10, -0.20, -1.0]
+    min_velocity: [-0.40, -0.20, -1.0]   # -0.40: station back-out
     max_accel: [0.6, 0.6, 1.0]
     max_decel: [-1.5, -1.5, -3.0]

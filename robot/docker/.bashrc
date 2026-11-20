@@ -7,6 +7,8 @@
 
 # Define the ROS2 workspace directory
 ROS2_WS_DIR="$HOME/AutoLab/robot/ros_ws"
+# `ros2 launch` that a double Ctrl-C cannot leave hanging (see that file); used by robot_up and rws
+ROS2_LAUNCH="$ROS2_WS_DIR/src/robot_bringup/scripts/ros2_launch.py"
 # needed for communication with Isaac Sim ROS2  # https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_ros.html#enabling-the-ros-bridge-extension
 export FASTRTPS_DEFAULT_PROFILES_FILE="$ROS2_WS_DIR/fastdds.xml"
 # real hardware: restrict Fast DDS to the LAN interface (no-op unless DDS_LAN_SUBNET is set)
@@ -49,7 +51,7 @@ function sws(){
 
 function rws(){
     echo "Running \`ros2 launch $@\` in $ROS2_WS_DIR"
-    ros2 launch robot_bringup robot.launch.xml 
+    python3 "$ROS2_LAUNCH" robot_bringup robot.launch.xml
 }
 
 # Function to prompt user for confirmation
@@ -229,6 +231,7 @@ alias l='ls -CF'
 
 alias emacs='emacs -nw'
 alias sis='source install/setup.bash'
+alias robot_up='python3 "$ROS2_LAUNCH" robot_bringup robot.launch.xml sim:=false'
 
 # if [ -f ~/.bash_aliases ]; then
 #     . ~/.bash_aliases

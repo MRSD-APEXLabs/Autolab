@@ -50,6 +50,7 @@ class XArm:
 
     def connect(self):
         if self.connected:
+            self._connect_ft()   # released by the previous run's release_ft()
             return
         if self._factory is None:
             from xarm.wrapper import XArmAPI
@@ -62,18 +63,35 @@ class XArm:
             self._arm = None
             raise ArmError(f'xArm connection to {self.ip} failed')
         self._wait_first_report()
-        if self.ft_report_type is not None:
-            try:
-                self._ft_api = self._factory(self.ip, is_radian=False, report_type=self.ft_report_type)
-            except Exception as exc:
-                self.disconnect()
-                raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed: {exc}') from exc
-            if not self._ft_api.connected:
-                self.disconnect()
-                raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed')
+        self._connect_ft()
         offset = [float(v) for v in self._arm.tcp_offset]   # [x, y, z mm, roll, pitch, yaw deg]
         self.flange_T_tcp = xarm_pose_matrix(offset)
         log.info('xArm %s connected, TCP offset %s', self.ip, offset)
+
+    def _connect_ft(self):
+        if self.ft_report_type is None or self._ft_api is not None:
+            return
+        try:
+            self._ft_api = self._factory(self.ip, is_radian=False, report_type=self.ft_report_type)
+        except Exception as exc:
+            self.disconnect()
+            raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed: {exc}') from exc
+        if not self._ft_api.connected:
+            self.disconnect()
+            raise ArmError(f'xArm F/T report connection ({self.ft_report_type}) to {self.ip} failed')
+
+    def release_ft(self):
+        """Close the read-only F/T report connection between runs. The controller accepts only 5 SDK clients
+        (2026-11-10, v2.7.0), and act_inference's base placement needs two of its own while the xarm_ros2 driver,
+        this main connection and act_inference's handback connection stay open. The main connection stays
+        (see hand_back); connect() reopens this one."""
+        if self._ft_api is not None:
+            try:
+                self._ft_api.disconnect()
+            except Exception:
+                pass
+            finally:
+                self._ft_api = None
 
     def _wait_first_report(self, timeout=2.0):
         """The SDK fills tcp_offset from its report socket, so right after connecting it reads all zeros (on the arm
@@ -87,13 +105,7 @@ class XArm:
             time.sleep(0.02)
 
     def disconnect(self):
-        if self._ft_api is not None:
-            try:
-                self._ft_api.disconnect()
-            except Exception:
-                pass
-            finally:
-                self._ft_api = None
+        self.release_ft()
         if self._arm is not None:
             try:
                 self._arm.disconnect()

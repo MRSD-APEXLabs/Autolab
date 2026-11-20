@@ -6,5 +6,6 @@ controller_server:
 
 velocity_smoother:
   ros__parameters:
-    max_velocity: [0.90, 0.40, 1.50]
-    min_velocity: [-0.10, -0.40, -1.50]
+    max_velocity: [1.20, 0.40, 1.50]
+    min_velocity: [-0.40, -0.40, -1.50]
+    max_accel: [1.2, 1.2, 1.0]

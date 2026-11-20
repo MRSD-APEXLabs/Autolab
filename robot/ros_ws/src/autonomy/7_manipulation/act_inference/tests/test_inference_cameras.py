@@ -55,10 +55,7 @@ def test_stale_and_fresh_frames():
     cam._latest = fresh
     assert cam.latest() is fresh
     cam._latest = replace(fresh, captured_monotonic=time.monotonic() - 1)
-    with pytest.raises(RuntimeError, match='stale'):
-        cam.latest()
-    cam.depth_ms = 400.0     # slow depth widens the budget by two compute periods
-    assert cam.latest() is cam._latest
+    assert cam.latest() is cam._latest      # no camera latency limit: old frames are used
     cam._latest = None
     with pytest.raises(RuntimeError, match='No camera frame'):
         cam.latest()

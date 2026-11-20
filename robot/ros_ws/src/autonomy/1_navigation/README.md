@@ -111,6 +111,11 @@ export NAVIGATION_ENABLED=true     # and NAVIGATION_HARDWARE=true to let it driv
 
 `run.sh` starts navigation directly and ignores both variables.
 
+On the real robot, `robot_bringup`'s `robot.launch.xml` (`sim:=false`) runs `run.sh --hardware --yes` itself, as a
+child process, so the separate terminal is no longer needed: `navigation:=false` leaves it out and
+`navigation_hardware:=false` runs it on the phoenix6 simulator. Everything `run.sh` does still applies (domain 42,
+tf2 overlay, CANivore bring-up); only the typed YES is skipped. The Xbox pad may be connected later.
+
 ## Humble and Jazzy from one source
 
 Everything distro-specific is selected at launch time by `ROS_DISTRO`:
@@ -128,14 +133,15 @@ The overlay carries only what Humble spells differently: behaviour plugins are
 `NAV2_PLANNER_CANCEL_CHECKER`, which `CMakeLists.txt` defines everywhere except Humble. In Python,
 `swerve_bridge` only asks rclpy for message-reception timestamps where they exist (Iron+), and
 `location_markers` / `point_to_goal` tolerate Humble's `NavigateToPose` result, which has no
-`error_code`. Where Humble cannot tell a failed staging leg from one preempted by another client,
-the approach stops instead of driving to the goal on its own.
+`error_code`. Station recovery uses action status: an aborted staging leg can replan
+to the same staging pose; a canceled/preempted leg stops and cannot restart itself.
 
 Additional Humble compatibility in the current port:
 
 - Humble behavior-server `global_frame` is `odom`, matching its local collision checker.
   Jazzy separates `local_frame=odom` from `global_frame=map`.
-- Station actions tolerate Humble results without `error_code`; unsuccessful status still stops.
+- Station actions tolerate Humble results without `error_code`; aborted translation/staging
+  actions receive bounded recovery, while canceled actions still stop.
 - The staging tree has a separate BT.CPP v3 version without Jazzy error-code ports.
 - Humble overlays load after motion/speed overlays, preserving flat polygon points,
   `max_points`, slash-style behavior plugin IDs and the singular progress-checker setting.
@@ -146,6 +152,57 @@ Additional Humble compatibility in the current port:
   Humble message-callback adapter are preserved.
 
 If you edit the Jazzy tree or the Nav2 parameters, keep the Humble copies in step.
+
+## Station approach and recovery
+
+`best.locations.yaml` now uses a 0.30 m final docking leg and a separate 0.80 m
+staging/withdrawal distance. The robot aligns in checked open space at staging,
+translates with its heading held to the 30 cm approach point, then starts final
+parking with a fresh odometry heading anchor. Large alignment turns and withdrawal
+stay at 80 cm. Small heading corrections are also allowed at the approach point
+and after the final docking leg, before reporting success.
+
+Fine corrections are limited to 0.25 rad (14.3 degrees) and 0.35 rad/s,
+with two correction attempts per request. The downstream module-speed compensation
+sets a practical in-place speed floor of about 0.334 rad/s; this remains enabled. A dedicated lifecycle-managed
+Nav2 behavior server supplies this slow Spin action independently of fast staging
+alignment. Both costmaps must clear the footprint throughout the requested angular
+sweep; clearance is checked again while turning. The rotation lock is released
+only for the correction action and restored during stopping/final verification.
+
+Final station verification allows 0.12 m position error and 0.12 rad (6.9 degrees)
+heading error. The controller aims for 0.10 m, leaving braking allowance. A stopped
+base inside the verification limits may finish after the follower is canceled
+and its terminal result is received. Final map/odometry agreement is still checked.
+
+The shared Humble progress checker counts 3 cm of translation within 20 seconds.
+For parking/approach translation, 8 seconds without 2 cm of displacement triggers
+a stopped retry before that deadline. Aborted staging actions replan to staging;
+small final position errors retry translation; heading errors first attempt a
+checked small correction, otherwise withdraw along the current body axis and
+realign in checked open space. Recovery waits for the
+previous action to terminate and the base to stop. The same public request stays
+`NAVIGATING` throughout recovery, with two retries total and a 360 second mission
+limit. `/station_docking/status` describes each retry.
+
+Cancellation, manual takeover, e-stop, stale perception, blocked withdrawal or
+exhausted retries still stop the mission. Recovery does not bypass collision
+monitoring or claim success outside the station limits. Stop navigation, run
+`./src/autonomy/1_navigation/build.sh` in the Humble container, then restart
+`./src/autonomy/1_navigation/run.sh --hardware` to load these changes.
+
+Validation (2026-11-10): 632 checks passed under Humble/Python 3.10; the docking,
+Humble compatibility and public API checks also passed under Jazzy. Tests cover
+the observed 9.1/10.4 cm stalls, heading recovery through withdrawal/re-alignment,
+retry exhaustion, cancellation during recovery, stale perception and blocked exits.
+The isolated Humble Nav2 simulation completed shaker -> home -> OT-2 -> undock
+with an injected 0.16 rad physical approach disturbance. It used a local heading
+correction and completed with zero collisions and no failed requests. The measured
+fine-turn output peaked at 0.3343 rad/s, within the 0.35 rad/s limit, including
+downstream stiction compensation. Tests also cover post-docking heading correction,
+changing obstacles during a turn and the physical excursion limit.
+These are software/simulation checks;
+the running physical navigation stack was neither rebuilt nor restarted.
 
 ## Topic API
 
@@ -187,6 +244,18 @@ for a typed `YES` before arming the drivetrain. Extra launch arguments pass thro
 `map:=/path/to/other.yaml`, `rviz:=true`, `x:=1.0 y:=0.5 yaw:=1.57`, `api_namespace:=/robot_1`,
 `nav_motion:=omni`, `approach_distance:=0`.
 
+### Resuming the pose after a restart
+
+The base is too heavy to move while the stack is down, so navigation assumes it has not moved.
+During `--hardware` runs, `nav_api` saves the robot's map pose (map -> base_footprint) to
+`robot/ros_ws/nav_state/last_pose.yaml` at most once a second, when it has changed. The next
+start uses it as the AMCL initial pose when `x:=`, `y:=` and `yaw:=` are all left out, so no
+"2D Pose Estimate" is needed. The file lives in the bind-mounted repo, so killing or recreating
+the container keeps it. The saved pose only applies to the map it was saved for. Without a saved
+pose, the start pose is 0, 0, 0 as before. Dry runs read the pose but never save it. The launch log
+line `AMCL initial pose ... from ...` shows which source was used. If the robot was moved, pass
+`x:= y:= yaw:=` or use "2D Pose Estimate"; the corrected pose is then saved.
+
 In the Humble robot container, RViz defaults to off even though the launch-file default is on;
 run `rviz_docker.sh` from the host. On Jazzy, or when `rviz:=true` is explicit, the launch-file
 setting is used unchanged.
@@ -224,24 +293,24 @@ existing mux may then return to Nav2, as when LT is released.
 Docker's privileged-device snapshot can miss a Bluetooth pad connected after the
 container started. The controller may appear in `/sys/class/input` while its
 `/dev/input/event*` node is missing inside Docker. Keyboard event nodes alone do
-not prove the gamepad works. `run.sh --hardware` now opens the named controller
-with SDL before starting the drivetrain; `scripts/check_controller.py` performs
-that same read-only check without publishing ROS messages.
+not prove the gamepad works. `run.sh --hardware` does not require the pad at start: it may be connected
+after launch, and joy_auto selects it when it appears. Until then there is no pad e-stop.
+`scripts/check_controller.py` opens the named controller with SDL as a read-only check, without publishing
+ROS messages.
 
-For hotplug/reconnect, use the included override. **First stop navigation and any
-other robot work: the following command recreates the robot container.** Run on
-the host:
+The default robot Compose configuration now bind-mounts the live host `/dev/input`
+directory read-only for hotplug/reconnect. Containers created before that change
+need to be recreated once. **First stop navigation and any other robot work: the
+following command recreates the robot container.** Run on the host:
 
 ```bash
 cd ~/coding/Autolab
-docker compose --profile deploy -f docker-compose.yaml \
-  -f robot/ros_ws/src/autonomy/1_navigation/docker-input.override.yaml \
-  up -d --no-deps robot-l4t
+docker compose --profile deploy -f docker-compose.yaml up -d --no-deps robot-l4t
 ```
 
-The override bind-mounts the live host `/dev/input` directory read-only and retains
-the existing service's input group. It changes no files outside `1_navigation`.
-Keep this override in subsequent recreate commands so the mount remains present.
+The mount retains the existing service's input group. The included
+`docker-input.override.yaml` remains available for older checkouts that lack the
+default mount.
 Inside the Humble container, rebuild and then use the usual runner:
 
 ```bash

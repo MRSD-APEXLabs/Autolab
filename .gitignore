@@ -22,3 +22,7 @@ graphify-out/
 **/*.before-*
 **/*.bkp
 /mqtt_ros2_bridge.py_09152026
+# Local navigation recordings, camera frame indexes, and planner logs.
+/robot/ros_ws/src/autonomy/1_navigation/recordings/
+/robot/ros_ws/src/autonomy/7_manipulation/act_inference/data/zedx_base/**/frames.csv
+/robot/ros_ws/src/autonomy/5_planning/base_urdf/ORT.log

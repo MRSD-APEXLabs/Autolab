@@ -40,7 +40,7 @@ if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -qx 
   echo "container is not running: $CONTAINER" >&2
   exit 1
 fi
-NAV_PID="$(docker exec "$CONTAINER" pgrep -fo 'ros2 launch navigation_bringup' 2>/dev/null || true)"
+NAV_PID="$(docker exec "$CONTAINER" pgrep -fo 'ros2(_launch\.py| launch) navigation_bringup' 2>/dev/null || true)"
 if [[ -z "$NAV_PID" ]]; then
   echo "navigation is not running in $CONTAINER; start run.sh first" >&2
   exit 1

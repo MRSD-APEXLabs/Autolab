@@ -1,5 +1,6 @@
 """Controller layout, selection, and held-deadman handover regressions; no hardware."""
-from swerve_navigation.joy_auto import Handover, NEUTRAL_AXES, SDLControllers, normalize
+from swerve_navigation.joy_auto import (Handover, NEUTRAL_AXES, SDLControllers, normalize,
+                                       use_inotify_without_udevd)
 
 
 def test_neutral_and_trigger_polarity():
@@ -118,3 +119,12 @@ def test_handover_stops_teleop_and_preserves_latched_estop():
     feed(3, NEUTRAL_AXES.copy(), [0] * 11, 0.4)
     assert feed(3, held, [0] * 11, 0.45).command == ZERO
     assert logic.e_stop
+
+
+def test_inotify_hotplug_only_without_a_udev_daemon():
+    env = {}
+    assert use_inotify_without_udevd(env, lambda path: False) and env == {'SDL_JOYSTICK_DISABLE_UDEV': '1'}
+    env = {}
+    assert not use_inotify_without_udevd(env, lambda path: path == '/run/udev/control') and env == {}
+    env = {'SDL_JOYSTICK_DISABLE_UDEV': '0'}
+    assert not use_inotify_without_udevd(env, lambda path: False) and env == {'SDL_JOYSTICK_DISABLE_UDEV': '0'}
