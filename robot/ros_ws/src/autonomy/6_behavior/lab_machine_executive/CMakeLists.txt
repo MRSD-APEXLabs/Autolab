@@ -13,6 +13,14 @@ find_package(behavior_tree_msgs REQUIRED)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
+# Tip check (no ROS), shared by the node and its tests
+add_library(lab_machine_tip_check STATIC src/tip_check.cpp)
+target_include_directories(lab_machine_tip_check PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_compile_features(lab_machine_tip_check PUBLIC cxx_std_17)
+set_target_properties(lab_machine_tip_check PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(lab_machine_tip_check nlohmann_json::nlohmann_json)
+
 add_executable(lab_machine_executive src/lab_machine_executive.cpp)
 
 target_include_directories(lab_machine_executive PUBLIC
@@ -29,6 +37,7 @@ ament_target_dependencies(lab_machine_executive
 )
 
 target_link_libraries(lab_machine_executive
+  lab_machine_tip_check
   CURL::libcurl
   nlohmann_json::nlohmann_json
 )
@@ -44,6 +53,10 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_tip_check test/test_tip_check.cpp)
+  target_link_libraries(test_tip_check lab_machine_tip_check)
 endif()
 
 ament_package()

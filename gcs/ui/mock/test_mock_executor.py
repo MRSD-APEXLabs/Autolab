@@ -7,11 +7,11 @@ import urllib.request
 import pytest
 
 from mock_executor import (
-    FakeAnomalyStore,
+    FakeTipCheck,
     MockExecutor,
     STATUS_TOPIC,
     load_step_specs,
-    start_anomaly_server,
+    start_tip_check_server,
 )
 
 STEP_TIME = 2.0
@@ -51,13 +51,13 @@ def clock():
 
 
 @pytest.fixture
-def store(clock):
-    return FakeAnomalyStore(clock=clock)
+def tips():
+    return FakeTipCheck()
 
 
 @pytest.fixture
-def ex(clock, store):
-    return MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock, anomaly_store=store)
+def ex(clock, tips):
+    return MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock, tip_check=tips)
 
 
 def start(ex, *steps, **kw):
@@ -79,6 +79,8 @@ def test_step_specs_come_from_real_step_config():
     assert specs['place']['required_params'] == ['target_machine']
     assert specs['go_to_pose']['required_params'] == ['x', 'y', 'yaw']
     assert specs['wait']['msg_type'] == 'wait'
+    assert specs['ot2']['retryable'] is False
+    assert specs['go_to']['retryable'] is True
 
 
 # --- start / validation -----------------------------------------------------------------------
@@ -172,11 +174,15 @@ def test_cancel_then_retry_resumes_same_step(ex, clock):
     assert status(ex)['current_step'] == 2
 
 
-def test_injected_failure_exhausts_retries_then_ui_retry_succeeds(clock, store):
+def test_injected_failure_exhausts_retries_then_ui_retry_succeeds(clock, tips):
+    # max_retries counts re-dispatches after the first attempt: 1 + 3 = 4 failures to exhaust.
     ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
-                      anomaly_store=store, fail_steps={'pick': 3})
+                      tip_check=tips, fail_steps={'pick': 4})
     start(ex, GO, PICK, HOME)
-    advance(ex, clock, STEP_TIME + 3 * STEP_TIME + 1)
+    advance(ex, clock, STEP_TIME + 3 * STEP_TIME * 0.5)
+    s = status(ex)
+    assert (s['state'], s['retry_count']) == ('running', 3)  # 3 failed, last retry in flight
+    advance(ex, clock, STEP_TIME)
     s = status(ex)
     assert s['state'] == 'failed'
     assert s['current_step'] == 1
@@ -186,9 +192,9 @@ def test_injected_failure_exhausts_retries_then_ui_retry_succeeds(clock, store):
     assert status(ex)['state'] == 'success'
 
 
-def test_single_failure_shows_retry_count_then_recovers(clock, store):
+def test_single_failure_shows_retry_count_then_recovers(clock, tips):
     ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
-                      anomaly_store=store, fail_steps={'go_to': 1})
+                      tip_check=tips, fail_steps={'go_to': 1})
     start(ex, GO, HOME)
     advance(ex, clock, STEP_TIME + 0.2)
     s = status(ex)
@@ -209,18 +215,84 @@ def test_force_fail_and_force_success_act_on_current_step(ex, clock):
 
 # --- robot-side fakes -------------------------------------------------------------------------
 
-def test_ot2_step_attaches_one_recording_per_aspirate(ex, clock, store):
-    ot2 = {'name': 'ot2', 'parameters_json': {'steps': [
+ASPIRATE_A1 = {'action': 'aspirate', 'resource_name': 'tube_rack', 'well_indices': [0], 'volumes': [200]}
+ASPIRATE_A2 = {'action': 'aspirate', 'resource_name': 'tube_rack', 'well_indices': [3], 'volumes': [200]}
+
+
+def ot2(*aspirates):
+    return {'name': 'ot2', 'parameters_json': {'steps': [
         {'action': 'pick_up_tips', 'resource_name': 'tip_rack', 'well_indices': [0]},
-        {'action': 'aspirate', 'resource_name': 'tube_rack', 'well_indices': [0], 'volumes': [200]},
-        {'action': 'aspirate', 'resource_name': 'tube_rack', 'well_indices': [1], 'volumes': [200]},
+        *aspirates,
+        {'action': 'drop_tips'},
     ]}}
-    start(ex, ot2, HOME)
+
+
+def test_ot2_step_attaches_one_tip_check_per_aspirate(ex, clock):
+    start(ex, ot2(ASPIRATE_A1, ASPIRATE_A2), HOME)
     advance(ex, clock, STEP_TIME + 0.5)
     recs = status(ex)['recordings']
-    assert len(recs) == 2
-    assert all(store.result(r) is not None for r in recs)
-    assert json.loads(store.result(recs[1])['step'])['well_indices'] == [1]
+    assert [r['type'] for r in recs] == ['tip_check', 'tip_check']
+    assert len({r['id'] for r in recs}) == 2
+    assert [r['aspirate'] for r in recs] == [ASPIRATE_A1, ASPIRATE_A2]
+    assert [r['protocol_step'] for r in recs] == [1, 2]
+    assert all(r['step'] == 0 for r in recs)
+    first = recs[0]
+    assert first['status'] == 'done' and first['anomaly_detected'] is False
+    assert first['sample_count'] == 5 and len(first['samples']) == 5
+    assert first['p_tip_empty'] < first['threshold']
+    assert first['files']['crop'].startswith('/runs/')
+
+
+def test_clog_injection_flags_the_nth_tip_check_and_the_protocol_goes_on(clock):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
+                      tip_check=FakeTipCheck(clog_checks={2}))
+    start(ex, ot2(ASPIRATE_A1), ot2(ASPIRATE_A2), HOME)
+    advance(ex, clock, 3 * STEP_TIME + 1)
+    s = status(ex)
+    assert s['state'] == 'success'
+    assert [r['anomaly_detected'] for r in s['recordings']] == [False, True]
+    assert s['recordings'][1]['p_tip_empty'] >= s['recordings'][1]['threshold']
+
+
+def test_tip_check_service_down_is_reported_and_the_step_still_succeeds(clock):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
+                      tip_check=FakeTipCheck(error_checks={1}))
+    start(ex, ot2(ASPIRATE_A1, ASPIRATE_A2), HOME)
+    advance(ex, clock, STEP_TIME + 0.5)
+    s = status(ex)
+    assert s['current_step'] == 1
+    first, second = s['recordings']
+    assert first['status'] == 'error' and 'unreachable' in first['error']
+    assert second['status'] == 'done'
+
+
+def test_tip_check_down_for_every_check(clock):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
+                      tip_check=FakeTipCheck(down=True))
+    start(ex, ot2(ASPIRATE_A1))
+    advance(ex, clock, STEP_TIME + 0.5)
+    assert [r['status'] for r in status(ex)['recordings']] == ['error']
+
+
+def test_ot2_failure_after_the_aspirate_is_not_retried_and_needs_a_forced_retry(clock, tips):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock, tip_check=tips,
+                      fail_steps={'ot2': 1})
+    start(ex, ot2(ASPIRATE_A1), HOME, max_retries=3)
+    advance(ex, clock, STEP_TIME)
+    s = status(ex)
+    assert s['state'] == 'failed'
+    assert s['retry_count'] == 0
+    assert 'not retried' in s['error']
+    assert s['retry_needs_force'] is True
+    assert len(s['recordings']) == 1  # the aspirate happened and was checked before the failure
+    ex.handle('cmd/routine_executor/retry', '')
+    ex.step()
+    assert status(ex)['state'] == 'failed'
+    ex.handle('cmd/routine_executor/retry', '{"force": true}')
+    advance(ex, clock, 2 * STEP_TIME + 1)
+    s = status(ex)
+    assert s['state'] == 'success'
+    assert len(s['recordings']) == 2
 
 
 def test_manipulation_steps_publish_phases_under_robot_namespace(ex, clock):
@@ -236,41 +308,43 @@ def test_manipulation_steps_publish_phases_under_robot_namespace(ex, clock):
     assert 'SUCCESS' in planning
 
 
-# --- fake clog-detection service --------------------------------------------------------------
+# --- fake tip-check service (debug console's standalone check + the card's images) ----------
 
-def test_anomaly_job_progresses_to_done(clock):
-    store = FakeAnomalyStore(clock=clock)
-    store.add('c1', {'action': 'aspirate', 'resource_name': 'tube_rack', 'well_indices': [0]})
-    seen = []
-    for _ in range(40):
-        seen.append(store.result('c1')['status'])
-        clock.t += 0.5
-    assert seen[0] == 'recording'
-    assert 'queued' in seen and 'running' in seen
-    final = store.result('c1')
-    assert final['status'] == 'done' and final['anomaly_detected'] is False
+def _get(url, body=None):
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={'Content-Type': 'application/json'})
+    return urllib.request.urlopen(req)
 
 
-def test_anomaly_clog_injection_marks_nth_clip(clock):
-    store = FakeAnomalyStore(clock=clock, clog_clips={2})
-    store.add('a', {})
-    store.add('b', {})
-    clock.t += 60
-    assert store.result('a')['anomaly_detected'] is False
-    assert store.result('b')['anomaly_detected'] is True
-
-
-def test_anomaly_http_server_serves_results_with_cors(clock):
-    store = FakeAnomalyStore(clock=clock)
-    store.add('c1', {})
-    server = start_anomaly_server(store, host='127.0.0.1', port=0)
+def test_tip_check_http_server_answers_check_jobs_health_and_images():
+    server = start_tip_check_server(FakeTipCheck(), host='127.0.0.1', port=0)
     try:
         base = f'http://127.0.0.1:{server.server_address[1]}'
-        with urllib.request.urlopen(f'{base}/result/c1') as r:
+        with _get(f'{base}/check', {'step': 'debug tip check'}) as r:
             assert r.headers['Access-Control-Allow-Origin'] == '*'
-            assert json.loads(r.read())['clip_id'] == 'c1'
+            job = json.loads(r.read())
+        assert job['status'] == 'done'
+        assert 0 <= job['p_tip_empty'] <= 1
+        assert job['files']['crop'].startswith('/runs/')
+        with _get(f'{base}/jobs') as r:
+            assert any(j['clip_id'] == job['clip_id'] for j in json.loads(r.read()))
+        with _get(f'{base}/health') as r:
+            assert json.loads(r.read())['camera_present'] is True
+        with _get(base + job['files']['crop']) as r:
+            assert r.headers['Content-Type'] == 'image/png'
+            assert r.read().startswith(b'\x89PNG')
         with pytest.raises(urllib.error.HTTPError) as e:
-            urllib.request.urlopen(f'{base}/result/nope')
+            _get(f'{base}/nope')
         assert e.value.code == 404
+    finally:
+        server.shutdown()
+
+
+def test_down_tip_check_service_fails_its_http_checks():
+    server = start_tip_check_server(FakeTipCheck(down=True), host='127.0.0.1', port=0)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _get(f'http://127.0.0.1:{server.server_address[1]}/check', {})
+        assert e.value.code == 503
     finally:
         server.shutdown()

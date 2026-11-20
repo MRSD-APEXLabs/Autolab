@@ -1,64 +1,41 @@
-import React, { useCallback, useState } from 'react';
-import { getResult } from './shared/anomalyApi';
-import { verdict, stepLabel, TONE_CLASSES } from './shared/verdict';
-import usePolling from './shared/usePolling';
+import React, { useState } from 'react';
+import { tipCheckFileUrl } from './shared/tipCheckApi';
+import { aspirateLabel, tipCheckVerdict, TONE_CLASSES } from './shared/verdict';
 
-const POLL_MS = 5000;
-
-// Clog-detection verdicts for the clips recorded during the current/last run.
-export default function ClogCheckCard({ clipIds }) {
-  // clip_id -> { job } | { fetchError, unreachable }
-  const [results, setResults] = useState({});
+// Tip-check results the robot attached to the current/last run (status.recordings).
+// lab_machine_executive runs the check after each aspirate and the result arrives complete,
+// so nothing is polled; only the images are loaded from the tip-check service.
+export default function ClogCheckCard({ recordings = [] }) {
   const [expanded, setExpanded] = useState(null);
+  const checks = recordings.filter((r) => r && typeof r === 'object' && r.type === 'tip_check' && r.id);
+  if (checks.length === 0) return null;
 
-  const pendingIds = clipIds.filter((id) => !(results[id]?.job && verdict(results[id].job).terminal));
-
-  const poll = useCallback(() => {
-    pendingIds.forEach((id) => {
-      getResult(id)
-        .then((job) => setResults((prev) => ({ ...prev, [id]: { job } })))
-        .catch((e) =>
-          setResults((prev) => ({
-            ...prev,
-            [id]: { job: prev[id]?.job, fetchError: e.message, unreachable: !e.status },
-          }))
-        );
-    });
-  }, [pendingIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  usePolling(poll, POLL_MS, pendingIds.length > 0);
-
-  const verdicts = clipIds.map((id) => verdict(results[id]?.job));
+  const verdicts = checks.map(tipCheckVerdict);
   const counts = verdicts.reduce((acc, v) => ({ ...acc, [v.label]: (acc[v.label] || 0) + 1 }), {});
   const summary = Object.entries(counts).map(([label, n]) => `${n} ${label}`).join(', ');
-  const unreachable = clipIds.some((id) => results[id]?.unreachable);
 
   return (
     <div className="bg-white p-4 rounded-2xl shadow mb-8">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-gray-800">Clog check</h3>
         <span className="text-sm text-gray-500">
-          {clipIds.length} recording{clipIds.length === 1 ? '' : 's'} — {summary}
+          {checks.length} tip check{checks.length === 1 ? '' : 's'} — {summary}
         </span>
       </div>
-      {unreachable && (
-        <p className="text-xs text-amber-700 mb-2">Can't reach the clog-detection service.</p>
-      )}
       <ul className="divide-y">
-        {clipIds.map((id, i) => {
-          const entry = results[id];
-          const job = entry?.job;
+        {checks.map((r, i) => {
           const v = verdicts[i];
-          const open = expanded === id;
+          const open = expanded === r.id;
           return (
-            <li key={id} className="py-2">
+            <li key={r.id} className="py-2">
               <button
                 type="button"
-                onClick={() => setExpanded(open ? null : id)}
+                onClick={() => setExpanded(open ? null : r.id)}
                 className="w-full flex items-center justify-between gap-4 text-left"
               >
                 <span className="text-sm text-gray-700">
-                  Aspirate {i + 1}: {stepLabel(job, id)}
+                  Aspirate {i + 1}
+                  {Number.isInteger(r.step) ? ` (step ${r.step + 1})` : ''}: {aspirateLabel(r.aspirate)}
                 </span>
                 <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${TONE_CLASSES[v.tone]}`}>
                   {v.label}
@@ -67,10 +44,26 @@ export default function ClogCheckCard({ clipIds }) {
               </button>
               {open && (
                 <div className="mt-2 text-xs text-gray-600 space-y-1">
-                  <p className="font-mono">{id}</p>
-                  {job?.summary && <p>{job.summary}</p>}
-                  {job?.error && <p className="text-amber-700">{job.error}</p>}
-                  {entry?.fetchError && <p className="text-amber-700">Fetch: {entry.fetchError}</p>}
+                  {r.summary && <p>{r.summary}</p>}
+                  {Array.isArray(r.samples) && r.samples.length > 0 && (
+                    <p>
+                      Checks: {r.samples.map((p) => Number(p).toFixed(2)).join(', ')}
+                      {typeof r.threshold === 'number' ? ` (clog at ≥ ${r.threshold.toFixed(2)})` : ''}
+                    </p>
+                  )}
+                  {r.model && <p>Model: {r.model}</p>}
+                  {r.warning && <p className="text-amber-700">{r.warning}</p>}
+                  {r.error && <p className="text-amber-700">{r.error}</p>}
+                  {r.files?.crop && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <img src={tipCheckFileUrl(r.files.crop)} alt="Tip crop sent to the model"
+                        className="h-32 rounded border" />
+                      {r.files.preview && (
+                        <img src={tipCheckFileUrl(r.files.preview)} alt="L515 snapshot with the tip region"
+                          className="h-32 rounded border" />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </li>

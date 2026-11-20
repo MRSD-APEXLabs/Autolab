@@ -84,7 +84,7 @@ export default function TipCheckControls() {
       <h3 className="text-sm font-semibold text-gray-700 mb-1">Tip check (L515 + d3:4b)</h3>
       <p className="text-xs text-gray-600 mb-2">
         Runs d3:4b five times on snapshots of the held tip and averages the prediction probabilities.
-        Use it while OT-2 Part 1 holds the tip fully raised above tube A1.
+        Use it while the OT-2 holds a tip in view of the L515 (the robot checks every aspirate by itself).
       </p>
       <ServiceLine health={health} error={healthError} />
       <button type="button" onClick={onRun} disabled={busy || health?.busy}

@@ -1,36 +1,49 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ClogCheckCard from './ClogCheckCard';
+import { TIP_CHECK_URL } from './shared/tipCheckApi';
 
-function mockFetch(byId) {
-  global.fetch = jest.fn((url) => {
-    const id = url.split('/result/')[1];
-    const r = byId[id];
-    if (r instanceof Error) return Promise.reject(r);
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(r) });
-  });
-}
+const aspirate = { action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200] };
+const tip = (id, fields) => ({ type: 'tip_check', id, step: 4, protocol_step: 1, aspirate, ...fields });
+
+beforeEach(() => {
+  global.fetch = jest.fn();
+});
 
 afterEach(() => {
   delete global.fetch;
 });
 
-test('renders one row per clip with its verdict', async () => {
-  mockFetch({
-    c1: { clip_id: 'c1', status: 'done', anomaly_detected: false },
-    c2: { clip_id: 'c2', status: 'done', anomaly_detected: true, severity: 'high' },
-    c3: { clip_id: 'c3', status: 'running', stage: 'stage2' },
-  });
-  render(<ClogCheckCard clipIds={['c1', 'c2', 'c3']} />);
-  expect(await screen.findByText('OK')).toBeInTheDocument();
-  expect(await screen.findByText(/Clog suspected · high/)).toBeInTheDocument();
-  expect(await screen.findByText(/Analyzing… · stage2/)).toBeInTheDocument();
-  expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/result/c1'), expect.anything());
+test('shows one row per tip check with its verdict, never calling a service', () => {
+  render(<ClogCheckCard recordings={[
+    tip('r-1', { status: 'done', anomaly_detected: false, p_tip_empty: 0.08, threshold: 0.5 }),
+    tip('r-3', { status: 'done', anomaly_detected: true, p_tip_empty: 0.71, threshold: 0.5 }),
+    tip('r-5', { status: 'error', error: 'tip-check service unreachable at http://x:8110' }),
+  ]} />);
+  expect(screen.getByText('Liquid in tip · P(empty) 0.08')).toBeInTheDocument();
+  expect(screen.getByText('Clog suspected · P(empty) 0.71')).toBeInTheDocument();
+  expect(screen.getByText('Check failed')).toBeInTheDocument();
+  expect(screen.getAllByText(/tube_rack wells 0 · 200 µL/)).toHaveLength(3);
+  expect(screen.getByText(/3 tip checks/)).toBeInTheDocument();
+  expect(global.fetch).not.toHaveBeenCalled();
 });
 
-test('unreachable service shows no result', async () => {
-  mockFetch({ c1: new TypeError('Failed to fetch') });
-  render(<ClogCheckCard clipIds={['c1']} />);
-  expect(await screen.findByText(/Can't reach the clog-detection service/)).toBeInTheDocument();
-  expect(screen.getByText('No result')).toBeInTheDocument();
-  expect(screen.queryByText('OK')).not.toBeInTheDocument();
+test('expanding a row shows the samples, warning, error and the images from the tip-check service', () => {
+  render(<ClogCheckCard recordings={[
+    tip('r-1', {
+      status: 'done', anomaly_detected: true, p_tip_empty: 0.7, threshold: 0.5, samples: [0.6, 0.8],
+      summary: 'Average of 2 checks: tip looks empty (P(empty)=0.70)', warning: '1 of 2 checks reported a warning. blur',
+      files: { crop: '/runs/c1/crop.jpg', preview: '/runs/c1/preview.jpg' },
+    }),
+  ]} />);
+  fireEvent.click(screen.getByRole('button', { name: /aspirate/i }));
+  expect(screen.getByText(/Average of 2 checks/)).toBeInTheDocument();
+  expect(screen.getByText(/0\.60, 0\.80/)).toBeInTheDocument();
+  expect(screen.getByText(/reported a warning\. blur/)).toBeInTheDocument();
+  expect(screen.getByAltText(/tip crop/i)).toHaveAttribute('src', `${TIP_CHECK_URL}/runs/c1/crop.jpg`);
+  expect(screen.getByAltText(/snapshot/i)).toHaveAttribute('src', `${TIP_CHECK_URL}/runs/c1/preview.jpg`);
+});
+
+test('ignores entries that are not tip checks', () => {
+  const { container } = render(<ClogCheckCard recordings={['old-clip', { id: 'x' }]} />);
+  expect(container).toBeEmptyDOMElement();
 });

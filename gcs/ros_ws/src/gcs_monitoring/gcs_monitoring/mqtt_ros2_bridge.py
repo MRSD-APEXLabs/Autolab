@@ -58,7 +58,6 @@ from gcs_monitoring.camera_select import (
 )
 
 from gcs_monitoring.shaker_timeout import ShakerTimeout, validate as validate_shaker
-from gcs_monitoring.ot2_parts import Ot2PartsRunner, COMMAND_TOPIC, STATUS_TOPIC
 
 MQTT_HOST = os.environ.get('MQTT_HOST', 'localhost')
 MQTT_PORT = int(os.environ.get('MQTT_PORT', '1883'))
@@ -139,13 +138,17 @@ TYPED_CMD_TOPIC_MAP = {
 }
 
 
+# Every MQTT command topic the bridge subscribes to.
+ALL_CMD_TOPICS = (
+    list(STRING_CMD_TOPIC_MAP) + list(TYPED_CMD_TOPIC_MAP)
+    + [SELECT_CAMERA_TOPIC, JOG_TOPIC]
+)
+
+
 class MqttRos2Bridge(Node):
     def __init__(self, mqtt_client: mqtt.Client) -> None:
         super().__init__('mqtt_ros2_bridge')
         self._mqtt = mqtt_client
-        self._ot2_parts = Ot2PartsRunner(
-            lambda payload: self._mqtt.publish(STATUS_TOPIC, json.dumps(payload), qos=0, retain=True))
-
         self._string_pubs: dict = {
             ros2_topic: self.create_publisher(String, ros2_topic, 10)
             for ros2_topic in STRING_CMD_TOPIC_MAP.values()
@@ -174,9 +177,7 @@ class MqttRos2Bridge(Node):
         )
 
     def relay(self, mqtt_topic: str, payload: bytes) -> None:
-        if mqtt_topic == COMMAND_TOPIC:
-            self._ot2_parts.relay(payload)
-        elif mqtt_topic in STRING_CMD_TOPIC_MAP:
+        if mqtt_topic in STRING_CMD_TOPIC_MAP:
             self._relay_string(mqtt_topic, payload)
         elif mqtt_topic in TYPED_CMD_TOPIC_MAP:
             self._relay_typed(mqtt_topic, payload)
@@ -275,10 +276,7 @@ def main() -> None:
             time.sleep(2)
 
     node = MqttRos2Bridge(client)
-    all_cmd_topics = (
-        list(STRING_CMD_TOPIC_MAP) + list(TYPED_CMD_TOPIC_MAP)
-        + [SELECT_CAMERA_TOPIC, COMMAND_TOPIC, JOG_TOPIC]
-    )
+    all_cmd_topics = ALL_CMD_TOPICS
 
     def on_connect(_client, _userdata, _flags, rc):
         if rc != 0:

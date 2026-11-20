@@ -11,8 +11,11 @@ Stands in for everything behind the MQTT broker that the experiment flow needs:
                        their time_s), then succeeds or fails per --fail-step / --fail-rate.
 * manipulation exec. — pick/place steps publish ros2/<robot>/behavior/manipulation_phase and
                        ros2/planning_state like the real executive.
-* lab_machine exec.  — each aspirate in an ot2 step attaches a clog-detection clip_id.
-* clog detection     — fake HTTP service on :8100 (GET /result/<clip_id>) for the Clog check card.
+* lab_machine exec.  — each aspirate in an ot2 step attaches a finished tip-check result (five
+                       averaged checks), like lab_machine_executive; --clog / --tip-check-error /
+                       --tip-check-down inject outcomes. ot2 steps are never auto-retried.
+* tip-check service  — fake HTTP service on :8110 (/check, /jobs, /health, /runs/*.png) for the
+                       debug console's standalone check and the Clog check card's images.
 
 See README.md in this folder for how to run it alongside the UI dev server.
 """
@@ -22,10 +25,12 @@ import ast
 import importlib.util
 import json
 import random
+import struct
 import sys
 import threading
 import time
 import uuid
+import zlib
 from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -67,6 +72,8 @@ def load_step_specs(path=EXECUTOR_PKG / 'step_config.py'):
                 specs[key.value] = {
                     'required_params': ast.literal_eval(fields['required_params']),
                     'msg_type': ast.literal_eval(fields['msg_type']),
+                    'retryable': (ast.literal_eval(fields['retryable'])
+                                  if 'retryable' in fields else True),
                 }
             return specs
     raise RuntimeError(f'No STEPS dict found in {path}')
@@ -81,62 +88,90 @@ def _log(msg):
     print(f'[mock] {msg}', flush=True)
 
 
-class FakeAnomalyStore:
-    """Clog-detection jobs whose status advances with time: recording → queued → running → done."""
+def _png(width=64, height=48, rgb=(120, 160, 200)):
+    """A small solid-colour PNG, standing in for the tip crop / L515 snapshot."""
+    row = b'\x00' + bytes(rgb) * width
+    raw = row * height
 
-    RECORDING_S, QUEUED_S, RUNNING_S = 3.0, 2.0, 5.0
+    def chunk(kind, data):
+        return (struct.pack('>I', len(data)) + kind + data
+                + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
 
-    def __init__(self, clock=time.monotonic, clog_clips=()):
-        self._clock = clock
-        self._clog = set(clog_clips)  # 1-based clip numbers (across the whole session) to flag
-        self._jobs = {}
+
+class FakeTipCheck:
+    """The d3:4b tip check. result() is what lab_machine_executive publishes after an aspirate
+    (five checks averaged); check() is one POST /check for the debug console.
+
+    clog_checks / error_checks: 1-based numbers of the aspirate checks (across the session) that
+    come out as a clog / as "service unreachable". down: every check fails.
+    """
+
+    PASSES = 5
+    THRESHOLD = 0.5
+    MODEL = 'mock-d3:4b'
+
+    def __init__(self, clog_checks=(), error_checks=(), down=False):
+        self._clog = set(clog_checks)
+        self._error = set(error_checks)
+        self.down = down
+        self._n = 0
+        self._jobs = []
         self._lock = threading.Lock()
 
-    def add(self, clip_id, step):
-        with self._lock:
-            n = len(self._jobs) + 1
-            self._jobs[clip_id] = {'created': self._clock(), 'n': n, 'step': json.dumps(step)}
+    def _files(self, clip):
+        return {'crop': f'/runs/{clip}/crop.png', 'preview': f'/runs/{clip}/preview.png'}
 
-    def result(self, clip_id):
+    def result(self, aspirate):
         with self._lock:
-            job = self._jobs.get(clip_id)
-        if job is None:
+            self._n += 1
+            n = self._n
+        if self.down or n in self._error:
+            return {'status': 'error', 'error': 'mock: tip-check service unreachable at http://mock:8110',
+                    'sample_count': self.PASSES, 'samples_done': 0}
+        clog = n in self._clog
+        samples = [round((0.72 if clog else 0.05) + 0.01 * i, 3) for i in range(self.PASSES)]
+        mean = sum(samples) / self.PASSES
+        clip = f'mock-tip-{n}'
+        return {
+            'status': 'done', 'clip_id': clip, 'model': self.MODEL, 'threshold': self.THRESHOLD,
+            'aggregation': 'mean', 'sample_count': self.PASSES, 'samples': samples,
+            'p_tip_empty': round(mean, 4), 'p_tip_visible': 0.95, 'anomaly_detected': clog,
+            'confidence': round(mean if clog else 1 - mean, 4),
+            'summary': f'Average of {self.PASSES} checks: '
+                       f'{"tip looks empty" if clog else "liquid in tip"} (P(empty)={mean:.2f})',
+            'warning': None, 'error': None, 'files': self._files(clip),
+            'timings_s': {'total': 3.0}, 'mock': True,
+        }
+
+    def check(self, body):
+        """One POST /check (finished at once). Returns None when the service is down."""
+        if self.down:
             return None
-        elapsed = self._clock() - job['created']
-        out = {'clip_id': clip_id, 'step': job['step']}
-        t1 = self.RECORDING_S
-        t2 = t1 + self.QUEUED_S
-        t3 = t2 + self.RUNNING_S
-        if elapsed < t1:
-            out['status'] = 'recording'
-        elif elapsed < t2:
-            out.update(status='queued', queue_position=1)
-        elif elapsed < t3:
-            out.update(status='running',
-                       stage='extracting' if elapsed < (t2 + t3) / 2 else 'inference')
-        else:
-            clog = job['n'] in self._clog
-            out.update(status='done', anomaly_detected=clog,
-                       severity='moderate' if clog else None,
-                       summary='Mock: flow interrupted mid-aspirate' if clog
-                       else 'Mock: aspirate looked normal')
-        return out
+        with self._lock:
+            clip = f'mock-debug-{len(self._jobs) + 1}'
+            job = {'clip_id': clip, 'status': 'done', 'p_tip_empty': 0.06, 'p_tip_visible': 0.95,
+                   'threshold': self.THRESHOLD, 'model': self.MODEL, 'step': (body or {}).get('step'),
+                   'files': self._files(clip), 'timings_s': {'total': 0.6}, 'mock': True}
+            self._jobs.append(job)
+            return dict(job)
 
     def jobs(self):
         with self._lock:
-            ids = list(self._jobs)
-        return [self.result(i) for i in ids]
+            return [dict(j) for j in self._jobs]
 
 
-def start_anomaly_server(store, host='0.0.0.0', port=8100):
-    """Serve the fake clog-detection API in a daemon thread. Returns the server (call .shutdown())."""
+def start_tip_check_server(tips, host='0.0.0.0', port=8110):
+    """Serve the fake tip-check API in a daemon thread. Returns the server (call .shutdown())."""
+    image = _png()
 
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, code, body):
-            data = json.dumps(body).encode()
+        def _send(self, code, body, content_type='application/json'):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
             self.send_response(code)
             self._cors()
-            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -152,24 +187,30 @@ def start_anomaly_server(store, host='0.0.0.0', port=8100):
             self.end_headers()
 
         def do_GET(self):
-            if self.path.startswith('/result/'):
-                job = store.result(self.path[len('/result/'):])
-                if job is None:
-                    self._send(404, {'error': 'unknown clip_id'})
-                else:
-                    self._send(200, job)
-            elif self.path == '/jobs':
-                self._send(200, store.jobs())
+            if self.path == '/jobs':
+                self._send(200, tips.jobs())
             elif self.path == '/health':
-                self._send(200, {'ok': True, 'mock': True})
+                self._send(200, {'ok': not tips.down, 'camera_present': True,
+                                 'model_reachable': not tips.down, 'busy': False, 'mock': True})
+            elif self.path.startswith('/runs/') and self.path.endswith('.png'):
+                self._send(200, image, 'image/png')
             else:
                 self._send(404, {'error': 'not found'})
 
         def do_POST(self):
-            if self.path.startswith('/recording/'):
-                self._send(200, {'ok': True, 'mock': True})
-            else:
+            if self.path != '/check':
                 self._send(404, {'error': 'not found'})
+                return
+            length = int(self.headers.get('Content-Length') or 0)
+            try:
+                body = json.loads(self.rfile.read(length) or b'{}')
+            except json.JSONDecodeError:
+                body = {}
+            job = tips.check(body)
+            if job is None:
+                self._send(503, {'error': 'mock: model not reachable'})
+            else:
+                self._send(200, job)
 
         def log_message(self, *_args):
             pass
@@ -186,18 +227,19 @@ class MockExecutor:
     (called from one loop) does it. Status goes out via status_message().
     """
 
-    def __init__(self, specs, step_time=3.0, clock=time.monotonic, anomaly_store=None,
+    def __init__(self, specs, step_time=3.0, clock=time.monotonic, tip_check=None,
                  fail_steps=None, fail_rate=0.0, rng=None):
         self._specs = specs
+        self._no_retry = {name for name, spec in specs.items() if not spec.get('retryable', True)}
         self._step_time = step_time
         self._clock = clock
-        self._store = anomaly_store
+        self._tips = tip_check if tip_check is not None else FakeTipCheck()
         self._fail_steps = dict(fail_steps or {})  # step name -> fail the first N attempts
         self._fail_rate = fail_rate
         self._rng = rng or random.Random()
         self._queue = deque()
         self._lock = threading.Lock()
-        self._sm = RoutineStateMachine([])
+        self._sm = RoutineStateMachine([], no_retry=self._no_retry)
         self._robot = 'robot_1'
         self._attempts = defaultdict(int)  # step index -> attempts dispatched this run
         self._active = None
@@ -277,9 +319,16 @@ class MockExecutor:
             else:
                 _log(f'resume received but state is {self._sm.state}')
         elif cmd == 'retry':
-            if self._sm.retry():
+            try:
+                force = bool(payload) and json.loads(payload).get('force') is True
+            except (json.JSONDecodeError, AttributeError):
+                force = False
+            if self._sm.retry(force=force):
                 _log(f'retrying from step {self._sm.current_step_idx + 1} '
                      f'"{self._sm.current_step_name()}"')
+            elif self._sm.to_dict()['retry_needs_force']:
+                _log(f'retry refused: "{self._sm.current_step_name()}" handles liquid; '
+                     'send {"force": true}')
             else:
                 _log(f'retry received but state is {self._sm.state}')
         else:
@@ -308,7 +357,8 @@ class MockExecutor:
                 _log(f'ERROR step "{s["name"]}" missing required params: {missing}')
                 return
         self._robot = routine.get('robot', 'robot_1')
-        self._sm = RoutineStateMachine(steps, max_retries=int(routine.get('max_retries', 3)))
+        self._sm = RoutineStateMachine(steps, max_retries=int(routine.get('max_retries', 3)),
+                                       no_retry=self._no_retry)
         self._attempts.clear()
         self._active = None
         self._sm.start()
@@ -329,14 +379,18 @@ class MockExecutor:
                     else self._step_time)
         fail = name != 'wait' and (attempt <= self._fail_steps.get(name, 0)
                                    or self._rng.random() < self._fail_rate)
-        clips = []
+        clips = []  # (time into the step, protocol step index, aspirate) -> one tip check each
         if name == 'ot2':
-            aspirates = [a for a in _ot2_actions(step) if a.get('action') == 'aspirate']
-            clips = [((k + 1) / (len(aspirates) + 1) * duration, a)
-                     for k, a in enumerate(aspirates)]
+            actions = _ot2_actions(step)
+            aspirates = [(k, a) for k, a in enumerate(actions) if a.get('action') == 'aspirate']
+            clips = [((n + 1) / (len(aspirates) + 1) * duration, k, a)
+                     for n, (k, a) in enumerate(aspirates)]
+        finish_at = duration * FAIL_AT_FRACTION if fail else duration
+        if fail and clips:  # an injected OT-2 failure comes after the aspirates (tip may hold liquid)
+            finish_at = (clips[-1][0] + duration) / 2
         self._active = {
             'idx': idx, 'name': name, 'started': now, 'duration': duration,
-            'finish_at': duration * FAIL_AT_FRACTION if fail else duration,
+            'finish_at': finish_at,
             'outcome': 'fail' if fail else 'success', 'clips': clips,
         }
         _log(f'step {idx + 1}/{len(self._sm.steps)} "{name}" dispatched '
@@ -348,8 +402,8 @@ class MockExecutor:
             return
         elapsed = now - act['started']
         while act['clips'] and act['clips'][0][0] <= elapsed:
-            _, action = act['clips'].pop(0)
-            self._add_clip(action)
+            _, k, action = act['clips'].pop(0)
+            self._add_tip_check(k, action)
         if act['name'] in MANIP_STEPS:
             phase = _manip_phase(elapsed / act['duration'] if act['duration'] else 1.0)
             if phase != 'PLANNING' and act.get('planned') is None and elapsed > 0:
@@ -365,24 +419,26 @@ class MockExecutor:
             return
         self._active = None
         if outcome == 'success':
-            for _, action in act['clips']:  # forced early: still attach the remaining aspirates
-                self._add_clip(action)
+            for _, k, action in act['clips']:  # forced early: still check the remaining aspirates
+                self._add_tip_check(k, action)
             self._sm.on_success()
             _log(f'step "{act["name"]}" succeeded')
         else:
             if act['name'] in MANIP_STEPS:
                 out.append((PLANNING_STATE_TOPIC, _ros_string('ERROR')))
             self._sm.on_failure()
-            _log(f'step "{act["name"]}" FAILED (attempt {self._sm.retry_count}/'
-                 f'{self._sm.max_retries}) → state={self._sm.state}')
+            _log(f'step "{act["name"]}" FAILED (retry {self._sm.retry_count}/'
+                 f'{self._sm.max_retries}; state={self._sm.state})')
 
-    def _add_clip(self, action):
-        clip_id = f'mock-{uuid.uuid4().hex[:8]}'
-        if self._store is not None:
-            self._store.add(clip_id, action)
-        if self._sm.add_recording(clip_id):
-            _log(f'attached clog-detection clip {clip_id} ({action.get("resource_name")} '
-                 f'wells {action.get("well_indices")})')
+    def _add_tip_check(self, protocol_step, action):
+        result = {**self._tips.result(action), 'type': 'tip_check',
+                  'id': f'mock-{uuid.uuid4().hex[:8]}-{protocol_step}',
+                  'protocol_step': protocol_step, 'aspirate': action}
+        if self._sm.add_recording(result):
+            verdict = (result.get('error') if result['status'] == 'error'
+                       else 'CLOG' if result['anomaly_detected'] else 'liquid in tip')
+            _log(f'tip check after aspirate ({action.get("resource_name")} '
+                 f'wells {action.get("well_indices")}): {verdict}')
 
     def _publish_phase(self, now, out):
         act = self._active
@@ -468,22 +524,28 @@ def main():
                    help='seconds each non-wait step takes (default 3)')
     p.add_argument('--fail-step', action='append', metavar='NAME[:N]',
                    help='fail the first N attempts of every NAME step (no N = always fail). '
-                        'e.g. --fail-step pick:3 exhausts max_retries=3, then a UI retry succeeds')
+                        'max_retries counts re-dispatches after the first attempt, so '
+                        '--fail-step pick:4 exhausts max_retries=3, then a UI retry succeeds')
     p.add_argument('--fail-rate', type=float, default=0.0, help='random failure probability per attempt')
     p.add_argument('--seed', type=int, help='seed for --fail-rate')
     p.add_argument('--clog', type=int, action='append', default=[], metavar='N',
-                   help='flag the Nth clip of the session as a suspected clog (repeatable)')
-    p.add_argument('--anomaly-port', type=int, default=8100)
-    p.add_argument('--no-anomaly', action='store_true',
-                   help="don't start the fake clog service (tests the 'unreachable' banner)")
+                   help='the Nth tip check of the session (one per aspirate) is a clog (repeatable)')
+    p.add_argument('--tip-check-error', type=int, action='append', default=[], metavar='N',
+                   help='the Nth tip check reports the service unreachable (repeatable)')
+    p.add_argument('--tip-check-down', action='store_true',
+                   help='every tip check fails, and the fake :8110 answers /check with 503')
+    p.add_argument('--tip-check-port', type=int, default=8110)
+    p.add_argument('--no-tip-check-server', action='store_true',
+                   help="don't start the fake :8110 (debug check and card images unreachable)")
     args = p.parse_args()
 
-    store = FakeAnomalyStore(clog_clips=args.clog)
-    if not args.no_anomaly:
-        start_anomaly_server(store, port=args.anomaly_port)
-        _log(f'fake clog-detection service on http://0.0.0.0:{args.anomaly_port}')
+    tips = FakeTipCheck(clog_checks=args.clog, error_checks=args.tip_check_error,
+                        down=args.tip_check_down)
+    if not args.no_tip_check_server:
+        start_tip_check_server(tips, port=args.tip_check_port)
+        _log(f'fake tip-check service on http://0.0.0.0:{args.tip_check_port}')
 
-    ex = MockExecutor(load_step_specs(), step_time=args.step_time, anomaly_store=store,
+    ex = MockExecutor(load_step_specs(), step_time=args.step_time, tip_check=tips,
                       fail_steps=_parse_fail_steps(args.fail_step), fail_rate=args.fail_rate,
                       rng=random.Random(args.seed))
 

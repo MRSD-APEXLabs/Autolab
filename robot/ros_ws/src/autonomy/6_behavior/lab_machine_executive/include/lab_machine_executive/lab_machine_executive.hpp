@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <behavior_tree/behavior_tree.hpp>
+#include <lab_machine_executive/tip_check.hpp>
 #include <behavior_tree_msgs/msg/lab_machine_command.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -43,19 +44,20 @@ class LabMachineExecutive : public rclcpp::Node {
     bool ot2_terminal_;            // true once success/failure set; cleared on deactivation
     std::future<bool> pending_http_; // in-flight HTTP call
     bool http_in_flight_;
+    std::string ot2_run_id_;       // names this protocol run's tip-check results
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;
     std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
-    std::string anomaly_base_url_; // clog-detection service; empty disables recording
+    lab_machine::TipCheckConfig tip_check_cfg_;  // d3:4b tip check after each aspirate
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::LabMachineCommand>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
-    // {"clip_id", "step"} per recorded aspirate; routine_executor attaches it to the run
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr anomaly_recording_pub_;
+    // One tip-check result (JSON) per aspirate; routine_executor attaches it to the run
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr tip_check_pub_;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg);
@@ -64,7 +66,8 @@ class LabMachineExecutive : public rclcpp::Node {
     // ── Helpers ───────────────────────────────────────────────────────────────
     void tick_ot2();
     void tick_shaker();
-    bool dispatch_ot2_step(const nlohmann::json& step);
+    bool dispatch_ot2_step(const nlohmann::json& step, int index);
+    nlohmann::json run_tip_check(const std::string& label);
 
     // Static HTTP helper — runs in std::async thread
     bool connect_ot2();

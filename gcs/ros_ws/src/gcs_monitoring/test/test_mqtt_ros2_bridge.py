@@ -97,3 +97,13 @@ def test_build_shaker_command_defaults_wait_time_to_zero():
 def test_routine_executor_controls_are_relayed():
     for cmd in ('start_routine_cmd', 'cancel', 'pause', 'resume', 'retry'):
         assert STRING_CMD_TOPIC_MAP[f'cmd/routine_executor/{cmd}'] == f'/routine_executor/{cmd}'
+
+
+def test_ot2_runs_only_through_the_routine_executor():
+    # OT-2 parts and rail lights went away; OT-2 work is an `ot2` routine step now.
+    import importlib.util
+    from gcs_monitoring.mqtt_ros2_bridge import ALL_CMD_TOPICS
+    assert 'cmd/routine_executor/start_routine_cmd' in ALL_CMD_TOPICS
+    assert not any('ot2_parts' in t or 'ot2_lights' in t for t in ALL_CMD_TOPICS)
+    for module in ('ot2_parts', 'ot2_part1', 'ot2_part2', 'ot2_cleanup', 'ot2_lights'):
+        assert importlib.util.find_spec(f'gcs_monitoring.{module}') is None, module

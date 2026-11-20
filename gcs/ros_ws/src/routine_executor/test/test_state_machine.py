@@ -299,50 +299,66 @@ def _running_sm():
     return sm
 
 
+def tip(check_id, **fields):
+    return {'type': 'tip_check', 'id': check_id, **fields}
+
+
 def test_recordings_empty_on_new():
     assert RoutineStateMachine([{'name': 'a'}]).recordings == []
 
 
-def test_add_recording_while_running():
+def test_add_recording_while_running_tags_the_routine_step():
     sm = _running_sm()
-    assert sm.add_recording('c1') is True
+    assert sm.add_recording(tip('c1')) is True
+    sm.on_success()
     sm.pause()
-    assert sm.add_recording('c2') is True
-    assert sm.recordings == ['c1', 'c2']
+    assert sm.add_recording(tip('c2', anomaly_detected=True)) is True
+    assert sm.recordings == [
+        {'type': 'tip_check', 'id': 'c1', 'step': 0},
+        {'type': 'tip_check', 'id': 'c2', 'anomaly_detected': True, 'step': 1},
+    ]
 
 
 def test_recording_ignored_when_inactive():
     idle = RoutineStateMachine([{'name': 'a'}])
-    assert idle.add_recording('c1') is False
+    assert idle.add_recording(tip('c1')) is False
     assert idle.recordings == []
     done = RoutineStateMachine([{'name': 'a'}])
     done.start()
     done.on_success()
     assert done.state == 'success'
-    assert done.add_recording('c2') is False
+    assert done.add_recording(tip('c2')) is False
     assert done.recordings == []
 
 
-def test_recording_dedup():
+def test_recording_without_id_or_type_is_ignored():
     sm = _running_sm()
-    sm.add_recording('c1')
+    assert sm.add_recording({'type': 'tip_check'}) is False
+    assert sm.add_recording({'id': 'c1'}) is False
     assert sm.add_recording('c1') is False
-    assert sm.recordings == ['c1']
+    assert sm.recordings == []
+
+
+def test_recording_dedup_by_id():
+    sm = _running_sm()
+    sm.add_recording(tip('c1'))
+    assert sm.add_recording(tip('c1', status='error')) is False
+    assert [r['id'] for r in sm.recordings] == ['c1']
 
 
 def test_recordings_kept_after_success():
     sm = _running_sm()
-    sm.add_recording('c1')
+    sm.add_recording(tip('c1'))
     sm.on_success()
     sm.on_success()
     assert sm.state == 'success'
-    assert sm.recordings == ['c1']
+    assert [r['id'] for r in sm.recordings] == ['c1']
 
 
 def test_to_dict_has_recordings():
     sm = _running_sm()
-    sm.add_recording('c1')
-    assert sm.to_dict()['recordings'] == ['c1']
+    sm.add_recording(tip('c1'))
+    assert sm.to_dict()['recordings'] == [{'type': 'tip_check', 'id': 'c1', 'step': 0}]
 
 
 def _fail_second_step(sm):
@@ -376,10 +392,10 @@ def test_retry_after_cancel_redispatches_cancelled_step():
 def test_retry_keeps_recordings_of_the_run():
     sm = make_sm()
     sm.start()
-    sm.add_recording('clip_1')
+    sm.add_recording(tip('clip_1'))
     sm.cancel()
     sm.retry()
-    assert sm.recordings == ['clip_1']
+    assert [r['id'] for r in sm.recordings] == ['clip_1']
 
 
 def test_retry_only_from_failed():
@@ -394,3 +410,68 @@ def test_retry_only_from_failed():
     sm.on_success()
     assert sm.retry() is False
     assert sm.state == 'success'
+
+
+# ── Steps that must never be re-sent (liquid handling) ─────────────────────────
+
+def _ot2_routine(max_retries=3):
+    return RoutineStateMachine(
+        [{'name': 'go_to', 'target_machine': 'ot2'}, {'name': 'ot2'}, {'name': 'home'}],
+        max_retries=max_retries, no_retry={'ot2'})
+
+
+def test_failed_no_retry_step_fails_the_run_without_redispatch():
+    sm = _ot2_routine()
+    sm.start()
+    sm.acknowledge_dispatch()
+    sm.on_success()
+    sm.acknowledge_dispatch()
+    sm.on_failure()
+    assert sm.state == 'failed'
+    assert sm.needs_dispatch is False
+    assert sm.retry_count == 0
+    assert sm.current_step_name() == 'ot2'
+    assert 'not retried' in sm.error
+    assert 'liquid' in sm.error
+
+
+def test_other_steps_still_retry_when_some_steps_are_no_retry():
+    sm = _ot2_routine()
+    sm.start()
+    sm.acknowledge_dispatch()
+    sm.on_failure()
+    assert sm.state == 'running'
+    assert sm.retry_count == 1
+    assert sm.needs_dispatch is True
+
+
+def test_operator_retry_of_no_retry_step_needs_force():
+    sm = _ot2_routine()
+    sm.start()
+    sm.on_success()
+    sm.on_failure()
+    assert sm.to_dict()['retry_needs_force'] is True
+    assert sm.retry() is False
+    assert sm.state == 'failed'
+    assert sm.retry(force=True) is True
+    assert sm.state == 'running'
+    assert sm.current_step_name() == 'ot2'
+    assert sm.to_dict()['retry_needs_force'] is False
+
+
+def test_operator_retry_after_cancel_during_no_retry_step_needs_force():
+    sm = _ot2_routine()
+    sm.start()
+    sm.on_success()
+    sm.cancel()
+    assert sm.retry() is False
+    assert sm.retry(force=True) is True
+
+
+def test_retry_needs_force_false_for_ordinary_failed_step():
+    sm = _ot2_routine(max_retries=0)
+    sm.start()
+    sm.on_failure()
+    assert sm.state == 'failed'
+    assert sm.to_dict()['retry_needs_force'] is False
+    assert sm.retry() is True

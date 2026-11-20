@@ -18,6 +18,9 @@ STEP_MSG_CLASSES = {
 
 NAV_CANCEL_TOPIC = '/nav/cancel'
 
+# Steps whose failure ends the run (never re-dispatched); operator retry needs force.
+NO_RETRY_STEPS = frozenset(name for name, cfg in STEPS.items() if not cfg.get('retryable', True))
+
 STATUS_QOS = rclpy.qos.QoSProfile(
     reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
     durability=rclpy.qos.DurabilityPolicy.VOLATILE,
@@ -61,7 +64,7 @@ class RoutineExecutorNode(Node):
         self._status_subs: dict = {}  # step_name -> subscription
         self._setup_status_subscriptions(self._robot)
 
-        # Clog-detection clip_ids published by lab_machine_executive per aspirate
+        # Tip-check results published by lab_machine_executive after each aspirate
         self._recording_sub = None
         self._setup_recording_subscription(self._robot)
 
@@ -92,16 +95,19 @@ class RoutineExecutorNode(Node):
         if self._recording_sub is not None:
             self.destroy_subscription(self._recording_sub)
         self._recording_sub = self.create_subscription(
-            String, f'/{robot}/behavior/anomaly_recording', self._on_recording, 10)
+            String, f'/{robot}/behavior/tip_check_result', self._on_tip_check_result, 10)
 
-    def _on_recording(self, msg: String) -> None:
+    def _on_tip_check_result(self, msg: String) -> None:
         try:
-            clip_id = json.loads(msg.data).get('clip_id')
-        except (json.JSONDecodeError, AttributeError) as e:
-            self.get_logger().warn(f'Malformed anomaly_recording message: {e}')
+            result = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f'Malformed tip_check_result message: {e}')
             return
-        if self._sm.add_recording(clip_id):
-            self.get_logger().info(f'Attached clog-detection clip {clip_id} to this run')
+        if not isinstance(result, dict):
+            self.get_logger().warn('Malformed tip_check_result message: not an object')
+            return
+        if self._sm.add_recording(result):
+            self.get_logger().info(f'Attached tip check {result.get("id")} to this run')
 
     def _get_cmd_pub(self, robot: str, topic_suffix: str, msg_type):
         key = (robot, topic_suffix)
@@ -158,7 +164,7 @@ class RoutineExecutorNode(Node):
             self._setup_status_subscriptions(robot)
             self._setup_recording_subscription(robot)
 
-        self._sm = RoutineStateMachine(steps, max_retries=max_retries)
+        self._sm = RoutineStateMachine(steps, max_retries=max_retries, no_retry=NO_RETRY_STEPS)
         self._listening = False
         self._seen_running = False
         self._sm.start()
@@ -206,13 +212,22 @@ class RoutineExecutorNode(Node):
             self.get_logger().warn(f'Resume received but state is {self._sm.state}')
 
     def _on_retry_cmd(self, msg: String) -> None:
-        if self._sm.retry():
+        # Payload '' or {"force": true}; force restarts a no-retry (liquid-handling) step.
+        try:
+            force = json.loads(msg.data).get('force') is True if msg.data else False
+        except (json.JSONDecodeError, AttributeError):
+            force = False
+        if self._sm.retry(force=force):
             self._listening = False
             self._seen_running = False
             self.get_logger().info(
                 f'Retrying routine from step {self._sm.current_step_idx + 1} '
                 f'"{self._sm.current_step_name()}"'
             )
+        elif self._sm.to_dict()['retry_needs_force']:
+            self.get_logger().warn(
+                f'Retry refused: step "{self._sm.current_step_name()}" handles liquid; '
+                'send {"force": true} after inspecting the machine')
         else:
             self.get_logger().warn(f'Retry received but state is {self._sm.state}')
 

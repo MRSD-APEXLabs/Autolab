@@ -83,6 +83,7 @@ function formatExecPayload(payload) {
 export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
   const [retryPending, setRetryPending] = useState(false);
+  const [confirmForce, setConfirmForce] = useState(false);
   const [connected, setConnected] = useState(false);
   const [executorStatus, setExecutorStatus] = useState({});
   const clientRef = useRef(null);
@@ -100,7 +101,13 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   }
 
   function handleRetry() {
-    clientRef.current?.publish(RETRY_TOPIC, '');
+    // A liquid-handling step is never re-sent without the operator confirming the machine is safe.
+    if (status?.retry_needs_force && !confirmForce) {
+      setConfirmForce(true);
+      return;
+    }
+    clientRef.current?.publish(RETRY_TOPIC, status?.retry_needs_force ? JSON.stringify({ force: true }) : '');
+    setConfirmForce(false);
     setRetryPending(true);
   }
 
@@ -155,7 +162,10 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
 
   // The executor left "failed": the retry went through.
   useEffect(() => {
-    if (state !== "failed") setRetryPending(false);
+    if (state !== "failed") {
+      setRetryPending(false);
+      setConfirmForce(false);
+    }
   }, [state]);
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
@@ -305,7 +315,7 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
       )}
 
       {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
-      {status?.recordings?.length > 0 && <ClogCheckCard clipIds={status.recordings} />}
+      {status?.recordings?.length > 0 && <ClogCheckCard recordings={status.recordings} />}
 
       {/* Active Step Card */}
       {status && (state === "running" || state === "paused") && status.current_step_name && (
@@ -367,6 +377,12 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
           <h3 className="font-semibold mb-1">Routine Failed</h3>
           <p className="text-sm">{status.error ?? "Unknown error"}</p>
+          {canRetry && confirmForce && (
+            <p className="text-sm mt-3 font-medium">
+              This step handles liquid and was not retried automatically: the tip may still hold liquid.
+              Check the OT-2 before running the step again.
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             {canRetry && (
               <button
@@ -376,6 +392,8 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
               >
                 {retryPending
                   ? "Retrying…"
+                  : confirmForce
+                  ? "I've inspected the OT-2 — retry"
                   : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
               </button>
             )}

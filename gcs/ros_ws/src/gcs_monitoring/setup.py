@@ -24,7 +24,6 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'ot2_lights = gcs_monitoring.ot2_lights:main',
             'ros2_mqtt_bridge = gcs_monitoring.ros2_mqtt_bridge:main',
             'mqtt_ros2_bridge = gcs_monitoring.mqtt_ros2_bridge:main',
         ],

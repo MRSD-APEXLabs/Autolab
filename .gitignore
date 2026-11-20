@@ -11,6 +11,9 @@ output.txt
 robot/ros_ws_nav/
 robot/ros_ws/src/autonomy/7_manipulation/act_inference/**/*.jpg
 
+# graphify knowledge graph output (local, rebuilt by git hooks)
+graphify-out/
+
 # Local runtime state, recordings, and backups
 /gcs/ot2_state/
 /behavior_debug_*/

@@ -92,8 +92,22 @@ export default function AnomalyPanel() {
   return (
     <section className="border border-gray-200 rounded-xl p-4 bg-white md:col-span-2">
       <h2 className="font-semibold text-gray-800 mb-1">Clog Detection</h2>
-      <TipCheckControls />
-      <h3 className="text-sm font-semibold text-gray-700 mb-1">O-VAD pipeline service</h3>
+
+      <section aria-labelledby="clog-tip-check" className="mb-4">
+        <h3 id="clog-tip-check" className="text-sm font-semibold text-gray-800 mb-1">
+          Tip check (d3:4b, :8110)
+        </h3>
+        <p className="text-xs text-gray-600 mb-2">
+          Runs after every OT-2 aspirate on the robot; this check runs it from the browser on demand.
+        </p>
+        <TipCheckControls />
+      </section>
+
+      <section aria-labelledby="clog-ovad" className="border-t pt-3">
+      <h3 id="clog-ovad" className="text-sm font-semibold text-gray-800 mb-1">O-VAD pipeline (:8100)</h3>
+      <p className="text-xs text-gray-600 mb-2">
+        The earlier video pipeline. Aspirates are no longer recorded automatically.
+      </p>
       <HealthLine health={health} error={healthError} />
 
       <div className="mb-3">
@@ -170,6 +184,7 @@ export default function AnomalyPanel() {
           </table>
         </div>
       )}
+      </section>
     </section>
   );
 }

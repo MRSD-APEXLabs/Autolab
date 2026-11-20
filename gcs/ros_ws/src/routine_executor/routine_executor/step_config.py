@@ -16,6 +16,7 @@ def make_pose_stamped(x: float, y: float, yaw: float) -> PoseStamped:
     return pose
 
 
+# 'retryable' (default True): False means a failure ends the run instead of re-dispatching.
 # What stops a step's action on the robot when the routine is cancelled: 'stop' returns (topic, msg).
 # A topic without a leading '/' is under /<robot>/, like publish_topic; /nav/cancel is nav_api's own.
 def _stop_manipulation():
@@ -99,6 +100,9 @@ STEPS = {
             parameters_json=params['parameters_json'] if isinstance(params['parameters_json'], str) else json.dumps(params['parameters_json']),
         ),
         'watch_topic': 'behavior/execute_ot2_protocol_status',
+        # Liquid handling: never re-sent automatically (a second send could aspirate twice);
+        # an operator retry needs force. No 'stop': a cancelled run lets the protocol finish.
+        'retryable': False,
     },
     'wait': {
         'msg_type': 'wait',

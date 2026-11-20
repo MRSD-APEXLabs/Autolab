@@ -155,3 +155,30 @@ test('an idle executor that still has steps offers new experiment and home', () 
   fireEvent.click(screen.getByRole('button', { name: /back to home/i }));
   expect(screen.getByText(/SYSTEM READY/i)).toBeInTheDocument();
 });
+
+test('a failed liquid-handling step needs a confirmed, forced retry', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('connect');
+  emit('message', STATUS, routineStatus('failed', {
+    steps: [{ name: 'go_to' }, { name: 'ot2' }], current_step: 1, current_step_name: null,
+    error: "Step 'ot2' failed and was not retried", retry_needs_force: true,
+  }));
+  fireEvent.click(screen.getByRole('button', { name: /retry from step 2/i }));
+  expect(published('cmd/routine_executor/retry')).toHaveLength(0);
+  expect(screen.getByText(/may still hold liquid/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /inspected.*retry/i }));
+  const sent = published('cmd/routine_executor/retry');
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0][1])).toEqual({ force: true });
+});
+
+test('tip-check results of the run show in the clog check card', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('running', {
+    recordings: [{ type: 'tip_check', id: 'r-1', step: 0, status: 'done', anomaly_detected: true, p_tip_empty: 0.8 }],
+  }));
+  expect(screen.getByText('Clog check')).toBeInTheDocument();
+  expect(screen.getByText('Clog suspected · P(empty) 0.80')).toBeInTheDocument();
+});

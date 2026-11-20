@@ -1,7 +1,8 @@
 // HTTP client for the d3:4b tip-check service (vlm_clog/clog_service.py on the
 // PC with the L515 camera, mrsd-lab-cmptr3). One POST /check takes an L515
-// snapshot, crops the pipette tip (where OT-2 Part 1 holds it, fully raised above
-// tube A1) and asks d3:4b on p5090 whether it is empty.
+// snapshot, crops the pipette tip and asks d3:4b on p5090 whether it is empty.
+// lab_machine_executive runs the same five-check average after every aspirate
+// (src/tip_check.cpp); keep the two in step. This copy serves the debug console.
 // REACT_APP_TIP_CHECK_URL overrides the address.
 import { requestAt } from './anomalyApi';
 

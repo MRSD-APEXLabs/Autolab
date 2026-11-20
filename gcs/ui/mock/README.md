@@ -7,13 +7,18 @@ clog check) in the UI **without the robot, ROS, or the GCS container**.
 
 | Real component | What the mock does |
 |---|---|
-| `routine_executor` (GCS) | Same MQTT topics (`cmd/routine_executor/*` in, `ros2/routine_executor/status` out at 1 Hz, `{"data": "<json>"}` envelope). Uses the **real** `RoutineStateMachine`, and reads the step names / required params straight from `step_config.py`, so validation, pause, cancel and retry behave like prod. |
+| `routine_executor` (GCS) | Same MQTT topics (`cmd/routine_executor/*` in, `ros2/routine_executor/status` out at 1 Hz, `{"data": "<json>"}` envelope). Uses the **real** `RoutineStateMachine`, and reads the step names / required params / `retryable` straight from `step_config.py`, so validation, pause, cancel and retry behave like prod: a failed `ot2` step is never auto-retried, and a Retry of it needs `{"force": true}`. |
 | Robot / behavior tree | Each step "runs" for `--step-time` s (`wait` uses its `time_s`), then succeeds or fails. Like prod, **pause doesn't stop the current step**, it holds the next one. |
 | `manipulation_executive` | `pick` / `place` / `pick_base` / `place_base` publish `ros2/<robot>/behavior/manipulation_phase` (SELECTING_CAMERA → PLANNING → RUNNING_ACT → SERVOING → PLANNING_SAFE) and `ros2/planning_state` (SUCCESS / ERROR). |
-| `lab_machine_executive` | Each `aspirate` in an `ot2` step attaches a clog-detection clip to `status.recordings`. |
-| Clog-detection service (:8100) | Fake HTTP API. Each clip goes recording → queued → running → done over ~10 s. |
+| `lab_machine_executive` | Each `aspirate` in an `ot2` step attaches a finished tip-check result (`type: "tip_check"`, five averaged checks) to `status.recordings`. A clog or a failed check never fails the step. |
+| Tip-check service (:8110) | Fake HTTP API: `POST /check` (one check, finished at once), `GET /jobs`, `GET /health`, and placeholder images under `/runs/…png` for the Clog check card. |
 
-Not mocked: camera streams (:8002) and the camera hub, so the camera panel shows offline.
+Not mocked: camera streams and the camera hub, so the camera panel shows offline. The UI now
+streams from `http://192.168.10.3:8002` unless `REACT_APP_CAMERA_STREAM_BASE` is set; off the
+robot LAN that request just times out.
+
+On cancel, the real executor now also stops the step on the robot (`ManipulationCommand(type='cancel')`
+or `/nav/cancel`). The mock just drops the running step, which looks the same from the UI.
 
 ## Run it
 
@@ -26,8 +31,8 @@ docker run --rm --name mock-mosquitto -p 1883:1883 -p 9001:9001 \
 # 2. Mock backend (once: pip3 install paho-mqtt)
 python3 gcs/ui/mock/mock_executor.py
 
-# 3. UI dev server
-cd gcs/ui && npm start        # http://localhost:3000
+# 3. UI dev server, pointed at the fake tip-check service for images and the debug check
+cd gcs/ui && REACT_APP_TIP_CHECK_URL=http://localhost:8110 npm start   # http://localhost:3000
 ```
 
 Then click through the welcome screen, edit the routine if you like, and press Continue.
@@ -38,11 +43,13 @@ Then click through the welcome screen, edit the routine if you like, and press C
 |---|---|
 | Happy path, quick | `--step-time 1` |
 | One failure, then auto-retry succeeds ("Retry 1 of 3") | `--fail-step pick:1` |
-| Retries exhausted → Failed card → **Retry from step N** succeeds | `--fail-step pick:3` (matches `max_retries: 3`) |
+| Retries exhausted → Failed card → **Retry from step N** succeeds | `--fail-step pick:4` (first attempt + `max_retries: 3` re-dispatches) |
 | A step that never succeeds, even after UI retry | `--fail-step pick` |
 | Random flakiness | `--fail-rate 0.3 --seed 1` |
-| Clog check: first aspirate flagged | `--clog 1` (Nth clip of the session; repeatable) |
-| Clog service unreachable banner | `--no-anomaly` |
+| Clog check: first aspirate flagged | `--clog 1` (Nth tip check of the session; repeatable) |
+| Tip check fails (service down) but the protocol goes on | `--tip-check-error 1`, or `--tip-check-down` for every check |
+| OT-2 fails after the aspirate → not retried → forced Retry | `--fail-step ot2:1` |
+| Debug check / card images unreachable | `--no-tip-check-server` |
 
 While it runs, type in its terminal: `f` = fail the current step now, `s` = succeed it now,
 `p` = print status, `q` = quit.

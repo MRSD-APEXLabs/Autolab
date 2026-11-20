@@ -247,3 +247,15 @@ def test_navigation_steps_stop_with_nav_cancel():
 def test_lab_machine_and_wait_steps_have_no_stop():
     for name in ('shaker', 'ot2', 'wait'):
         assert STEPS[name].get('stop') is None
+
+
+def test_liquid_handling_steps_are_not_retryable():
+    # Re-sending an OT-2 protocol could aspirate twice.
+    assert STEPS['ot2']['retryable'] is False
+
+
+def test_retryable_defaults_to_true_and_is_a_bool():
+    for name, config in STEPS.items():
+        assert isinstance(config.get('retryable', True), bool), name
+    assert STEPS['shaker'].get('retryable', True) is True
+    assert STEPS['go_to'].get('retryable', True) is True

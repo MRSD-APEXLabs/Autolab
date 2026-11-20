@@ -39,3 +39,22 @@ test('stepLabel parses executive step JSON', () => {
   expect(stepLabel({ step: 'debug replay' })).toBe('debug replay');
   expect(stepLabel(undefined, 'c1')).toBe('c1');
 });
+
+describe('tipCheckVerdict', () => {
+  const { tipCheckVerdict } = require('./verdict');
+  test('liquid in tip is healthy', () => {
+    expect(tipCheckVerdict({ status: 'done', anomaly_detected: false, p_tip_empty: 0.1 }))
+      .toEqual({ label: 'Liquid in tip', tone: 'ok', detail: 'P(empty) 0.10' });
+  });
+  test('a clog is bad', () => {
+    expect(tipCheckVerdict({ status: 'done', anomaly_detected: true, p_tip_empty: 0.9 }))
+      .toEqual({ label: 'Clog suspected', tone: 'bad', detail: 'P(empty) 0.90' });
+  });
+  test('a failed check is a warning, not a clog', () => {
+    expect(tipCheckVerdict({ status: 'error', error: 'down' }))
+      .toEqual({ label: 'Check failed', tone: 'warn', detail: null });
+  });
+  test('anything else has no result', () => {
+    expect(tipCheckVerdict(undefined).label).toBe('No result');
+  });
+});

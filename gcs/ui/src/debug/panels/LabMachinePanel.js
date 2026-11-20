@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
-import Ot2LightsControls from './Ot2LightsControls';
-import Ot2PartsControls from './Ot2PartsControls';
-import Ot2ClogSequence from './Ot2ClogSequence';
+import Ot2Routines from './Ot2Routines';
 
 const DEFAULT_OT2_PARAMS = JSON.stringify({
   steps: [
@@ -15,9 +13,7 @@ const DEFAULT_OT2_PARAMS = JSON.stringify({
 }, null, 2);
 
 function Ot2Section({ publish, connected }) {
-  const [partsActive, setPartsActive] = useState(true);
-  const [sequenceRunning, setSequenceRunning] = useState(false);
-  const [fullWorkflowRunning, setFullWorkflowRunning] = useState(false);
+  const [routineActive, setRoutineActive] = useState(true);
   const [paramsJson, setParamsJson] = useState(DEFAULT_OT2_PARAMS);
   const [error, setError] = useState(null);
 
@@ -41,10 +37,7 @@ function Ot2Section({ publish, connected }) {
   return (
     <div className="mb-4">
       <h3 className="text-sm font-semibold text-gray-700 mb-2">OT2</h3>
-      <Ot2LightsControls />
-      <Ot2PartsControls onActive={setPartsActive} locked={sequenceRunning || fullWorkflowRunning} />
-      <Ot2ClogSequence onRunning={setSequenceRunning} locked={fullWorkflowRunning} />
-      <Ot2ClogSequence fullWorkflow onRunning={setFullWorkflowRunning} locked={sequenceRunning} />
+      <Ot2Routines onActive={setRoutineActive} />
       <label className="text-xs text-gray-600 block mb-2">
         Parameters JSON
         <textarea
@@ -55,7 +48,7 @@ function Ot2Section({ publish, connected }) {
         />
       </label>
       {error && <p className="text-xs text-red-600 mb-2">Invalid JSON: {error}</p>}
-      <ConfirmButton onConfirm={send} disabled={!connected || !!error || partsActive || sequenceRunning || fullWorkflowRunning}>Send OT2 Protocol</ConfirmButton>
+      <ConfirmButton onConfirm={send} disabled={!connected || !!error || routineActive}>Send OT2 Protocol</ConfirmButton>
     </div>
   );
 }
