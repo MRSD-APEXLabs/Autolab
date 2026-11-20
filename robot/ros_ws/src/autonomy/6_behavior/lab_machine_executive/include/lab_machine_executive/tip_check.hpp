@@ -41,15 +41,26 @@ class TipCheckClient {
    public:
     using Sleep = std::function<void(double seconds)>;
     using Now = std::function<double()>;  // seconds, monotonic
+    // Called as the checks go: {"pass": 1-based, "passes", "status" (submitting | queued |
+    // running | … | done), "stage" (service's stage, or null), "queue_position" (or null),
+    // "samples" (P(empty) of the finished checks)}. Only when something changed.
+    using Progress = std::function<void(const nlohmann::json& progress)>;
 
     TipCheckClient(HttpClient& http, TipCheckConfig cfg, Sleep sleep, Now now);
+
+    void on_progress(Progress progress) { progress_ = std::move(progress); }
 
     // Runs cfg.passes checks and returns the averaged verdict, or {"status": "error", ...}.
     nlohmann::json run(const std::string& label);
 
    private:
-    nlohmann::json one_check(const std::string& label);  // throws std::runtime_error
+    nlohmann::json one_check(const std::string& label, int pass);  // throws std::runtime_error
     nlohmann::json parse(const HttpResponse& r, const std::string& what);
+    void report(int pass, const nlohmann::json& job);
+
+    nlohmann::json samples_so_far_ = nlohmann::json::array();
+    nlohmann::json last_progress_;
+    Progress progress_;
 
     HttpClient& http_;
     TipCheckConfig cfg_;
@@ -67,5 +78,13 @@ using PublishFn = std::function<void(const nlohmann::json& result)>;
 bool run_protocol_step(const nlohmann::json& step, int index, const std::string& run_id,
                        const DispatchFn& dispatch, const TipCheckFn& tip_check,
                        const PublishFn& publish);
+
+// Live OT-2 progress (topic ot2_progress), what the GCS shows while the protocol runs:
+// {"run_id", "phase" (connecting | command | tip_check | homing | disconnecting | done | failed),
+//  "command": 0-based index or null, "commands": count, "action": that command's action or null,
+//  "tip_check": the client's progress during a tip check, else null}.
+nlohmann::json ot2_progress(const std::string& run_id, const std::string& phase,
+                            const nlohmann::json& steps, int command = -1,
+                            const nlohmann::json& tip_check = nlohmann::json());
 
 }  // namespace lab_machine

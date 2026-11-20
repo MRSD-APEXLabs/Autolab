@@ -64,8 +64,10 @@ class RoutineExecutorNode(Node):
         self._status_subs: dict = {}  # step_name -> subscription
         self._setup_status_subscriptions(self._robot)
 
-        # Tip-check results published by lab_machine_executive after each aspirate
+        # Tip-check results published by lab_machine_executive after each aspirate, and its live
+        # OT-2 progress (current command, tip-check pass)
         self._recording_sub = None
+        self._progress_sub = None
         self._setup_recording_subscription(self._robot)
 
         # 1 Hz status publish + execution loop
@@ -96,6 +98,25 @@ class RoutineExecutorNode(Node):
             self.destroy_subscription(self._recording_sub)
         self._recording_sub = self.create_subscription(
             String, f'/{robot}/behavior/tip_check_result', self._on_tip_check_result, 10)
+        if self._progress_sub is not None:
+            self.destroy_subscription(self._progress_sub)
+        self._progress_sub = self.create_subscription(
+            String, f'/{robot}/behavior/ot2_progress', self._on_ot2_progress, 10)
+
+    def _on_ot2_progress(self, msg: String) -> None:
+        try:
+            progress = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f'Malformed ot2_progress message: {e}')
+            return
+        if not isinstance(progress, dict):
+            self.get_logger().warn('Malformed ot2_progress message: not an object')
+            return
+        # Only the OT-2 step's own progress; a late message after the step ended is dropped.
+        if self._sm.current_step_name() != 'ot2':
+            return
+        if self._sm.set_step_progress({**progress, 'machine': 'ot2'}):
+            self._publish_status()  # don't wait for the 1 Hz tick: the UI follows each command
 
     def _on_tip_check_result(self, msg: String) -> None:
         try:

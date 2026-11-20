@@ -16,6 +16,9 @@ class RoutineStateMachine:
         self.error = None
         self.needs_dispatch = False  # True when a command needs to be published
         self.recordings = []         # clog-detection results ({'type', 'id', 'step', ...}) of this run
+        # Live progress of the current step from its executive (e.g. which OT-2 command is running,
+        # how far the tip check is), tagged with the routine step it belongs to. None when unknown.
+        self.step_progress = None
 
     def start(self):
         if self.state in _ACTIVE:
@@ -25,6 +28,7 @@ class RoutineStateMachine:
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = True
+        self.step_progress = None
 
     def pause(self):
         if self.state != 'running':
@@ -49,6 +53,7 @@ class RoutineStateMachine:
             return
         self.retry_count = 0
         self.current_step_idx += 1
+        self.step_progress = None
         if self.current_step_idx >= len(self.steps):
             self.state = 'success'
             self.needs_dispatch = False
@@ -76,6 +81,7 @@ class RoutineStateMachine:
         else:
             self.retry_count += 1
             self.needs_dispatch = True  # retry: re-dispatch same step
+            self.step_progress = None
 
     def cancel(self):
         if self.state not in _ACTIVE:
@@ -105,6 +111,7 @@ class RoutineStateMachine:
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = True
+        self.step_progress = None
         return True
 
     def add_recording(self, record: dict) -> bool:
@@ -119,6 +126,16 @@ class RoutineStateMachine:
         if any(r['id'] == record['id'] for r in self.recordings):
             return False
         self.recordings.append({**record, 'step': self.current_step_idx})
+        return True
+
+    def set_step_progress(self, progress: dict) -> bool:
+        """Record the current step's live progress (replaces the previous one). Only while active.
+
+        Kept after the run fails, so the operator sees where the step stopped.
+        """
+        if self.state not in _ACTIVE or not isinstance(progress, dict):
+            return False
+        self.step_progress = {**progress, 'step': self.current_step_idx}
         return True
 
     def acknowledge_dispatch(self):
@@ -139,4 +156,5 @@ class RoutineStateMachine:
             'error': self.error,
             'recordings': list(self.recordings),
             'retry_needs_force': self._retry_needs_force(),
+            'step_progress': self.step_progress,
         }

@@ -295,3 +295,52 @@ select.rb-input { font-family: var(--body); padding-right: 4px; }
 @media (prefers-reduced-motion: reduce) {
   .xt-step.now .xt-node, .xp-now.flip > *, .ax-loadbar i { animation: none !important; }
 }
+
+/* OT-2 protocol progress (run page, current step) */
+.o2 { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.o2-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.o2-list { display: grid; gap: 2px; }
+.o2-cmd { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 5px 0 9px; }
+.o2-cmd::before { content: ""; position: absolute; left: 12px; top: 30px; bottom: -4px; width: 2px; background: var(--line); }
+.o2-cmd:last-child::before { display: none; }
+.o2-cmd.done::before, .o2-cmd.check::before { background: var(--navy); }
+.o2-node { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font: normal 700 11px/1 var(--mono);
+  color: var(--faint); background: #fff; border: 2px solid var(--line2); position: relative; z-index: 1; }
+.o2-name { display: block; font: 600 14px/1.25 var(--body); color: var(--faint); padding-top: 4px; }
+.o2-cmd small { display: block; font: 400 12px/1.3 var(--mono); color: var(--faint); margin-top: 2px; overflow-wrap: anywhere; }
+.o2-cmd.done .o2-node, .o2-cmd.check .o2-node { background: var(--navy); border-color: var(--navy); color: #fff; }
+.o2-cmd.done .o2-name, .o2-cmd.check .o2-name { color: var(--dim); }
+.o2-cmd.now .o2-node { background: var(--orange); border-color: var(--orange); color: #fff; animation: xt-pulse 1.8s ease-out infinite;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--orange) 55%, transparent); }
+.o2-cmd.now .o2-name, .o2-cmd.fail .o2-name { color: var(--text); font-weight: 700; }
+.o2-cmd.fail .o2-node { background: var(--red); border-color: var(--red); color: #fff; }
+.o2-check { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--sky-strong) 9%, transparent); border: 1px solid color-mix(in srgb, var(--sky-strong) 30%, transparent); }
+.o2-check-name { font: 700 12px/1 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--sky-strong); }
+.o2-check-stage { font: 600 13px/1.2 var(--body); color: var(--text); }
+.o2-check-mean { font: 400 12px/1.2 var(--mono); color: var(--dim); }
+.o2-passes { display: inline-flex; gap: 4px; }
+.o2-passes i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--sky-strong); background: transparent; }
+.o2-passes i.on { background: var(--sky-strong); }
+.o2-passes i.now { animation: cc-blink 1s ease-in-out infinite alternate; }
+@keyframes cc-blink { to { background: color-mix(in srgb, var(--sky-strong) 55%, transparent); } }
+
+/* clog check card: images shown whole, side by side when they fit */
+.cc-imgs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding-top: 8px; }
+.cc-img { margin: 0; min-width: 0; }
+.cc-img a { display: grid; place-items: center; background: #0e1620; border-radius: 8px; border: 1px solid var(--line2); overflow: hidden; }
+.cc-img img { display: block; width: auto; max-width: 100%; height: auto; max-height: 320px; object-fit: contain; }
+.cc-img figcaption { font: 400 11px/1.3 var(--body); color: var(--faint); margin-top: 4px; }
+.cc-pulse { animation: cc-blink 1s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .o2-cmd.now .o2-node, .o2-passes i.now, .cc-pulse { animation: none !important; } }
+
+/* routine builder: ready-made experiments */
+.rb-presets { display: grid; gap: 8px; margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.rb-presets-label { font: 700 11px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.rb-presets-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.rb-preset { display: grid; gap: 6px; justify-items: start; text-align: left; padding: 14px 16px; border-radius: 10px; cursor: pointer;
+  background: var(--panel); border: 1.5px solid var(--line2); border-left: 6px solid var(--k); transition: background .15s, border-color .15s; }
+.rb-preset:hover { background: color-mix(in srgb, var(--k) 6%, var(--panel)); }
+.rb-preset.on { border-color: var(--k); background: color-mix(in srgb, var(--k) 9%, var(--panel)); }
+.rb-preset-title { font: 400 24px/1 var(--display); color: var(--navy); letter-spacing: .02em; }
+.rb-preset-blurb { font: 400 13px/1.4 var(--body); color: var(--dim); }

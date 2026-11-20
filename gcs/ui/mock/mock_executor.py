@@ -11,9 +11,12 @@ Stands in for everything behind the MQTT broker that the experiment flow needs:
                        their time_s), then succeeds or fails per --fail-step / --fail-rate.
 * manipulation exec. — pick/place steps publish ros2/<robot>/behavior/manipulation_phase and
                        ros2/planning_state like the real executive.
-* lab_machine exec.  — each aspirate in an ot2 step attaches a finished tip-check result (five
-                       averaged checks), like lab_machine_executive; --clog / --tip-check-error /
-                       --tip-check-down inject outcomes. ot2 steps are never auto-retried.
+* lab_machine exec.  — an ot2 step walks through its commands (connecting → each command →
+                       homing → disconnecting) and reports them as status.step_progress, like
+                       lab_machine_executive's ot2_progress; after each aspirate the tip check runs
+                       pass by pass (live progress) and then attaches its result (five averaged
+                       checks); --clog / --tip-check-error / --tip-check-down inject outcomes.
+                       ot2 steps take --ot2-time and are never auto-retried.
 * tip-check service  — fake HTTP service on :8110 (/check, /jobs, /health, /runs/*.png) for the
                        debug console's standalone check and the Clog check card's images.
 
@@ -228,8 +231,9 @@ class MockExecutor:
     """
 
     def __init__(self, specs, step_time=3.0, clock=time.monotonic, tip_check=None,
-                 fail_steps=None, fail_rate=0.0, rng=None):
+                 fail_steps=None, fail_rate=0.0, rng=None, ot2_time=None):
         self._specs = specs
+        self._ot2_time = step_time if ot2_time is None else ot2_time
         self._no_retry = {name for name, spec in specs.items() if not spec.get('retryable', True)}
         self._step_time = step_time
         self._clock = clock
@@ -375,23 +379,22 @@ class MockExecutor:
         self._attempts[idx] += 1
         attempt = self._attempts[idx]
 
-        duration = (float(step.get('time_s', 0)) if self._specs[name]['msg_type'] == 'wait'
-                    else self._step_time)
+        if self._specs[name]['msg_type'] == 'wait':
+            duration = float(step.get('time_s', 0))
+        else:
+            duration = self._ot2_time if name == 'ot2' else self._step_time
         fail = name != 'wait' and (attempt <= self._fail_steps.get(name, 0)
                                    or self._rng.random() < self._fail_rate)
-        clips = []  # (time into the step, protocol step index, aspirate) -> one tip check each
-        if name == 'ot2':
-            actions = _ot2_actions(step)
-            aspirates = [(k, a) for k, a in enumerate(actions) if a.get('action') == 'aspirate']
-            clips = [((n + 1) / (len(aspirates) + 1) * duration, k, a)
-                     for n, (k, a) in enumerate(aspirates)]
+        # (time into the step, kind, data): 'progress' -> step_progress, 'tip' -> a tip-check result
+        events = _ot2_timeline(_ot2_actions(step), duration, self._tips) if name == 'ot2' else []
         finish_at = duration * FAIL_AT_FRACTION if fail else duration
-        if fail and clips:  # an injected OT-2 failure comes after the aspirates (tip may hold liquid)
-            finish_at = (clips[-1][0] + duration) / 2
+        tips_at = [t for t, kind, _ in events if kind == 'tip']
+        if fail and tips_at:  # an injected OT-2 failure comes after the aspirates (tip may hold liquid)
+            finish_at = (tips_at[-1] + duration) / 2
         self._active = {
             'idx': idx, 'name': name, 'started': now, 'duration': duration,
             'finish_at': finish_at,
-            'outcome': 'fail' if fail else 'success', 'clips': clips,
+            'outcome': 'fail' if fail else 'success', 'events': events,
         }
         _log(f'step {idx + 1}/{len(self._sm.steps)} "{name}" dispatched '
              f'(attempt {attempt}, {duration:.1f}s{", WILL FAIL" if fail else ""})')
@@ -401,16 +404,28 @@ class MockExecutor:
         if act is None:
             return
         elapsed = now - act['started']
-        while act['clips'] and act['clips'][0][0] <= elapsed:
-            _, k, action = act['clips'].pop(0)
-            self._add_tip_check(k, action)
+        while act['events'] and act['events'][0][0] <= elapsed:
+            self._fire(act['events'].pop(0), out)
         if act['name'] in MANIP_STEPS:
             phase = _manip_phase(elapsed / act['duration'] if act['duration'] else 1.0)
             if phase != 'PLANNING' and act.get('planned') is None and elapsed > 0:
                 act['planned'] = True
                 out.append((PLANNING_STATE_TOPIC, _ros_string('SUCCESS')))
         if elapsed >= act['finish_at']:
+            if act['outcome'] == 'fail' and act['name'] == 'ot2':
+                progress = dict(self._sm.step_progress or {})
+                progress.pop('step', None)
+                self._sm.set_step_progress({**progress, 'machine': 'ot2', 'phase': 'failed',
+                                            'tip_check': None})
             self._finish_active(act['outcome'], out)
+
+    def _fire(self, event, out):
+        _, kind, data = event
+        if kind == 'tip':
+            k, action, result = data
+            self._add_tip_check(k, action, result)
+        elif self._sm.set_step_progress({**data, 'machine': 'ot2'}):
+            out.append(self.status_message())  # like node.py: publish at once, not on the 1 Hz tick
 
     def _finish_active(self, outcome, out):
         act = self._active
@@ -419,8 +434,9 @@ class MockExecutor:
             return
         self._active = None
         if outcome == 'success':
-            for _, k, action in act['clips']:  # forced early: still check the remaining aspirates
-                self._add_tip_check(k, action)
+            for event in act['events']:  # forced early: still check the remaining aspirates
+                if event[1] == 'tip':
+                    self._fire(event, out)
             self._sm.on_success()
             _log(f'step "{act["name"]}" succeeded')
         else:
@@ -430,8 +446,10 @@ class MockExecutor:
             _log(f'step "{act["name"]}" FAILED (retry {self._sm.retry_count}/'
                  f'{self._sm.max_retries}; state={self._sm.state})')
 
-    def _add_tip_check(self, protocol_step, action):
-        result = {**self._tips.result(action), 'type': 'tip_check',
+    def _add_tip_check(self, protocol_step, action, result=None):
+        if result is None:
+            result = self._tips.result(action)
+        result = {**result, 'type': 'tip_check',
                   'id': f'mock-{uuid.uuid4().hex[:8]}-{protocol_step}',
                   'protocol_step': protocol_step, 'aspirate': action}
         if self._sm.add_recording(result):
@@ -459,6 +477,62 @@ def _manip_phase(fraction):
         if fraction >= start:
             current = name
     return current
+
+
+# Relative length of each part of an OT-2 protocol in the mock (scaled to the step's duration).
+OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5, 'disconnecting': 0.5}
+
+
+def _ot2_timeline(actions, duration, tips):
+    """Events of one OT-2 protocol, as lab_machine_executive reports them on ot2_progress.
+
+    The tip check after an aspirate goes pass by pass (submitting → running → done, with the
+    finished passes' P(empty)); its result is attached when the last pass is done. Each check's
+    outcome (clog / error) is drawn from `tips` when the step is dispatched.
+    """
+    passes = FakeTipCheck.PASSES
+    units = OT2_UNITS['connecting'] + OT2_UNITS['homing'] + OT2_UNITS['disconnecting']
+    for a in actions:
+        units += OT2_UNITS['command'] + (passes * OT2_UNITS['tip_pass'] if a.get('action') == 'aspirate' else 0)
+    scale = duration / units if units else 0
+    run_id = uuid.uuid4().hex[:8]
+    n = len(actions)
+
+    def progress(phase, command=None, tip_check=None):
+        has = command is not None and 0 <= command < n
+        return {'run_id': run_id, 'phase': phase, 'command': command if has else None, 'commands': n,
+                'action': actions[command].get('action') if has else None, 'tip_check': tip_check}
+
+    events, t = [(0.0, 'progress', progress('connecting'))], OT2_UNITS['connecting'] * scale
+    for k, a in enumerate(actions):
+        events.append((t, 'progress', progress('command', k)))
+        t += OT2_UNITS['command'] * scale
+        if a.get('action') != 'aspirate':
+            continue
+        result = tips.result(a)
+        samples = result.get('samples') or []
+        if result.get('status') == 'error':  # the service is down: the first pass fails at once
+            events.append((t, 'progress', progress('tip_check', k, {
+                'pass': 1, 'passes': passes, 'status': 'submitting', 'stage': None,
+                'queue_position': None, 'samples': []})))
+            t += OT2_UNITS['tip_pass'] * scale
+            events.append((t, 'tip', (k, a, result)))
+            continue
+        for i in range(passes):
+            base = {'pass': i + 1, 'passes': passes, 'queue_position': None}
+            events.append((t, 'progress', progress('tip_check', k, {
+                **base, 'status': 'submitting', 'stage': None, 'samples': samples[:i]})))
+            events.append((t + 0.2 * OT2_UNITS['tip_pass'] * scale, 'progress', progress('tip_check', k, {
+                **base, 'status': 'running', 'stage': 'analyzing', 'samples': samples[:i]})))
+            events.append((t + 0.8 * OT2_UNITS['tip_pass'] * scale, 'progress', progress('tip_check', k, {
+                **base, 'status': 'done', 'stage': None, 'samples': samples[:i + 1]})))
+            t += OT2_UNITS['tip_pass'] * scale
+        events.append((t, 'tip', (k, a, result)))
+    events.append((t, 'progress', progress('homing')))
+    t += OT2_UNITS['homing'] * scale
+    events.append((t, 'progress', progress('disconnecting')))
+    # 'done' is not sent: the step's success moves the routine on (and clears step_progress)
+    return events
 
 
 def _ot2_actions(step):
@@ -521,7 +595,9 @@ def main():
                    help='9001 = WebSocket listener (same as the UI); use 1883 with --transport tcp')
     p.add_argument('--transport', choices=['websockets', 'tcp'], default='websockets')
     p.add_argument('--step-time', type=float, default=3.0,
-                   help='seconds each non-wait step takes (default 3)')
+                   help='seconds each non-wait, non-ot2 step takes (default 3)')
+    p.add_argument('--ot2-time', type=float, default=20.0,
+                   help='seconds an ot2 step takes, tip checks included (default 20)')
     p.add_argument('--fail-step', action='append', metavar='NAME[:N]',
                    help='fail the first N attempts of every NAME step (no N = always fail). '
                         'max_retries counts re-dispatches after the first attempt, so '
@@ -545,7 +621,7 @@ def main():
         start_tip_check_server(tips, port=args.tip_check_port)
         _log(f'fake tip-check service on http://0.0.0.0:{args.tip_check_port}')
 
-    ex = MockExecutor(load_step_specs(), step_time=args.step_time, tip_check=tips,
+    ex = MockExecutor(load_step_specs(), step_time=args.step_time, ot2_time=args.ot2_time, tip_check=tips,
                       fail_steps=_parse_fail_steps(args.fail_step), fail_rate=args.fail_rate,
                       rng=random.Random(args.seed))
 

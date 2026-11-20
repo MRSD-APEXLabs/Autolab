@@ -348,3 +348,65 @@ def test_down_tip_check_service_fails_its_http_checks():
         assert e.value.code == 503
     finally:
         server.shutdown()
+
+
+# --- live OT-2 progress (status.step_progress, like lab_machine_executive's ot2_progress) -----
+
+def _progress_trace(ex, clock, seconds, dt=0.01):
+    seen = []
+    for _ in range(int(round(seconds / dt))):
+        clock.t += dt
+        ex.step()
+        p = status(ex)['step_progress']
+        if p and (not seen or p != seen[-1]):
+            seen.append(p)
+    return seen
+
+
+def test_ot2_step_reports_each_command_then_homing(ex, clock):
+    start(ex, ot2(ASPIRATE_A1), HOME)
+    seen = _progress_trace(ex, clock, STEP_TIME - 0.1)
+    phases = [p['phase'] for p in seen]
+    assert phases[0] == 'connecting'
+    assert [p['command'] for p in seen if p['phase'] == 'command'] == [0, 1, 2]
+    assert [p['action'] for p in seen if p['phase'] == 'command'] == ['pick_up_tips', 'aspirate', 'drop_tips']
+    assert phases.index('homing') > max(i for i, ph in enumerate(phases) if ph == 'command')
+    assert all(p['machine'] == 'ot2' and p['step'] == 0 and p['commands'] == 3 for p in seen)
+
+
+def test_tip_check_progress_goes_pass_by_pass_before_the_result(ex, clock):
+    start(ex, ot2(ASPIRATE_A1), HOME)
+    seen = _progress_trace(ex, clock, STEP_TIME - 0.1)
+    checks = [p['tip_check'] for p in seen if p['phase'] == 'tip_check']
+    assert all(p['command'] == 1 for p in seen if p['phase'] == 'tip_check')
+    assert sorted({c['pass'] for c in checks}) == [1, 2, 3, 4, 5]
+    assert {'submitting', 'running', 'done'} <= {c['status'] for c in checks}
+    last = checks[-1]
+    assert last['pass'] == 5 and last['status'] == 'done' and len(last['samples']) == 5
+    assert status(ex)['recordings'][0]['samples'] == last['samples']
+
+
+def test_step_progress_is_cleared_when_the_ot2_step_succeeds(ex, clock):
+    start(ex, ot2(ASPIRATE_A1), HOME)
+    advance(ex, clock, STEP_TIME + 0.2)
+    s = status(ex)
+    assert s['current_step'] == 1 and s['step_progress'] is None
+
+
+def test_failed_ot2_step_keeps_its_progress_marked_failed(clock, tips):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock, tip_check=tips,
+                      fail_steps={'ot2': 1})
+    start(ex, ot2(ASPIRATE_A1), HOME)
+    advance(ex, clock, STEP_TIME)
+    p = status(ex)['step_progress']
+    assert status(ex)['state'] == 'failed'
+    assert p['phase'] == 'failed' and p['step'] == 0
+
+
+def test_ot2_time_sets_the_ot2_step_length_only(clock, tips):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, ot2_time=10.0, clock=clock, tip_check=tips)
+    start(ex, ot2(ASPIRATE_A1), HOME)
+    advance(ex, clock, STEP_TIME + 0.5)
+    assert status(ex)['current_step'] == 0
+    advance(ex, clock, 10.0 - STEP_TIME)
+    assert status(ex)['current_step'] == 1

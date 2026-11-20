@@ -475,3 +475,62 @@ def test_retry_needs_force_false_for_ordinary_failed_step():
     assert sm.state == 'failed'
     assert sm.to_dict()['retry_needs_force'] is False
     assert sm.retry() is True
+
+
+# ── Live step progress (e.g. OT-2 command and tip-check pass) ──────────────────
+
+def _running(steps=None):
+    sm = RoutineStateMachine(steps or [{'name': 'go_to'}, {'name': 'ot2'}], max_retries=1)
+    sm.start()
+    return sm
+
+
+def test_step_progress_none_on_new():
+    sm = RoutineStateMachine([{'name': 'ot2'}])
+    assert sm.to_dict()['step_progress'] is None
+
+
+def test_set_step_progress_tags_the_routine_step():
+    sm = _running()
+    sm.on_success()
+    assert sm.set_step_progress({'phase': 'command', 'command': 1}) is True
+    assert sm.to_dict()['step_progress'] == {'phase': 'command', 'command': 1, 'step': 1}
+
+
+def test_step_progress_ignored_when_inactive_or_not_a_dict():
+    sm = RoutineStateMachine([{'name': 'ot2'}])
+    assert sm.set_step_progress({'phase': 'command'}) is False
+    sm.start()
+    assert sm.set_step_progress(['not', 'a', 'dict']) is False
+    assert sm.step_progress is None
+
+
+def test_step_progress_cleared_when_the_step_succeeds():
+    sm = _running()
+    sm.set_step_progress({'phase': 'homing'})
+    sm.on_success()
+    assert sm.step_progress is None
+
+
+def test_step_progress_cleared_on_auto_retry_but_kept_when_the_run_fails():
+    sm = _running([{'name': 'go_to'}])
+    sm.set_step_progress({'phase': 'command', 'command': 2})
+    sm.on_failure()  # retry 1 of 1
+    assert sm.step_progress is None
+    sm.set_step_progress({'phase': 'command', 'command': 3})
+    sm.on_failure()  # retries exhausted
+    assert sm.state == 'failed'
+    assert sm.step_progress['command'] == 3
+
+
+def test_step_progress_cleared_on_operator_retry_and_new_start():
+    sm = _running([{'name': 'go_to'}])
+    sm.set_step_progress({'phase': 'command'})
+    sm.cancel()
+    assert sm.step_progress is not None
+    sm.retry()
+    assert sm.step_progress is None
+    sm.set_step_progress({'phase': 'command'})
+    sm.cancel()
+    sm.start()
+    assert sm.step_progress is None

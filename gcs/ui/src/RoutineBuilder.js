@@ -3,6 +3,7 @@ import {
   GROUPS, MACHINES, OT2_ACTIONS, OT2_RESOURCES, STEP_TYPES,
   missingParams, newOt2Command, ot2Commands, stepName, stepTitle,
 } from './shared/steps';
+import { PRESETS, matchingPreset } from './shared/presets';
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -251,6 +252,30 @@ function Block({ step, index, count, onChange, onMove, onRemove, onDuplicate, dr
   );
 }
 
+// The two ready-made experiments; picking one replaces the routine being built.
+function PresetPicker({ routine, onPick }) {
+  const current = matchingPreset(routine);
+  return (
+    <div className="rb-presets" role="radiogroup" aria-label="Ready-made experiments">
+      <span className="rb-presets-label">Ready-made experiments</span>
+      <div className="rb-presets-row">
+        {PRESETS.map((p) => (
+          <button
+            key={p.id} type="button" role="radio" aria-checked={current?.id === p.id}
+            className={`rb-preset k-${p.tone} ${current?.id === p.id ? 'on' : ''}`}
+            onClick={() => onPick(p)}
+          >
+            <span className="rb-preset-title">{p.title}</span>
+            <span className="rb-preset-blurb">{p.blurb}</span>
+            <span className={`ax-badge ${p.tone}`}>Expect: {p.expect}</span>
+          </button>
+        ))}
+      </div>
+      {!current && <span className="rb-note">Custom routine. Pick one above to start from a ready-made experiment.</span>}
+    </div>
+  );
+}
+
 // Block editor for a routine_executor routine. `value` is the routine JSON string; edits come back
 // through onChange as a pretty-printed JSON string, so the stored routine stays exactly what is sent.
 export default function RoutineBuilder({ value, onChange }) {
@@ -292,6 +317,7 @@ export default function RoutineBuilder({ value, onChange }) {
 
   return (
     <div className="rb">
+      <PresetPicker routine={routine} onPick={(p) => { onChange(serialize(p.routine)); setMode('blocks'); }} />
       <div className="rb-toolbar">
         <div className="rb-seg" role="tablist" aria-label="Editor">
           <button type="button" role="tab" aria-selected={mode === 'blocks'} className={mode === 'blocks' ? 'on' : ''}

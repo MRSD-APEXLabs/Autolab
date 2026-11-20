@@ -50,9 +50,27 @@ json TipCheckClient::parse(const HttpResponse& r, const std::string& what) {
     return body;
 }
 
-json TipCheckClient::one_check(const std::string& label) {
+void TipCheckClient::report(int pass, const json& job) {
+    if (!progress_) return;
+    auto field = [&job](const char* key) {
+        return job.is_object() && job.contains(key) && !job[key].is_null() ? job[key] : json();
+    };
+    json p = {{"pass", pass + 1},
+              {"passes", cfg_.passes},
+              {"status", job.is_object() ? job.value("status", "submitting") : "submitting"},
+              {"stage", field("stage")},
+              {"queue_position", field("queue_position")},
+              {"samples", samples_so_far_}};
+    if (p == last_progress_) return;
+    last_progress_ = p;
+    progress_(p);
+}
+
+json TipCheckClient::one_check(const std::string& label, int pass) {
+    report(pass, json());
     json job = parse(http_.post(cfg_.base_url + "/check", json{{"step", label}}.dump()), "/check");
     if (!job.is_object()) throw std::runtime_error("unreadable /check response");
+    report(pass, job);
     const json clip = job.value("clip_id", json());
     const double deadline = now_() + cfg_.timeout_s;
     while (job.value("status", "") != "done") {
@@ -72,20 +90,25 @@ json TipCheckClient::one_check(const std::string& label) {
         if (!jobs.is_array()) throw std::runtime_error("unreadable clog-check job list");
         for (const auto& item : jobs)
             if (item.is_object() && item.value("clip_id", json()) == clip) job = item;
+        report(pass, job);
     }
     return job;
 }
 
 json TipCheckClient::run(const std::string& label) {
     std::vector<json> samples;
+    samples_so_far_ = json::array();
+    last_progress_ = json();
     try {
         for (int i = 0; i < cfg_.passes; ++i) {
-            json job = one_check(label);
+            json job = one_check(label, i);
             if (!is_probability(job.value("p_tip_empty", json())))
                 throw std::runtime_error("check " + std::to_string(i + 1) + " of " +
                                          std::to_string(cfg_.passes) +
                                          " returned no valid tip-empty probability");
             samples.push_back(job);
+            samples_so_far_.push_back(job["p_tip_empty"]);
+            report(i, job);
         }
         std::set<std::string> models;
         std::vector<double> thresholds;
@@ -168,6 +191,21 @@ bool run_protocol_step(const json& step, int index, const std::string& run_id,
     result["aspirate"] = step;
     publish(result);
     return true;
+}
+
+json ot2_progress(const std::string& run_id, const std::string& phase, const json& steps,
+                  int command, const json& tip_check) {
+    const bool has_command =
+        steps.is_array() && command >= 0 && command < static_cast<int>(steps.size());
+    json action;
+    if (has_command && steps[command].is_object() && steps[command].contains("action"))
+        action = steps[command]["action"];
+    return {{"run_id", run_id},
+            {"phase", phase},
+            {"command", has_command ? json(command) : json()},
+            {"commands", steps.is_array() ? steps.size() : 0},
+            {"action", action},
+            {"tip_check", tip_check}};
 }
 
 }  // namespace lab_machine

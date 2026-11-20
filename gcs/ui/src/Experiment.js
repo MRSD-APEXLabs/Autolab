@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from "react";
 import mqtt from "mqtt";
 import ClogCheckCard from "./ClogCheckCard";
 import CameraStage from "./CameraStage";
+import Ot2Progress from "./Ot2Progress";
 import { Brand, TitleBar } from "./Chrome";
-import { GROUPS, stepDetail, stepGroup, stepName, stepStation, stepTitle } from "./shared/steps";
+import { GROUPS, OT2_ACTIONS, ot2Commands, stepDetail, stepGroup, stepName, stepStation, stepTitle } from "./shared/steps";
+import { OT2_PHASE_LABEL, ot2ProgressFor, tipCheckStageText } from "./shared/ot2Progress";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
@@ -64,8 +66,17 @@ function formatExecPayload(payload) {
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
+// One line for the timeline under the running OT-2 step: "Aspirate · clog check pass 2 of 5".
+function ot2LiveLine(step, progress) {
+  if (!progress) return null;
+  if (progress.phase !== "command" && progress.phase !== "tip_check") return OT2_PHASE_LABEL[progress.phase] ?? null;
+  const cmd = ot2Commands(step)?.[progress.command];
+  const label = OT2_ACTIONS[cmd?.action]?.label ?? cmd?.action ?? `Command ${progress.command + 1}`;
+  return progress.phase === "tip_check" ? `Clog check · ${tipCheckStageText(progress.tip_check)}` : label;
+}
+
 // Right-hand run timeline: one node per step, the rail filled up to the current step.
-function Timeline({ steps, state, currentStepIdx, completedCount }) {
+function Timeline({ steps, state, currentStepIdx, completedCount, liveLine }) {
   const total = steps.length;
   const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
   return (
@@ -81,7 +92,7 @@ function Timeline({ steps, state, currentStepIdx, completedCount }) {
           if (state === "success" || i < currentStepIdx) cls = "done";
           else if (i === currentStepIdx && state === "failed") cls = "fail";
           else if (i === currentStepIdx && state !== "idle") cls = state === "paused" ? "now paused" : "now";
-          const detail = stepDetail(step);
+          const detail = (i === currentStepIdx && liveLine) || stepDetail(step);
           return (
             <li key={i} className={`xt-step ${cls}`} style={{ "--g": GROUPS[stepGroup(step)].color }}
               aria-current={cls.startsWith("now") ? "step" : undefined}>
@@ -192,6 +203,14 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const displayTopics = (active && STEP_DISPLAY_TOPICS[stepName(currentStep)]) || [];
   const station = active || state === "failed" ? stepStation(currentStep) : null;
   const nextStep = active ? steps[currentStepIdx + 1] : null;
+  const isOt2 = stepName(currentStep) === "ot2";
+  const ot2Progress = isOt2 ? ot2ProgressFor(status) : null;
+  const recordings = status?.recordings ?? [];
+  // The tip check running right now, until its result is attached to the run.
+  const pendingCheck = ot2Progress?.phase === "tip_check"
+    && !recordings.some((r) => r?.id === `${ot2Progress.run_id}-${ot2Progress.command}`)
+    ? { progress: ot2Progress.tip_check, aspirate: ot2Commands(currentStep)?.[ot2Progress.command], step: currentStepIdx }
+    : null;
 
   // Ways out when the executor has nothing to run.
   const idleActions = (
@@ -266,7 +285,8 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
                   <b>{pad2(currentStepIdx + 1)}</b>
                   <span>{stepTitle(currentStep)}</span>
                 </div>
-                {stepDetail(currentStep) && <p className="xp-sub">{stepDetail(currentStep)}</p>}
+                {stepDetail(currentStep) && !isOt2 && <p className="xp-sub">{stepDetail(currentStep)}</p>}
+                {isOt2 && <Ot2Progress step={currentStep} progress={ot2Progress} />}
 
                 {displayTopics.length > 0 && (
                   <dl className="ax-kv mt-4 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
@@ -290,6 +310,7 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
                 <p className="ax-mono text-sm mt-1" style={{ color: "var(--dim)" }}>
                   {status.error ?? "Unknown error"}
                 </p>
+                {isOt2 && ot2Progress && <Ot2Progress step={currentStep} progress={ot2Progress} />}
                 {canRetry && confirmForce && (
                   <p className="text-sm mt-3 font-semibold" style={{ color: "var(--amber)" }}>
                     This step handles liquid and was not retried automatically: the tip may still hold liquid.
@@ -349,12 +370,13 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
             )}
 
             {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
-            {status?.recordings?.length > 0 && <ClogCheckCard recordings={status.recordings} />}
+            {(recordings.length > 0 || pendingCheck) && <ClogCheckCard recordings={recordings} pending={pendingCheck} />}
           </div>
 
           <div className="xp-time">
             {status && totalSteps > 0 ? (
-              <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount} />
+              <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount}
+                liveLine={active && isOt2 ? ot2LiveLine(currentStep, ot2Progress) : null} />
             ) : (
               <aside className="xt"><span className="ax-h3">Progress</span><p className="ax-hint mt-3">No steps loaded</p></aside>
             )}

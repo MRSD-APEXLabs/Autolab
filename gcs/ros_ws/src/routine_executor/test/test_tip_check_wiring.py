@@ -56,3 +56,22 @@ def test_forced_retry_of_failed_ot2_step_restarts_it():
     RoutineExecutorNode._on_retry_cmd(node, String(data='{"force": true}'))
     assert node._sm.state == 'running'
     assert node._sm.needs_dispatch is True
+
+
+def test_ot2_progress_is_attached_to_the_ot2_step_and_published_at_once():
+    node = make_node([{'name': 'ot2', 'parameters_json': {}}])
+    published = []
+    node._publish_status = lambda: published.append(node._sm.to_dict())
+    progress = {'phase': 'tip_check', 'command': 1, 'commands': 4, 'tip_check': {'pass': 2, 'passes': 5}}
+    RoutineExecutorNode._on_ot2_progress(node, String(data=json.dumps(progress)))
+    assert node._sm.step_progress == {**progress, 'machine': 'ot2', 'step': 0}
+    assert published and published[-1]['step_progress']['phase'] == 'tip_check'
+
+
+def test_ot2_progress_outside_an_ot2_step_or_malformed_is_ignored():
+    node = make_node([{'name': 'go_to', 'target_machine': 'ot2'}])
+    node._publish_status = lambda: None
+    RoutineExecutorNode._on_ot2_progress(node, String(data='{"phase": "homing"}'))
+    RoutineExecutorNode._on_ot2_progress(node, String(data='not json'))
+    RoutineExecutorNode._on_ot2_progress(node, String(data='[1]'))
+    assert node._sm.step_progress is None

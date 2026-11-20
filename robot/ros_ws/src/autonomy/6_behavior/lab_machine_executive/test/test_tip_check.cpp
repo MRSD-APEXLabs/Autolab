@@ -2,6 +2,7 @@
 // runs it. All HTTP is faked; nothing here reaches the OT-2 or the camera service.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <string>
@@ -372,4 +373,84 @@ TEST(ProtocolStep, CheckLabelDescribesTheAspirate) {
     s.run(ASPIRATE, 3);
     EXPECT_NE(s.checked[0].find("tube_rack"), std::string::npos);
     EXPECT_NE(s.checked[0].find("200"), std::string::npos);
+}
+
+// ── Progress while the checks run (shown live on the GCS) ──────────────────────
+
+TEST(TipCheckProgress, ReportsEachPassAndTheSamplesSoFar) {
+    FakeHttp http;
+    Clock clock;
+    http.answer("/check", ok({{"clip_id", "mine"}, {"status", "queued"}, {"queue_position", 2}}));
+    http.answer("/check", ok(done_job(0.3, "mine")));
+    http.answer("/jobs", ok(json::array({{{"clip_id", "mine"}, {"status", "running"}, {"stage", "vlm"}}})));
+    http.answer("/jobs", ok(json::array({done_job(0.1, "mine")})));
+    TipCheckClient client = make_client(http, clock, 2);
+    std::vector<json> seen;
+    client.on_progress([&seen](const json& p) { seen.push_back(p); });
+    json r = client.run("x");
+    ASSERT_EQ(r["status"], "done");
+
+    ASSERT_GE(seen.size(), 5u);
+    EXPECT_EQ(seen[0]["pass"], 1);
+    EXPECT_EQ(seen[0]["passes"], 2);
+    EXPECT_EQ(seen[0]["status"], "submitting");
+    EXPECT_EQ(seen[1]["status"], "queued");
+    EXPECT_EQ(seen[1]["queue_position"], 2);
+    EXPECT_EQ(seen[2]["status"], "running");
+    EXPECT_EQ(seen[2]["stage"], "vlm");
+    // pass 1 finished: its probability is in the samples when pass 2 starts
+    auto pass2 = std::find_if(seen.begin(), seen.end(), [](const json& p) { return p["pass"] == 2; });
+    ASSERT_NE(pass2, seen.end());
+    EXPECT_EQ((*pass2)["status"], "submitting");
+    EXPECT_EQ((*pass2)["samples"].size(), 1u);
+    EXPECT_EQ(seen.back()["samples"].size(), 2u);
+    EXPECT_NEAR(seen.back()["samples"][0].get<double>(), 0.1, 1e-9);
+}
+
+TEST(TipCheckProgress, RepeatedIdenticalPollsAreReportedOnce) {
+    FakeHttp http;
+    Clock clock;
+    http.answer("/check", ok({{"clip_id", "mine"}, {"status", "running"}}));
+    http.answer("/jobs", ok(json::array({{{"clip_id", "mine"}, {"status", "running"}}})));
+    http.answer("/jobs", ok(json::array({{{"clip_id", "mine"}, {"status", "running"}}})));
+    http.answer("/jobs", ok(json::array({done_job(0.2, "mine")})));
+    TipCheckClient client = make_client(http, clock, 1);
+    int running = 0;
+    client.on_progress([&running](const json& p) { if (p["status"] == "running") ++running; });
+    client.run("x");
+    EXPECT_EQ(running, 1);
+}
+
+TEST(TipCheckProgress, NoCallbackIsFine) {
+    FakeHttp http;
+    Clock clock;
+    http.answer("/check", ok(done_job(0.2)));
+    EXPECT_EQ(make_client(http, clock, 1).run("x")["status"], "done");
+}
+
+TEST(Ot2Progress, NamesTheCommandAndItsAction) {
+    json steps = json::array({{{"action", "pick_up_tips"}}, ASPIRATE});
+    json p = lab_machine::ot2_progress("run7", "command", steps, 1);
+    EXPECT_EQ(p["run_id"], "run7");
+    EXPECT_EQ(p["phase"], "command");
+    EXPECT_EQ(p["command"], 1);
+    EXPECT_EQ(p["commands"], 2);
+    EXPECT_EQ(p["action"], "aspirate");
+    EXPECT_TRUE(p["tip_check"].is_null());
+}
+
+TEST(Ot2Progress, PhasesWithoutACommandHaveNulls) {
+    json steps = json::array({ASPIRATE});
+    json p = lab_machine::ot2_progress("r", "homing", steps);
+    EXPECT_TRUE(p["command"].is_null());
+    EXPECT_TRUE(p["action"].is_null());
+    EXPECT_EQ(p["commands"], 1);
+    EXPECT_TRUE(lab_machine::ot2_progress("r", "command", steps, 5)["command"].is_null());
+    EXPECT_EQ(lab_machine::ot2_progress("r", "connecting", json())["commands"], 0);
+}
+
+TEST(Ot2Progress, CarriesTheTipCheckProgress) {
+    json steps = json::array({ASPIRATE});
+    json p = lab_machine::ot2_progress("r", "tip_check", steps, 0, {{"pass", 3}, {"passes", 5}});
+    EXPECT_EQ(p["tip_check"]["pass"], 3);
 }

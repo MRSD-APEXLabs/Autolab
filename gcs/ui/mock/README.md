@@ -10,7 +10,7 @@ clog check) in the UI **without the robot, ROS, or the GCS container**.
 | `routine_executor` (GCS) | Same MQTT topics (`cmd/routine_executor/*` in, `ros2/routine_executor/status` out at 1 Hz, `{"data": "<json>"}` envelope). Uses the **real** `RoutineStateMachine`, and reads the step names / required params / `retryable` straight from `step_config.py`, so validation, pause, cancel and retry behave like prod: a failed `ot2` step is never auto-retried, and a Retry of it needs `{"force": true}`. |
 | Robot / behavior tree | Each step "runs" for `--step-time` s (`wait` uses its `time_s`), then succeeds or fails. Like prod, **pause doesn't stop the current step**, it holds the next one. |
 | `manipulation_executive` | `pick` / `place` / `pick_base` / `place_base` publish `ros2/<robot>/behavior/manipulation_phase` (SELECTING_CAMERA → PLANNING → RUNNING_ACT → SERVOING → PLANNING_SAFE) and `ros2/planning_state` (SUCCESS / ERROR). |
-| `lab_machine_executive` | Each `aspirate` in an `ot2` step attaches a finished tip-check result (`type: "tip_check"`, five averaged checks) to `status.recordings`. A clog or a failed check never fails the step. |
+| `lab_machine_executive` | An `ot2` step (`--ot2-time` s, default 20) walks through connecting → each command → homing → disconnecting and reports it in `status.step_progress`, like the real `ot2_progress` topic. After each `aspirate` the tip check runs pass by pass (live `step_progress.tip_check`: pass, status, P(empty) so far), then its finished result (`type: "tip_check"`, five averaged checks) goes to `status.recordings`. A clog or a failed check never fails the step. |
 | Tip-check service (:8110) | Fake HTTP API: `POST /check` (one check, finished at once), `GET /jobs`, `GET /health`, and placeholder images under `/runs/…png` for the Clog check card. |
 
 Not mocked: camera streams and the camera hub, so the camera panel shows offline. The UI now
@@ -46,7 +46,7 @@ Then click through the welcome screen, edit the routine if you like, and press C
 | Retries exhausted → Failed card → **Retry from step N** succeeds | `--fail-step pick:4` (first attempt + `max_retries: 3` re-dispatches) |
 | A step that never succeeds, even after UI retry | `--fail-step pick` |
 | Random flakiness | `--fail-rate 0.3 --seed 1` |
-| Clog check: first aspirate flagged | `--clog 1` (Nth tip check of the session; repeatable) |
+| Clog check: first aspirate flagged | `--clog 1` (Nth tip check of the session; repeatable). Pick the **Anomaly** ready-made experiment in the builder for the matching routine. |
 | Tip check fails (service down) but the protocol goes on | `--tip-check-error 1`, or `--tip-check-down` for every check |
 | OT-2 fails after the aspirate → not retried → forced Retry | `--fail-step ot2:1` |
 | Debug check / card images unreachable | `--no-tip-check-server` |

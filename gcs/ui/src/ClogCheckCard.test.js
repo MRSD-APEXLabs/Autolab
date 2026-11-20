@@ -47,3 +47,24 @@ test('ignores entries that are not tip checks', () => {
   const { container } = render(<ClogCheckCard recordings={['old-clip', { id: 'x' }]} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+test('a check in progress shows as a live row, before any result', () => {
+  render(<ClogCheckCard recordings={[]} pending={{
+    aspirate, step: 3, progress: { pass: 2, passes: 5, status: 'running', samples: [0.05] },
+  }} />);
+  const row = screen.getByTestId('pending-check');
+  expect(row).toHaveTextContent('Aspirate 1 (step 4)');
+  expect(row).toHaveTextContent('Checking… Pass 2 of 5 · analyzing');
+  expect(row).toHaveTextContent('Checks so far: 0.05');
+  expect(screen.getByText(/checking the tip now/)).toBeInTheDocument();
+});
+
+test('images are linked full size and never cropped', () => {
+  render(<ClogCheckCard recordings={[
+    tip('r-1', { status: 'done', anomaly_detected: false, p_tip_empty: 0.1, files: { crop: '/runs/c/crop.jpg', preview: '/runs/c/preview.jpg' } }),
+  ]} />);
+  fireEvent.click(screen.getByRole('button', { name: /aspirate/i }));
+  const img = screen.getByAltText(/tip crop/i);
+  expect(img.className).not.toMatch(/object-cover/);
+  expect(img.closest('a')).toHaveAttribute('href', `${TIP_CHECK_URL}/runs/c/crop.jpg`);
+});

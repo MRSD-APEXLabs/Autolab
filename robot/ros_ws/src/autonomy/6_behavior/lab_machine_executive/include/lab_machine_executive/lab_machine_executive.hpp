@@ -58,6 +58,8 @@ class LabMachineExecutive : public rclcpp::Node {
     rclcpp::TimerBase::SharedPtr timer_;
     // One tip-check result (JSON) per aspirate; routine_executor attaches it to the run
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr tip_check_pub_;
+    // Live OT-2 progress (JSON, lab_machine::ot2_progress): command, tip-check pass, phase
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr ot2_progress_pub_;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg);
@@ -67,7 +69,10 @@ class LabMachineExecutive : public rclcpp::Node {
     void tick_ot2();
     void tick_shaker();
     bool dispatch_ot2_step(const nlohmann::json& step, int index);
-    nlohmann::json run_tip_check(const std::string& label);
+    nlohmann::json run_tip_check(const std::string& label, int index);
+    // Thread-safe (called from the timer and from the HTTP worker during a tip check)
+    void publish_ot2_progress(const std::string& phase, int command = -1,
+                              const nlohmann::json& tip_check = nlohmann::json());
 
     // Static HTTP helper — runs in std::async thread
     bool connect_ot2();

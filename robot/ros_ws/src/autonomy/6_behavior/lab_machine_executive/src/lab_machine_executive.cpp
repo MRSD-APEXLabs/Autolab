@@ -119,6 +119,8 @@ LabMachineExecutive::LabMachineExecutive()
 
     tip_check_pub_ = this->create_publisher<std_msgs::msg::String>(
         "tip_check_result", rclcpp::QoS(10).reliable());
+    ot2_progress_pub_ = this->create_publisher<std_msgs::msg::String>(
+        "ot2_progress", rclcpp::QoS(10).reliable());
 
     // Timer at 20 Hz to match behavior_executive cadence
     timer_ = rclcpp::create_timer(
@@ -330,6 +332,7 @@ void LabMachineExecutive::tick_ot2() {
         ot2_phase_        = OT2Phase::CONNECTING;
         http_in_flight_   = true;
         RCLCPP_INFO(this->get_logger(), "OT-2 connecting to %s…", ot2_host_.c_str());
+        publish_ot2_progress("connecting");
         pending_http_ = std::async(std::launch::async,
                                    &LabMachineExecutive::connect_ot2, this);
         ot2_action_->set_running();
@@ -346,6 +349,7 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed");
                 ot2_action_->set_failure();
                 return;
             }
@@ -363,6 +367,7 @@ void LabMachineExecutive::tick_ot2() {
             if (ot2_current_step_ >= static_cast<int>(ot2_steps_.size())) {
                 RCLCPP_INFO(this->get_logger(), "OT-2 steps complete — homing…");
                 ot2_phase_      = OT2Phase::HOMING;
+                publish_ot2_progress("homing");
                 http_in_flight_ = true;
                 pending_http_   = std::async(std::launch::async,
                                              &LabMachineExecutive::home_ot2, this);
@@ -372,6 +377,7 @@ void LabMachineExecutive::tick_ot2() {
             const auto& step = ot2_steps_[ot2_current_step_];
             RCLCPP_INFO(this->get_logger(), "OT-2 step %d: %s",
                         ot2_current_step_, step.value("action", "?").c_str());
+            publish_ot2_progress("command", ot2_current_step_);
             pending_http_   = std::async(std::launch::async,
                                          &LabMachineExecutive::dispatch_ot2_step,
                                          this, step, ot2_current_step_);
@@ -388,6 +394,7 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
@@ -407,11 +414,13 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 homed — disconnecting…");
             ot2_phase_      = OT2Phase::DISCONNECTING;
+            publish_ot2_progress("disconnecting");
             http_in_flight_ = true;
             pending_http_   = std::async(std::launch::async,
                                          &LabMachineExecutive::disconnect_ot2, this);
@@ -430,10 +439,12 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            publish_ot2_progress("done");
             command_lab_machine_condition_->set(false);
             ot2_condition_->set(false);
             ot2_terminal_ = true;
@@ -458,7 +469,7 @@ bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step, int inde
     };
     lab_machine::TipCheckFn check;
     if (!tip_check_cfg_.base_url.empty())
-        check = [this](const std::string& label) { return run_tip_check(label); };
+        check = [this, index](const std::string& label) { return run_tip_check(label, index); };
     auto publish = [this](const nlohmann::json& result) {
         std_msgs::msg::String msg;
         msg.data = result.dump();
@@ -473,7 +484,14 @@ bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step, int inde
     return lab_machine::run_protocol_step(step, index, ot2_run_id_, dispatch, check, publish);
 }
 
-nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label) {
+void LabMachineExecutive::publish_ot2_progress(const std::string& phase, int command,
+                                               const nlohmann::json& tip_check) {
+    std_msgs::msg::String msg;
+    msg.data = lab_machine::ot2_progress(ot2_run_id_, phase, ot2_steps_, command, tip_check).dump();
+    ot2_progress_pub_->publish(msg);
+}
+
+nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label, int index) {
     RCLCPP_INFO(this->get_logger(), "Tip check: %d passes via %s", tip_check_cfg_.passes,
                 tip_check_cfg_.base_url.c_str());
     CurlHttp http(static_cast<long>(tip_check_cfg_.timeout_s) + 30);
@@ -484,6 +502,9 @@ nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label) {
             return std::chrono::duration<double>(
                        std::chrono::steady_clock::now().time_since_epoch()).count();
         });
+    client.on_progress([this, index](const nlohmann::json& p) {
+        publish_ot2_progress("tip_check", index, p);
+    });
     return client.run(label);
 }
 
