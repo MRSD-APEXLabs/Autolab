@@ -180,7 +180,7 @@ Node parameters: `base_mode` (`scripted` or `policy`); `base_pose_mm_deg` (six X
 (150.0, both modes), `base_accel_mm_s2` (500.0, the lift and the scripted approach); scripted
 `base_approach_speed_mm_s` (150.0), `base_approach_clearance_mm` (20.0); scripted seating
 `base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (4.0), `base_slide_max_mm`
-(30.0), `base_ridge_force_n` (1.0), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
+(30.0), `base_ridge_force_n` (0.7), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
 `base_slide_fast_mm` (12.0), `base_force_count` (2), `base_settle_sec` (0.2), `base_baseline_sec` (0.2),
 `base_open_wait_sec` (1.5, both modes),
 `base_debug` (false), `base_debug_dir`; policy mode `base_ckpt_dir`, `base_start_pose_mm_deg`,

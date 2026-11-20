@@ -40,7 +40,7 @@ class BasePlacementConfig:
     touch_force_n: float = 1.0
     slide_speed_mm_s: float = 4.0
     slide_max_mm: float = 30.0            # no ridge after this much -X travel fails the run
-    ridge_force_n: float = 1.0
+    ridge_force_n: float = 0.7
     fast_speed_mm_s: float = 10.0
     probe_fast_mm: float = 3.5
     slide_fast_mm: float = 12.0
