@@ -2,12 +2,11 @@
 import './App.css';
 import './theme.css';
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import mqtt from 'mqtt';
 import LoaderPage from "./LoaderPage";
 import ExperimentSequence from './Experiment';
-import CameraPanel from './CameraPanel';
-import Backdrop from './Backdrop';
+import RoutineBuilder, { parseRoutine, routineProblems } from './RoutineBuilder';
+import { Brand, TitleBar } from './Chrome';
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
@@ -139,89 +138,45 @@ export default function App() {
     });
   }
 
-  let routinePreview = null;
-  try {
-    const parsed = JSON.parse(routineJson);
-    routinePreview = Array.isArray(parsed?.steps) ? parsed.steps : null;
-  } catch {
-    routinePreview = null;
-  }
+  const routine = parseRoutine(routineJson);
+  const problems = routineProblems(routine);
 
   return (
     <>
       {!started && (
-        <div className="ax-page">
-          <Backdrop />
+        <div className="ax-page ax-home-page">
           <div className="ax-wrap">
             <header className="ax-top">
-              <div className="ax-brand">
-                <span className="ax-mark" />
-                <span>APEX Labs</span>
-                <span className="section">Workcell</span>
-              </div>
+              <Brand />
               <span className="ax-badge ok live"><i />System ready</span>
             </header>
 
-            <section className="mt-6 md:mt-16">
-              <div className="ax-eyebrow ax-rise" style={{ '--i': 0 }}>
-                <b>01</b> AI-powered laboratory automation
+            <section className="ax-home">
+              <p className="ax-h3">Team H · Workcell control</p>
+              <h1 className="ax-home-title">Apex Labs</h1>
+              <i className="ax-rule" />
+              <p className="ax-home-tag">Automated Precision EXperimentation Laboratories</p>
+              <div className="flex flex-wrap gap-3 mt-8">
+                <button onClick={() => setStarted(true)} className="ax-btn solid lg">
+                  Begin →
+                </button>
+                <a href="/debug" className="ax-btn ghost lg">Debug console</a>
               </div>
-              <h1 className="ax-headline ax-rise flex flex-wrap items-baseline gap-x-5" style={{ '--i': 1 }}>
-                <span>Welcome to <em>Apex</em></span>
-                <span className="ax-badge warn" style={{ fontSize: 14 }}>Alpha</span>
-              </h1>
-              <p className="ax-lede ax-rise" style={{ '--i': 2 }}>
-                Apex combines advanced AI planning, computer vision, and precision robotics to automate laboratory
-                workflows — from pipetting to automated plate handling.
-              </p>
             </section>
 
-            <div className="ax-features mt-12">
+            <ol className="ax-home-steps">
               {[
-                {
-                  title: 'Vision Understanding',
-                  desc: 'Precise object detection and spatial analysis with high-fidelity environment mapping.',
-                  k: 'var(--teal)',
-                },
-                {
-                  title: 'Intelligent Planning',
-                  desc: 'Advanced LLM planners generate optimized laboratory protocols with contextual awareness.',
-                  k: 'var(--blue)',
-                },
-                {
-                  title: 'Robotic Execution',
-                  desc: 'Precision control systems with real-time feedback for reliable laboratory workflow automation.',
-                  k: 'var(--violet)',
-                },
-              ].map((item, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 24 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 + i * 0.09, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                  className="ax-feature"
-                  style={{ '--k': item.k }}
-                >
+                ['Build', 'Put the routine together from blocks: moves, plate handling, OT-2 and shaker.'],
+                ['Send', 'The routine executor runs it step by step on the robot.'],
+                ['Watch', 'Follow the run on the robot and station cameras, with progress alongside.'],
+              ].map(([title, text], i) => (
+                <li key={title}>
                   <b>{String(i + 1).padStart(2, '0')}</b>
-                  <h3>{item.title}</h3>
-                  <p>{item.desc}</p>
-                </motion.div>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </li>
               ))}
-            </div>
-
-            <div className="ax-panel ax-rise mt-10 flex flex-wrap items-center justify-between gap-4" style={{ '--i': 5 }}>
-              <div>
-                <div className="ax-h3">Getting started</div>
-                <p className="mt-2 text-[15px]" style={{ color: 'var(--dim)' }}>
-                  Begin by mapping your workspace objects.
-                </p>
-              </div>
-              <button onClick={() => setStarted(true)} className="ax-btn solid lg">
-                Begin →
-              </button>
-            </div>
-
-            <p className="ax-hint mt-6" style={{ color: 'var(--green)' }}>● AI system initialized</p>
+            </ol>
           </div>
         </div>
       )}
@@ -232,79 +187,44 @@ export default function App() {
 
       {started === true && (
         <div className="ax-page">
-          <Backdrop />
-          <div className="ax-wrap narrow">
+          <div className="ax-wrap">
             <header className="ax-top">
-              <div className="ax-brand">
-                <span className="ax-mark" />
-                <span>APEX Labs</span>
-                <span className="section">New experiment</span>
-              </div>
-              <span className="ax-badge ok live"><i />AI Planning Ready</span>
+              <Brand />
+              <button onClick={() => setStarted(false)} className="ax-btn ghost">
+                ← Back
+              </button>
             </header>
 
-            <div className="ax-eyebrow ax-rise" style={{ '--i': 0 }}>
-              <b>02</b> Routine
+            <TitleBar
+              title="Build the routine"
+              right={routine
+                ? <span className="ax-badge">{routine.steps.length} step{routine.steps.length === 1 ? '' : 's'}</span>
+                : <span className="ax-badge warn">Invalid JSON</span>}
+            />
+
+            <div className="ax-panel mt-6">
+              <RoutineBuilder value={routineJson} onChange={setRoutineJson} />
             </div>
-            <h1 className="ax-headline sm ax-rise" style={{ '--i': 1 }}>
-              Describe the <em>run</em>
-            </h1>
 
-            <div className="ax-panel ax-rise mt-8" style={{ '--i': 2 }}>
-              <div className="ax-panel ax-accent k-busy !shadow-none !p-4 mb-6" style={{ backdropFilter: 'none' }}>
-                <span className="text-sm" style={{ color: 'var(--dim)' }}>
-                  <strong style={{ color: 'var(--text)' }}>Objects detected:</strong> 3 items with spatial coordinates loaded.
-                </span>
-              </div>
-
-              <div className="ax-panel-head">
-                <label htmlFor="routine-json" className="ax-h3">Routine Command (JSON)</label>
-                {routinePreview ? (
-                  <span className="ax-badge ok">{routinePreview.length} step{routinePreview.length === 1 ? '' : 's'}</span>
+            <div className="rb-send">
+              <div className="min-w-0">
+                {problems.length > 0 ? (
+                  <ul className="rb-problems">
+                    {problems.slice(0, 3).map((p) => <li key={p}>{p}</li>)}
+                    {problems.length > 3 && <li>and {problems.length - 3} more</li>}
+                  </ul>
                 ) : (
-                  <span className="ax-badge warn">Invalid JSON</span>
+                  <p className="ax-hint">Ready to send {routine.steps.length} steps to the routine executor.</p>
                 )}
               </div>
-              <textarea
-                id="routine-json"
-                value={routineJson}
-                onChange={(e) => setRoutineJson(e.target.value)}
-                rows="14"
-                spellCheck={false}
-                className="ax-code"
-              />
-              <p className="ax-hint mt-2">
-                Edit the JSON directly to customise steps and parameters before sending.
-              </p>
-
-              {routinePreview && routinePreview.length > 0 && (
-                <div className="ax-chips mt-5">
-                  {routinePreview.map((step, i) => (
-                    <span key={i}>
-                      <b style={{ color: 'var(--faint)', marginRight: 8 }}>{String(i + 1).padStart(2, '0')}</b>
-                      {typeof step === 'string' ? step : step?.name ?? '?'}
-                      {step?.target_machine ? ` · ${step.target_machine}` : ''}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex justify-between items-center mt-8">
-                <button onClick={() => setStarted(false)} className="ax-btn ghost">
-                  ← Back
-                </button>
-                <button onClick={handleContinue} className="ax-btn solid lg">
-                  Continue →
-                </button>
-              </div>
+              <button onClick={handleContinue} className="ax-btn solid lg" disabled={problems.length > 0}>
+                Continue →
+              </button>
             </div>
-
-            <p className="ax-hint mt-6">No coding required</p>
           </div>
         </div>
       )}
 
-      <CameraPanel />
     </>
   );
 }

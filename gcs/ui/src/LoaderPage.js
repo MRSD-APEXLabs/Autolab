@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from "react";
 import ExperimentSequence from "./Experiment";
-import Backdrop from "./Backdrop";
-
 
 export default function LoaderPage({ onNewExperiment, onHome }) {
   const [done, setDone] = useState(false);
@@ -10,21 +8,17 @@ export default function LoaderPage({ onNewExperiment, onHome }) {
     const timer = setTimeout(() => setDone(true), 5000); // 5 seconds
     return () => clearTimeout(timer);
   }, []);
-if (done) {
+
+  if (done) {
     return <ExperimentSequence onNewExperiment={onNewExperiment} onHome={onHome} />;
-}
+  }
 
   return (
     <div className="ax-page flex flex-col items-center justify-center">
-      <Backdrop />
-      <span className="ax-mark lg ax-rise" style={{ "--i": 0 }} />
-      <div className="ax-spinner mt-10 ax-rise" style={{ "--i": 1 }} />
-      <h2 className="ax-eyebrow mt-8 ax-rise" style={{ "--i": 2 }}>
-        Preparing Your Experiment
-      </h2>
-      <p className="ax-hint mt-3 ax-rise" style={{ "--i": 3 }}>
-        Setting up your workflow sequence...
-      </p>
+      <span className="ax-mark lg" />
+      <h2 className="ax-display mt-8">Preparing your experiment</h2>
+      <div className="ax-loadbar mt-6"><i /></div>
+      <p className="ax-hint mt-4">Sending the routine to the executor…</p>
     </div>
   );
 }

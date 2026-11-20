@@ -32,22 +32,22 @@ test('renders the welcome page', () => {
   expect(screen.getByText(/SYSTEM READY/i)).toBeInTheDocument();
 });
 
-test('camera panel header is visible on the welcome page', () => {
+test('the welcome page has no floating camera panel', () => {
   render(<App />);
-  expect(screen.getByText('Camera Feeds')).toBeInTheDocument();
+  expect(screen.queryByText('Camera Feeds')).not.toBeInTheDocument();
 });
 
-test('camera panel header is visible on the experiment page', () => {
+test('the routine builder has no floating camera panel over the blocks', () => {
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: /begin/i }));
-  expect(screen.getByText('Camera Feeds')).toBeInTheDocument();
+  expect(screen.queryByText('Camera Feeds')).not.toBeInTheDocument();
 });
 
-test('camera panel header is visible on the loader page', () => {
+test('the run page shows cameras inline instead of the floating panel', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
   render(<App />);
-  fireEvent.click(screen.getByRole('button', { name: /begin/i }));
-  fireEvent.click(screen.getByRole('button', { name: /continue/i }));
-  expect(screen.getByText('Camera Feeds')).toBeInTheDocument();
+  expect(screen.queryByText('Camera Feeds')).not.toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Cameras' })).toBeInTheDocument();
 });
 
 test('a reload during an experiment comes back to the experiment view', () => {
@@ -94,7 +94,8 @@ test('a failed routine can be retried from the failed step', () => {
 test('new experiment after a failure (and a reload) opens the editor with the last routine', () => {
   const first = render(<App />);
   fireEvent.click(screen.getByRole('button', { name: /begin/i }));
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: '{"steps": [{"name": "pick_base"}]}' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+  fireEvent.change(screen.getByLabelText('Routine JSON'), { target: { value: '{"steps": [{"name": "pick_base"}]}' } });
   fireEvent.click(screen.getByRole('button', { name: /continue/i }));
   emit('connect');
   first.unmount();
@@ -102,7 +103,9 @@ test('new experiment after a failure (and a reload) opens the editor with the la
   render(<App />);
   emit('message', STATUS, routineStatus('failed', { error: 'cancelled' }));
   fireEvent.click(screen.getByRole('button', { name: /new experiment/i }));
-  expect(screen.getByRole('textbox')).toHaveValue('{"steps": [{"name": "pick_base"}]}');
+  expect(screen.getAllByTestId('routine-block')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+  expect(screen.getByLabelText('Routine JSON')).toHaveValue('{"steps": [{"name": "pick_base"}]}');
   expect(window.sessionStorage.getItem('apex.view')).toBeNull();
 });
 
@@ -111,7 +114,7 @@ test('new experiment is offered after a successful routine', () => {
   render(<App />);
   emit('message', STATUS, routineStatus('success', { current_step: 1, current_step_name: null }));
   fireEvent.click(screen.getByRole('button', { name: /new experiment/i }));
-  expect(screen.getByRole('textbox')).toBeInTheDocument();
+  expect(screen.getByText('Build the routine')).toBeInTheDocument();
 });
 
 test('no retry while a routine is running', () => {
@@ -136,7 +139,7 @@ test('an idle executor with no routine offers a new experiment', () => {
   render(<App />);
   emit('message', STATUS, routineStatus('idle', { steps: [], current_step_name: null }));
   fireEvent.click(screen.getByRole('button', { name: /new experiment/i }));
-  expect(screen.getByRole('textbox')).toBeInTheDocument();
+  expect(screen.getByText('Build the routine')).toBeInTheDocument();
 });
 
 test('an idle executor that still has steps shows the tracker, not the idle card', () => {
@@ -181,4 +184,78 @@ test('tip-check results of the run show in the clog check card', () => {
   }));
   expect(screen.getByText('Clog check')).toBeInTheDocument();
   expect(screen.getByText('Clog suspected · P(empty) 0.80')).toBeInTheDocument();
+});
+
+const openBuilder = () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: /begin/i }));
+};
+const sentRoutine = () => JSON.parse(published('cmd/routine_executor/start_routine_cmd')[0][1]);
+
+test('the builder shows the default routine as blocks', () => {
+  openBuilder();
+  expect(screen.getAllByTestId('routine-block')).toHaveLength(13);
+  expect(screen.getByText('13 steps')).toBeInTheDocument();
+});
+
+test('blocks can be added, edited, reordered and removed, and the routine sent', () => {
+  openBuilder();
+  fireEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+  fireEvent.change(screen.getByLabelText('Routine JSON'), { target: { value: '{"steps": [], "max_retries": 3}' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Blocks' }));
+  expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add Go to station' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Wait' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Shaker' }));
+  fireEvent.change(screen.getByLabelText('For'), { target: { value: '25' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Move step 2 up' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Return home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove step 3' }));
+
+  fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+  emit('connect');
+  expect(sentRoutine()).toEqual({
+    steps: [{ name: 'wait', time_s: 25 }, { name: 'go_to', target_machine: 'shaker' }],
+    max_retries: 3,
+  });
+});
+
+test('an OT-2 block edits its commands', () => {
+  openBuilder();
+  fireEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+  fireEvent.change(screen.getByLabelText('Routine JSON'), { target: { value: '{"steps": []}' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Blocks' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add OT-2 protocol' }));
+  fireEvent.change(screen.getByLabelText('Command 2 volumes'), { target: { value: '150' } });
+  fireEvent.change(screen.getByLabelText('Command 3 wells'), { target: { value: '0, 5,' } });
+  fireEvent.change(screen.getByLabelText('Command 3 wells'), { target: { value: '0, 5, 10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove command 1' }));
+  fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+  emit('connect');
+  const cmds = sentRoutine().steps[0].parameters_json.steps;
+  expect(cmds.map((c) => c.action)).toEqual(['aspirate', 'dispense', 'drop_tips']);
+  expect(cmds[0].volumes).toEqual([150]);
+  expect(cmds[1].well_indices).toEqual([0, 5, 10]);
+});
+
+test('a block missing a parameter blocks sending', () => {
+  openBuilder();
+  fireEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+  fireEvent.change(screen.getByLabelText('Routine JSON'), { target: { value: '{"steps": [{"name": "place"}]}' } });
+  fireEvent.click(screen.getByRole('tab', { name: 'Blocks' }));
+  expect(screen.getByText('Needs target_machine')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+});
+
+test('the run timeline lists every step with readable names', () => {
+  window.sessionStorage.setItem('apex.view', 'experiment');
+  render(<App />);
+  emit('message', STATUS, routineStatus('running', {
+    steps: [{ name: 'go_to', target_machine: 'ot2' }, { name: 'shaker', pwm: 150 }], current_step: 1, current_step_name: 'shaker',
+  }));
+  const timeline = screen.getByRole('complementary', { name: 'Run progress' });
+  expect(timeline).toHaveTextContent('Go to OT-2');
+  expect(timeline).toHaveTextContent('1/2 Steps Completed');
+  expect(screen.getAllByText('Run shaker').length).toBeGreaterThan(0);
 });

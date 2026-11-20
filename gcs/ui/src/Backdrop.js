@@ -1,14 +1,24 @@
 import React from 'react';
 import './theme.css';
 
-// Dot grid + soft glows behind every main page (the FVD deck's slide background).
-// The second glow follows --accent, so a page can tint it with the run state.
-export default function Backdrop() {
+// The deck's section-slide shapes (orange half-discs, blue quarter, red block), drawn behind a page.
+// variant "title" = the three growing half-discs of the section slides; "corner" = the small stack.
+export default function Backdrop({ variant = 'corner' }) {
   return (
-    <div className="ax-bg" aria-hidden="true">
-      <div className="grid" />
-      <div className="glow g1" />
-      <div className="glow g2" />
+    <div className={`ax-shapes ${variant}`} aria-hidden="true">
+      {variant === 'title' ? (
+        <>
+          <i className="d1" />
+          <i className="d2" />
+          <i className="d3" />
+        </>
+      ) : (
+        <>
+          <i className="q" />
+          <i className="r" />
+          <i className="c" />
+        </>
+      )}
     </div>
   );
 }
