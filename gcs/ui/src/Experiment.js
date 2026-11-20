@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import mqtt from "mqtt";
 import ClogCheckCard from "./ClogCheckCard";
+import Backdrop from "./Backdrop";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
@@ -42,14 +43,14 @@ const STATE_LABEL = {
   failed: "Failed",
 };
 
-// Colors mirror the underglow LEDs (6_behavior/led_status README "State → LED").
+// Colors mirror the underglow LEDs (6_behavior/led_status README "State → LED"), in the deck palette.
 const LED_STYLE = {
-  I: { name: "Idle",    badge: "bg-teal-100 text-teal-700",     text: "text-teal-600",   dot: "bg-teal-500" },
-  M: { name: "Moving",  badge: "bg-cyan-100 text-cyan-700",     text: "text-cyan-600",   dot: "bg-cyan-500" },
-  A: { name: "Arm",     badge: "bg-purple-100 text-purple-700", text: "text-purple-600", dot: "bg-purple-500" },
-  W: { name: "Waiting", badge: "bg-amber-100 text-amber-700",   text: "text-amber-600",  dot: "bg-amber-500" },
-  E: { name: "Fault",   badge: "bg-red-100 text-red-600",       text: "text-red-600",    dot: "bg-red-500" },
-  R: { name: "Ready",   badge: "bg-green-100 text-green-700",   text: "text-green-600",  dot: "bg-green-500" },
+  I: { name: "Idle",    color: "var(--teal)" },
+  M: { name: "Moving",  color: "var(--cyan)" },
+  A: { name: "Arm",     color: "var(--violet)" },
+  W: { name: "Waiting", color: "var(--amber)" },
+  E: { name: "Fault",   color: "var(--red)" },
+  R: { name: "Ready",   color: "var(--green)" },
 };
 
 // Step type → LED group (led_status/node.py GROUPS). Steps with no watched BT action (wait) leave the LED idle.
@@ -79,6 +80,26 @@ function formatExecPayload(payload) {
   if (payload.data !== undefined) return String(payload.data);
   return JSON.stringify(payload);
 }
+
+// Short "where / how" under a step name in the timeline: ot2 · 150 pwm · 20 s · 4 commands.
+function stepDetail(step) {
+  if (!step || typeof step !== "object") return "";
+  if (step.target_machine) return step.target_machine;
+  if (typeof step.time_s === "number") return `${step.time_s} s`;
+  if (step.pwm !== undefined) return Number(step.pwm) === 0 ? "stop" : `pwm ${step.pwm}`;
+  let params = step.parameters_json;
+  if (typeof params === "string") {
+    try {
+      params = JSON.parse(params);
+    } catch {
+      params = null;
+    }
+  }
+  if (Array.isArray(params?.steps)) return `${params.steps.length} command${params.steps.length === 1 ? "" : "s"}`;
+  return "";
+}
+
+const pad2 = (n) => String(n).padStart(2, "0");
 
 export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
@@ -173,25 +194,38 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const currentStepName = status?.current_step_name ?? null;
   const stateLabel = STATE_LABEL[state] ?? STATE_LABEL.idle;
   const led = LED_STYLE[ledFor(state, currentStepName)];
-  const { badge: stateBadge, text: stateText } = led;
   const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
+  const active = state === "running" || state === "paused";
+  const pct = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0;
+
+  // Big line at the top of the run: the step being worked on, like the deck's mission-control stage.
+  let stageNum = null;
+  let stageText = "Waiting for executor";
+  if (status) {
+    if (active && currentStepName) {
+      stageNum = pad2(currentStepIdx + 1);
+      stageText = currentStepName;
+    } else if (state === "failed") {
+      stageNum = totalSteps > 0 ? pad2(Math.min(currentStepIdx + 1, totalSteps)) : null;
+      stageText = failedStepName ? `${failedStepName} stopped` : "Stopped";
+    } else if (state === "success") {
+      stageNum = pad2(totalSteps);
+      stageText = "All steps done";
+    } else {
+      stageText = "Standing by";
+    }
+  }
 
   // Ways out when the executor has nothing to run.
   const idleActions = (
-    <div className="mt-4 flex flex-wrap gap-2">
+    <div className="mt-5 flex flex-wrap gap-2">
       {onNewExperiment && (
-        <button
-          onClick={onNewExperiment}
-          className="text-sm px-4 py-2 rounded-lg bg-orange-600 text-white hover:bg-orange-700"
-        >
+        <button onClick={onNewExperiment} className="ax-btn solid">
           New experiment
         </button>
       )}
       {onHome && (
-        <button
-          onClick={onHome}
-          className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100"
-        >
+        <button onClick={onHome} className="ax-btn ghost">
           Back to home
         </button>
       )}
@@ -199,244 +233,263 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-6">
-        <div className="w-6 h-6 rounded-full bg-gray-800" />
-        <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={handleCancel}
-            className="text-xs px-3 py-1 rounded-full bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-40"
-            disabled={state !== "running" && state !== "paused"}
-          >
-            Cancel
-          </button>
-          {state === "running" && (
-            <button
-              onClick={handlePause}
-              className="text-xs px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-            >
-              Pause
+    <div className="ax-page" style={{ "--accent": led.color }}>
+      <Backdrop />
+      <div className="ax-wrap">
+        {/* Top bar */}
+        <header className="ax-top">
+          <div className="ax-brand">
+            <span className="ax-mark" />
+            <span>APEX Labs</span>
+            <span className="section">Experiment run</span>
+          </div>
+          <div className="ax-top-right">
+            {state === "running" && (
+              <button onClick={handlePause} className="ax-btn amber">
+                Pause
+              </button>
+            )}
+            {state === "paused" && (
+              <button onClick={handleResume} className="ax-btn green">
+                Resume
+              </button>
+            )}
+            <button onClick={handleCancel} className="ax-btn stop" disabled={!active}>
+              Cancel
             </button>
-          )}
-          {state === "paused" && (
-            <button
-              onClick={handleResume}
-              className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200"
-            >
-              Resume
-            </button>
-          )}
-          <span
-            className={`text-xs px-2 py-1 rounded-full ${
-              connected ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
-            }`}
-          >
-            {connected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
-      </div>
-
-      {/* Title */}
-      <div className="mb-4 w-full flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Experiment Sequence</h2>
-          <p className="text-gray-500 text-sm">Live routine executor status</p>
-        </div>
-        <span className={`text-sm font-medium px-3 py-1 rounded-full ${stateBadge}`}>
-          {stateLabel}
-        </span>
-      </div>
-
-      {/* Waiting placeholder */}
-      {!status && (
-        <div className="bg-white p-8 rounded-2xl shadow text-center text-gray-400 text-sm">
-          Waiting for routine executor…
-        </div>
-      )}
-
-      {/* Progress Tracker */}
-      {status && totalSteps > 0 && (
-        <div className="bg-white p-4 rounded-2xl shadow mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <span className={`font-medium ${stateText}`}>{stateLabel}</span>
-            <span className="text-sm text-gray-500">
-              {completedCount}/{totalSteps} Steps Completed
+            <span className={`ax-badge ${connected ? "ok live" : ""}`}>
+              <i />
+              {connected ? "Connected" : "Disconnected"}
             </span>
           </div>
+        </header>
 
-          <div className="flex gap-2 flex-wrap">
-            {steps.map((step, i) => {
-              let bg;
-              if (state === "success") {
-                bg = "bg-green-500";
-              } else if (i < currentStepIdx) {
-                bg = "bg-green-500";
-              } else if (i === currentStepIdx && state !== "idle") {
-                bg = led.dot;
-              } else {
-                bg = "bg-gray-300";
-              }
-
-              return (
-                <div
-                  key={i}
-                  title={stepName(step)}
-                  className={`w-6 h-6 rounded-full ${bg} text-white flex items-center justify-center text-xs font-medium`}
-                >
-                  {i + 1}
-                </div>
-              );
-            })}
+        {/* Run header */}
+        <section className="ax-runhead mb-8">
+          <div className="min-w-0">
+            <h2 className="ax-eyebrow ax-rise" style={{ "--i": 0 }}>Experiment Sequence</h2>
+            <div
+              key={`${state}-${currentStepIdx}`}
+              className="ax-stage flip"
+              style={{ "--k": led.color }}
+            >
+              {stageNum && <b>{stageNum}</b>}
+              <span>{stageText}</span>
+              {stageNum && totalSteps > 0 && <span className="of">/ {pad2(totalSteps)}</span>}
+            </div>
+            <p className="ax-hint mt-3">Live routine executor status</p>
           </div>
-
-          <p className="text-sm mt-2 text-gray-500">
-            {(state === "running" || state === "paused") && status.current_step_name && (
-              <>
-                {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
-                <span className={`font-medium ${stateText}`}>
-                  {status.current_step_name}
-                </span>
-              </>
-            )}
-            {state === "success" && (
-              <span className="text-green-600 font-medium">Routine complete</span>
-            )}
-            {state === "failed" && (
-              <span className="text-red-600 font-medium">
-                {status.error ?? "Failed"}
+          <div className="flex items-center gap-3">
+            {active && (
+              <span className="ax-badge k" style={{ "--k": led.color }}>
+                <i />
+                {led.name}
               </span>
             )}
-            {state === "idle" && "No routine running"}
-          </p>
-          {state === "idle" && idleActions}
-        </div>
-      )}
-
-      {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
-      {status?.recordings?.length > 0 && <ClogCheckCard recordings={status.recordings} />}
-
-      {/* Active Step Card */}
-      {status && (state === "running" || state === "paused") && status.current_step_name && (
-        <div className="bg-white rounded-2xl shadow p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              Step {currentStepIdx + 1} of {totalSteps}
-            </h3>
-            <span className={`flex items-center gap-2 text-sm font-medium ${stateText}`}>
-              <span className={`w-2.5 h-2.5 rounded-full ${led.dot}`} />
-              {state === "paused" ? "Paused" : "Running"} · {led.name}
+            <span
+              className={`ax-state ${state === "idle" ? "" : "fill"}`}
+              style={{ "--k": led.color }}
+            >
+              {stateLabel}
             </span>
           </div>
+        </section>
 
-          <div className="mb-4">
-            <label className="text-gray-700 text-sm font-medium">Step name</label>
-            <input
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
-              value={status.current_step_name}
-              readOnly
-            />
+        {/* Waiting placeholder */}
+        {!status && (
+          <div className="ax-panel text-center">
+            <div className="ax-spinner mx-auto" />
+            <p className="ax-hint mt-4">Waiting for routine executor…</p>
+          </div>
+        )}
+
+        {/* Progress tracker: the deck's step timeline */}
+        {status && totalSteps > 0 && (
+          <div className="ax-panel ax-rise" style={{ "--i": 1 }}>
+            <div className="ax-panel-head !mb-0">
+              <span className="ax-h3">Routine</span>
+              <span className="ax-mono text-sm" style={{ color: "var(--dim)" }}>
+                {completedCount}/{totalSteps} Steps Completed
+              </span>
+            </div>
+            <div className="ax-progress">
+              <i style={{ width: `${pct}%` }} />
+            </div>
+
+            <ol className="ax-timeline">
+              {steps.map((step, i) => {
+                let cls = "";
+                if (state === "success" || i < currentStepIdx) cls = "done";
+                else if (i === currentStepIdx && state === "failed") cls = "fail";
+                else if (i === currentStepIdx && state !== "idle") cls = state === "paused" ? "now paused" : "now";
+                const detail = stepDetail(step);
+                return (
+                  <li
+                    key={i}
+                    title={stepName(step)}
+                    className={`ax-tl ${cls}`}
+                    style={{ "--cs": cls.startsWith("now") ? led.color : "var(--teal)" }}
+                  >
+                    <b>{pad2(i + 1)}</b>
+                    <span>{stepName(step)}</span>
+                    <small>{detail || "\u00a0"}</small>
+                  </li>
+                );
+              })}
+            </ol>
+
+            <p className="text-sm mt-5" style={{ color: "var(--dim)" }}>
+              {active && status.current_step_name && (
+                <>
+                  {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
+                  <span className="font-medium" style={{ color: led.color }}>
+                    {status.current_step_name}
+                  </span>
+                </>
+              )}
+              {state === "success" && (
+                <span className="font-medium" style={{ color: "var(--green)" }}>Routine complete</span>
+              )}
+              {state === "failed" && (
+                <span className="font-medium" style={{ color: "var(--red)" }}>
+                  {status.error ?? "Failed"}
+                </span>
+              )}
+              {state === "idle" && "No routine running"}
+            </p>
+            {state === "idle" && idleActions}
+          </div>
+        )}
+
+        <div className="grid gap-[18px] mt-[18px] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-start">
+          <div className="grid gap-[18px] min-w-0">
+            {/* Active step card */}
+            {status && active && status.current_step_name && (
+              <div className="ax-panel ax-accent ax-rise" style={{ "--k": led.color, "--i": 2 }}>
+                <div className="ax-panel-head">
+                  <h3 className="ax-h3">
+                    Step {currentStepIdx + 1} of {totalSteps}
+                  </h3>
+                  <span className="ax-badge k" style={{ "--k": led.color }}>
+                    <i />
+                    {state === "paused" ? "Paused" : "Running"} · {led.name}
+                  </span>
+                </div>
+
+                <div className="ax-mono text-xs" style={{ color: "var(--faint)" }}>Step name</div>
+                <div
+                  className="mt-1"
+                  style={{ font: "700 30px/1.1 var(--display)", letterSpacing: ".01em" }}
+                >
+                  {status.current_step_name}
+                </div>
+                {stepDetail(steps[currentStepIdx]) && (
+                  <div className="ax-hint mt-1">{stepDetail(steps[currentStepIdx])}</div>
+                )}
+
+                {status.retry_count > 0 && (
+                  <p className="ax-badge warn mt-4">
+                    Retry {status.retry_count} of {status.max_retries}
+                  </p>
+                )}
+
+                {/* Executor status for this step */}
+                {displayTopics.length > 0 && (
+                  <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+                    <p className="ax-h3 mb-3">Executor Status</p>
+                    <dl className="ax-kv">
+                      {displayTopics.map((ros2Topic) => {
+                        const val = executorStatus[`ros2${ros2Topic}`];
+                        return (
+                          <React.Fragment key={ros2Topic}>
+                            <dt title={ros2Topic}>{ros2Topic}</dt>
+                            <dd>{formatExecPayload(val)}</dd>
+                          </React.Fragment>
+                        );
+                      })}
+                    </dl>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Error card */}
+            {status && state === "failed" && (
+              <div className="ax-panel ax-accent k-bad ax-rise" style={{ "--i": 2 }}>
+                <small className="ax-mono text-xs font-bold tracking-[.18em]" style={{ color: "var(--red)" }}>
+                  FAULT
+                </small>
+                <h3 className="mt-2" style={{ font: "700 28px/1.1 var(--display)" }}>Routine Failed</h3>
+                <p className="ax-mono text-sm mt-2" style={{ color: "var(--dim)" }}>
+                  {status.error ?? "Unknown error"}
+                </p>
+                {canRetry && confirmForce && (
+                  <p className="text-sm mt-4 font-medium" style={{ color: "var(--amber)" }}>
+                    This step handles liquid and was not retried automatically: the tip may still hold liquid.
+                    Check the OT-2 before running the step again.
+                  </p>
+                )}
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {canRetry && (
+                    <button
+                      onClick={handleRetry}
+                      disabled={!connected || retryPending}
+                      className={`ax-btn solid ${confirmForce ? "amber" : "stop"}`}
+                    >
+                      {retryPending
+                        ? "Retrying…"
+                        : confirmForce
+                        ? "I've inspected the OT-2 — retry"
+                        : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
+                    </button>
+                  )}
+                  {onNewExperiment && (
+                    <button onClick={onNewExperiment} className="ax-btn ghost">
+                      New experiment
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Idle card: executor is idle with no routine loaded */}
+            {status && state === "idle" && totalSteps === 0 && (
+              <div className="ax-panel ax-accent k-none ax-rise" style={{ "--i": 1 }}>
+                <h3 style={{ font: "700 26px/1.1 var(--display)" }}>No routine running</h3>
+                <p className="text-sm mt-2" style={{ color: "var(--dim)" }}>
+                  The routine executor is idle. Start a new experiment or head back home.
+                </p>
+                {idleActions}
+              </div>
+            )}
+
+            {/* Success card */}
+            {status && state === "success" && (
+              <div className="ax-panel ax-accent k-ok ax-rise" style={{ "--i": 2 }}>
+                <small className="ax-mono text-xs font-bold tracking-[.18em]" style={{ color: "var(--green)" }}>
+                  DONE
+                </small>
+                <h3 className="mt-2" style={{ font: "700 28px/1.1 var(--display)" }}>Routine Complete</h3>
+                <p className="text-sm mt-2" style={{ color: "var(--dim)" }}>
+                  All {totalSteps} steps executed successfully.
+                </p>
+                {onNewExperiment && (
+                  <button onClick={onNewExperiment} className="ax-btn solid green mt-5">
+                    New experiment
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {status.retry_count > 0 && (
-            <p className="text-sm text-amber-600">
-              Retry {status.retry_count} of {status.max_retries}
-            </p>
-          )}
-
-          {/* Executor status for this step */}
-          {displayTopics.length > 0 && (
-            <div className="mt-4 border-t pt-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                Executor Status
-              </p>
-              <div className="space-y-2">
-                {displayTopics.map((ros2Topic) => {
-                  const mqttTopic = `ros2${ros2Topic}`;
-                  const val = executorStatus[mqttTopic];
-                  return (
-                    <div key={ros2Topic} className="flex items-center justify-between gap-4">
-                      <span className="text-xs text-gray-400 font-mono truncate">
-                        {ros2Topic}
-                      </span>
-                      <span className="text-xs text-gray-700 font-medium shrink-0">
-                        {formatExecPayload(val)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
+          {status?.recordings?.length > 0 && (
+            <div className="min-w-0">
+              <ClogCheckCard recordings={status.recordings} />
             </div>
           )}
         </div>
-      )}
-
-      {/* Error Card */}
-      {status && state === "failed" && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
-          <h3 className="font-semibold mb-1">Routine Failed</h3>
-          <p className="text-sm">{status.error ?? "Unknown error"}</p>
-          {canRetry && confirmForce && (
-            <p className="text-sm mt-3 font-medium">
-              This step handles liquid and was not retried automatically: the tip may still hold liquid.
-              Check the OT-2 before running the step again.
-            </p>
-          )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {canRetry && (
-              <button
-                onClick={handleRetry}
-                disabled={!connected || retryPending}
-                className="text-sm px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {retryPending
-                  ? "Retrying…"
-                  : confirmForce
-                  ? "I've inspected the OT-2 — retry"
-                  : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
-              </button>
-            )}
-            {onNewExperiment && (
-              <button
-                onClick={onNewExperiment}
-                className="text-sm px-4 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-100"
-              >
-                New experiment
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Idle Card: executor is idle with no routine loaded */}
-      {status && state === "idle" && totalSteps === 0 && (
-        <div className="bg-white rounded-2xl shadow p-6 text-gray-700">
-          <h3 className="font-semibold">No routine running</h3>
-          <p className="text-sm mt-1 text-gray-500">
-            The routine executor is idle. Start a new experiment or head back home.
-          </p>
-          {idleActions}
-        </div>
-      )}
-
-      {/* Success Card */}
-      {status && state === "success" && (
-        <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-green-700">
-          <h3 className="font-semibold">Routine Complete</h3>
-          <p className="text-sm mt-1">
-            All {totalSteps} steps executed successfully.
-          </p>
-          {onNewExperiment && (
-            <button
-              onClick={onNewExperiment}
-              className="mt-4 text-sm px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
-            >
-              New experiment
-            </button>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

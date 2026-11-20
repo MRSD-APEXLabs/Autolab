@@ -1,11 +1,13 @@
 // import logo from './logo.svg';
 import './App.css';
+import './theme.css';
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import mqtt from 'mqtt';
 import LoaderPage from "./LoaderPage";
 import ExperimentSequence from './Experiment';
 import CameraPanel from './CameraPanel';
+import Backdrop from './Backdrop';
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
@@ -137,71 +139,90 @@ export default function App() {
     });
   }
 
+  let routinePreview = null;
+  try {
+    const parsed = JSON.parse(routineJson);
+    routinePreview = Array.isArray(parsed?.steps) ? parsed.steps : null;
+  } catch {
+    routinePreview = null;
+  }
+
   return (
     <>
       {!started && (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center px-6 py-10">
-          <header className="w-full max-w-5xl flex justify-between items-center mb-12">
-            <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-            <span className="text-sm text-orange-600 font-medium">SYSTEM READY</span>
-          </header>
+        <div className="ax-page">
+          <Backdrop />
+          <div className="ax-wrap">
+            <header className="ax-top">
+              <div className="ax-brand">
+                <span className="ax-mark" />
+                <span>APEX Labs</span>
+                <span className="section">Workcell</span>
+              </div>
+              <span className="ax-badge ok live"><i />System ready</span>
+            </header>
 
-          <div className="w-full max-w-5xl shadow-xl border border-gray-200 rounded-2xl bg-white p-10">
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
-                Welcome to Apex
-                <span className="bg-orange-100 text-orange-600 text-sm font-semibold px-2 py-0.5 rounded-md">Alpha</span>
-              </h2>
-              <p className="text-gray-600 mt-2 max-w-3xl">
-                AI-powered laboratory automation platform. Apex combines advanced AI planning, computer vision, and precision robotics
-                to automate laboratory workflows — from pipetting to automated plate handling.
+            <section className="mt-6 md:mt-16">
+              <div className="ax-eyebrow ax-rise" style={{ '--i': 0 }}>
+                <b>01</b> AI-powered laboratory automation
+              </div>
+              <h1 className="ax-headline ax-rise flex flex-wrap items-baseline gap-x-5" style={{ '--i': 1 }}>
+                <span>Welcome to <em>Apex</em></span>
+                <span className="ax-badge warn" style={{ fontSize: 14 }}>Alpha</span>
+              </h1>
+              <p className="ax-lede ax-rise" style={{ '--i': 2 }}>
+                Apex combines advanced AI planning, computer vision, and precision robotics to automate laboratory
+                workflows — from pipetting to automated plate handling.
               </p>
-            </div>
+            </section>
 
-            <div className="grid md:grid-cols-3 gap-6 mb-10">
+            <div className="ax-features mt-12">
               {[
                 {
                   title: 'Vision Understanding',
                   desc: 'Precise object detection and spatial analysis with high-fidelity environment mapping.',
-                  icon: '👁️',
+                  k: 'var(--teal)',
                 },
                 {
                   title: 'Intelligent Planning',
                   desc: 'Advanced LLM planners generate optimized laboratory protocols with contextual awareness.',
-                  icon: '🧠',
+                  k: 'var(--blue)',
                 },
                 {
                   title: 'Robotic Execution',
                   desc: 'Precision control systems with real-time feedback for reliable laboratory workflow automation.',
-                  icon: '🤖',
+                  k: 'var(--violet)',
                 },
               ].map((item, i) => (
                 <motion.div
                   key={i}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 24 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="p-5 border border-gray-200 rounded-xl hover:shadow-md transition bg-gray-50/60"
+                  transition={{ delay: 0.3 + i * 0.09, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                  className="ax-feature"
+                  style={{ '--k': item.k }}
                 >
-                  <div className="text-3xl mb-3">{item.icon}</div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-1">{item.title}</h3>
-                  <p className="text-gray-600 text-sm leading-relaxed">{item.desc}</p>
+                  <b>{String(i + 1).padStart(2, '0')}</b>
+                  <h3>{item.title}</h3>
+                  <p>{item.desc}</p>
                 </motion.div>
               ))}
             </div>
 
-            <div className="flex justify-between items-center">
-              <p className="text-gray-600 text-sm">Getting Started — Begin by mapping your workspace objects.</p>
-              <button
-                onClick={() => setStarted(true)}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg"
-              >
+            <div className="ax-panel ax-rise mt-10 flex flex-wrap items-center justify-between gap-4" style={{ '--i': 5 }}>
+              <div>
+                <div className="ax-h3">Getting started</div>
+                <p className="mt-2 text-[15px]" style={{ color: 'var(--dim)' }}>
+                  Begin by mapping your workspace objects.
+                </p>
+              </div>
+              <button onClick={() => setStarted(true)} className="ax-btn solid lg">
                 Begin →
               </button>
             </div>
-          </div>
 
-          <div className="mt-6 text-sm text-green-600 font-medium">AI system initialized</div>
+            <p className="ax-hint mt-6" style={{ color: 'var(--green)' }}>● AI system initialized</p>
+          </div>
         </div>
       )}
 
@@ -210,47 +231,76 @@ export default function App() {
       {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} onHome={goHome} />}
 
       {started === true && (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center px-6 py-10">
-          <header className="w-full max-w-4xl flex justify-between items-center mb-8">
-            <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-            <span className="text-sm text-green-600 font-medium">AI Planning Ready</span>
-          </header>
+        <div className="ax-page">
+          <Backdrop />
+          <div className="ax-wrap narrow">
+            <header className="ax-top">
+              <div className="ax-brand">
+                <span className="ax-mark" />
+                <span>APEX Labs</span>
+                <span className="section">New experiment</span>
+              </div>
+              <span className="ax-badge ok live"><i />AI Planning Ready</span>
+            </header>
 
-          <div className="w-full max-w-4xl bg-white shadow-lg border border-gray-200 rounded-2xl p-8">
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-              <strong>Objects detected:</strong> 3 items with spatial coordinates loaded.
+            <div className="ax-eyebrow ax-rise" style={{ '--i': 0 }}>
+              <b>02</b> Routine
             </div>
+            <h1 className="ax-headline sm ax-rise" style={{ '--i': 1 }}>
+              Describe the <em>run</em>
+            </h1>
 
-            <div className="mb-6">
-              <label className="block text-gray-700 font-medium mb-2">Routine Command (JSON)</label>
+            <div className="ax-panel ax-rise mt-8" style={{ '--i': 2 }}>
+              <div className="ax-panel ax-accent k-busy !shadow-none !p-4 mb-6" style={{ backdropFilter: 'none' }}>
+                <span className="text-sm" style={{ color: 'var(--dim)' }}>
+                  <strong style={{ color: 'var(--text)' }}>Objects detected:</strong> 3 items with spatial coordinates loaded.
+                </span>
+              </div>
+
+              <div className="ax-panel-head">
+                <label htmlFor="routine-json" className="ax-h3">Routine Command (JSON)</label>
+                {routinePreview ? (
+                  <span className="ax-badge ok">{routinePreview.length} step{routinePreview.length === 1 ? '' : 's'}</span>
+                ) : (
+                  <span className="ax-badge warn">Invalid JSON</span>
+                )}
+              </div>
               <textarea
+                id="routine-json"
                 value={routineJson}
                 onChange={(e) => setRoutineJson(e.target.value)}
-                rows="12"
-                className="w-full border-2 border-orange-300 focus:border-orange-500 rounded-lg p-3 outline-none text-gray-800 font-mono text-sm"
+                rows="14"
+                spellCheck={false}
+                className="ax-code"
               />
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="ax-hint mt-2">
                 Edit the JSON directly to customise steps and parameters before sending.
               </p>
+
+              {routinePreview && routinePreview.length > 0 && (
+                <div className="ax-chips mt-5">
+                  {routinePreview.map((step, i) => (
+                    <span key={i}>
+                      <b style={{ color: 'var(--faint)', marginRight: 8 }}>{String(i + 1).padStart(2, '0')}</b>
+                      {typeof step === 'string' ? step : step?.name ?? '?'}
+                      {step?.target_machine ? ` · ${step.target_machine}` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mt-8">
+                <button onClick={() => setStarted(false)} className="ax-btn ghost">
+                  ← Back
+                </button>
+                <button onClick={handleContinue} className="ax-btn solid lg">
+                  Continue →
+                </button>
+              </div>
             </div>
 
-            <div className="flex justify-between items-center">
-              <button
-                onClick={() => setStarted(false)}
-                className="text-gray-600 hover:text-gray-800 text-sm"
-              >
-                ← Back
-              </button>
-              <button
-                onClick={handleContinue}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg"
-              >
-                Continue →
-              </button>
-            </div>
+            <p className="ax-hint mt-6">No coding required</p>
           </div>
-
-          <p className="text-gray-500 text-sm mt-6 italic">*No coding required*</p>
         </div>
       )}
 

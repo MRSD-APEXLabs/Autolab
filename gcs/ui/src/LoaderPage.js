@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import ExperimentSequence from "./Experiment";
+import Backdrop from "./Backdrop";
 
 
 export default function LoaderPage({ onNewExperiment, onHome }) {
@@ -14,18 +15,14 @@ if (done) {
 }
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-white">
-      <div className="relative w-12 h-12">
-        <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
-        <div
-          className="absolute inset-0 border-4 border-orange-500 rounded-full border-t-transparent animate-spin"
-          style={{ animationDuration: "1s" }}
-        ></div>
-      </div>
-      <h2 className="mt-6 text-lg font-semibold text-gray-800">
+    <div className="ax-page flex flex-col items-center justify-center">
+      <Backdrop />
+      <span className="ax-mark lg ax-rise" style={{ "--i": 0 }} />
+      <div className="ax-spinner mt-10 ax-rise" style={{ "--i": 1 }} />
+      <h2 className="ax-eyebrow mt-8 ax-rise" style={{ "--i": 2 }}>
         Preparing Your Experiment
       </h2>
-      <p className="text-gray-500 text-sm mt-1">
+      <p className="ax-hint mt-3 ax-rise" style={{ "--i": 3 }}>
         Setting up your workflow sequence...
       </p>
     </div>
