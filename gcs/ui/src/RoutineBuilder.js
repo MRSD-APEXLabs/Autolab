@@ -203,7 +203,14 @@ function BlockFields({ step, onChange }) {
       return (
         <div className="flex flex-wrap items-center gap-3">
           <NumberField label="Speed" unit="PWM" value={step.pwm} min={0} max={255} onChange={(v) => set({ pwm: v })} />
-          <span className="rb-note">{Number(step.pwm) === 0 ? 'stops the shaker' : '0 stops it'}</span>
+          {Number(step.pwm) === 0 ? (
+            <span className="rb-note">stops the shaker</span>
+          ) : (
+            <>
+              <NumberField label="Run for" unit="s" value={step.wait_time_s ?? 0} min={0} onChange={(v) => set({ wait_time_s: v })} />
+              <span className="rb-note">{Number(step.wait_time_s) > 0 ? 'then stops' : '0 s keeps it running'}</span>
+            </>
+          )}
         </div>
       );
     case 'wait':

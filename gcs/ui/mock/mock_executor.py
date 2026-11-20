@@ -8,7 +8,7 @@ Stands in for everything behind the MQTT broker that the experiment flow needs:
                        required params from step_config.py, so start/pause/cancel/retry behave
                        like prod.
 * the robot          — each dispatched step "runs" for --step-time seconds (wait steps use
-                       their time_s), then succeeds or fails per --fail-step / --fail-rate.
+                       their time_s, shaker steps add their wait_time_s), then succeeds or fails per --fail-step / --fail-rate.
 * manipulation exec. — pick/place steps publish ros2/<robot>/behavior/manipulation_phase and
                        ros2/planning_state like the real executive.
 * lab_machine exec.  — an ot2 step walks through its commands (connecting → each command →
@@ -383,6 +383,8 @@ class MockExecutor:
             duration = float(step.get('time_s', 0))
         else:
             duration = self._ot2_time if name == 'ot2' else self._step_time
+            if name == 'shaker':  # timed: start, hold wait_time_s, stop
+                duration += float(step.get('wait_time_s', 0) or 0)
         fail = name != 'wait' and (attempt <= self._fail_steps.get(name, 0)
                                    or self._rng.random() < self._fail_rate)
         # (time into the step, kind, data): 'progress' -> step_progress, 'tip' -> a tip-check result

@@ -76,9 +76,7 @@ const DEFAULT_ROUTINE = JSON.stringify(
       { name: 'pick', target_machine: 'ot2' },
       { name: 'go_to', target_machine: 'shaker' },
       { name: 'place', target_machine: 'shaker' },
-      { name: 'shaker', pwm: 150 },
-      { name: 'wait', 'time_s': 20 },
-      { name: 'shaker', pwm: 0 },
+      { name: 'shaker', pwm: 150, wait_time_s: 20 },
       { name: 'pick', target_machine: 'shaker' },
       { name: 'place_base' },
       { name: 'go_to', target_machine: 'home' }

@@ -194,8 +194,8 @@ const sentRoutine = () => JSON.parse(published('cmd/routine_executor/start_routi
 
 test('the builder shows the default routine as blocks', () => {
   openBuilder();
-  expect(screen.getAllByTestId('routine-block')).toHaveLength(13);
-  expect(screen.getByText('13 steps')).toBeInTheDocument();
+  expect(screen.getAllByTestId('routine-block')).toHaveLength(11);
+  expect(screen.getByText('11 steps')).toBeInTheDocument();
 });
 
 test('blocks can be added, edited, reordered and removed, and the routine sent', () => {

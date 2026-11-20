@@ -30,6 +30,19 @@ def _stop_navigation():
     return '/nav/cancel', Empty()
 
 
+def make_shaker_msg(pwm) -> LabMachineCommand:
+    return LabMachineCommand(
+        device='shaker',
+        action='protocol',
+        parameters_json=json.dumps({'pwm': pwm}),
+    )
+
+
+def _stop_shaker():
+    # a cancelled run never leaves the shaker spinning (also ends a timed step's hold)
+    return 'behavior/lab_machine_command', make_shaker_msg(0)
+
+
 STEPS = {
     'pick_base': {
         'msg_type': 'manipulation',
@@ -79,16 +92,15 @@ STEPS = {
         'watch_topic': 'behavior/pick_object_status',
         'stop': _stop_manipulation,
     },
+    # Optional 'wait_time_s': run at pwm that long, then the executor sends PWM 0 itself
+    # (routine_executor/shaker_step.py); without it the PWM is set and left.
     'shaker': {
         'msg_type': 'lab_machine',
         'publish_topic': 'behavior/lab_machine_command',
         'required_params': ['pwm'],
-        'make_msg': lambda params: LabMachineCommand(
-            device='shaker',
-            action='protocol',
-            parameters_json=json.dumps({'pwm': params['pwm']}),
-        ),
+        'make_msg': lambda params: make_shaker_msg(params['pwm']),
         'watch_topic': 'behavior/execute_shaker_protocol_status',
+        'stop': _stop_shaker,
     },
     'ot2': {
         'msg_type': 'lab_machine',

@@ -36,3 +36,27 @@ test('editing a preset makes it a custom routine again', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Remove step 1' }));
   expect(screen.getByRole('radio', { name: /^No anomaly/ })).toHaveAttribute('aria-checked', 'false');
 });
+
+const shakerStep = (json) => JSON.parse(json).steps.find((s) => s.name === 'shaker');
+
+test('the presets run the shaker as one timed step, not run / wait / stop', () => {
+  PRESETS.forEach((p) => {
+    const shakers = p.routine.steps.filter((s) => s.name === 'shaker');
+    expect(shakers).toEqual([{ name: 'shaker', pwm: 150, wait_time_s: 20 }]);
+  });
+});
+
+test('a shaker block sets its speed and how long it runs in one step', () => {
+  render(<Harness initial={JSON.stringify({ steps: [{ name: 'shaker', pwm: 150, wait_time_s: 20 }] })} />);
+  expect(screen.getByText('then stops')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Run for'), { target: { value: '45' } });
+  expect(shakerStep(screen.getByTestId('json').textContent)).toEqual({ name: 'shaker', pwm: 150, wait_time_s: 45 });
+  fireEvent.change(screen.getByLabelText('Run for'), { target: { value: '0' } });
+  expect(screen.getByText('0 s keeps it running')).toBeInTheDocument();
+});
+
+test('a PWM 0 shaker block is a stop and has no duration', () => {
+  render(<Harness initial={JSON.stringify({ steps: [{ name: 'shaker', pwm: 0 }] })} />);
+  expect(screen.getByText('stops the shaker')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Run for')).not.toBeInTheDocument();
+});

@@ -99,6 +99,13 @@ def test_ot2_watch_topic():
     assert STEPS['ot2']['watch_topic'] == 'behavior/execute_ot2_protocol_status'
 
 
+def test_cancel_stops_the_shaker():
+    topic, msg = STEPS['shaker']['stop']()
+    assert topic == 'behavior/lab_machine_command'
+    assert msg.device == 'shaker'
+    assert json.loads(msg.parameters_json) == {'pwm': 0}
+
+
 def test_shaker_watch_topic():
     assert STEPS['shaker']['watch_topic'] == 'behavior/execute_shaker_protocol_status'
 

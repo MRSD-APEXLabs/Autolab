@@ -62,7 +62,11 @@ export const STEP_TYPES = {
       parameters_json: { steps: ['pick_up_tips', 'aspirate', 'dispense', 'drop_tips'].map(newOt2Command) },
     }),
   },
-  shaker: { group: 'machine', title: 'Shaker', params: ['pwm'], make: () => ({ name: 'shaker', pwm: 150 }) },
+  // wait_time_s (optional): run that long, then the executor stops it; 0 / absent = set and leave.
+  shaker: {
+    group: 'machine', title: 'Shaker', params: ['pwm'],
+    make: () => ({ name: 'shaker', pwm: 150, wait_time_s: 20 }),
+  },
   wait: { group: 'wait', title: 'Wait', params: ['time_s'], make: () => ({ name: 'wait', time_s: 10 }) },
 };
 
@@ -81,7 +85,7 @@ export function ot2Commands(step) {
   return Array.isArray(params?.steps) ? params.steps : null;
 }
 
-// Human title of a step: "Go to OT-2", "Shaker · 150 PWM", "Wait 20 s".
+// Human title of a step: "Go to OT-2", "Run shaker", "Wait".
 export function stepTitle(step) {
   const name = stepName(step);
   const s = typeof step === 'object' && step ? step : {};
@@ -101,10 +105,16 @@ export function stepTitle(step) {
 }
 
 // Short "how" line: 150 PWM · 20 s · 4 commands · (x, y, yaw).
+const shakerDetail = (s) => {
+  if (Number(s.pwm) === 0) return '';
+  const t = Number(s.wait_time_s);
+  return t > 0 ? `${s.pwm} PWM · ${t} s` : `${s.pwm} PWM · until stopped`;
+};
+
 export function stepDetail(step) {
   if (!step || typeof step !== 'object') return '';
   const name = stepName(step);
-  if (name === 'shaker') return Number(step.pwm) === 0 ? '' : `${step.pwm} PWM`;
+  if (name === 'shaker') return shakerDetail(step);
   if (name === 'wait' && typeof step.time_s === 'number') return `${step.time_s} s`;
   if (name === 'go_to_pose') return `x ${step.x} · y ${step.y} · yaw ${step.yaw}`;
   if (name === 'ot2') {
