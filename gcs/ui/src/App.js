@@ -7,6 +7,7 @@ import LoaderPage from "./LoaderPage";
 import ExperimentSequence from './Experiment';
 import RoutineBuilder, { parseRoutine, routineProblems } from './RoutineBuilder';
 import { Brand, TitleBar } from './Chrome';
+import { TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './shared/tips';
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
@@ -67,8 +68,8 @@ const DEFAULT_ROUTINE = JSON.stringify(
       { name: 'pick_base' },
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
-                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [0]},
-                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200]},
+                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [TIP_FOR_LIQUID.clear]},
+                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.clear], volumes: [200], tip_check: false},
                   {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 5, 10, 15, 20], volumes: [40, 40, 40, 40, 40]},
                   {action: 'return_tips'}
                   ]}

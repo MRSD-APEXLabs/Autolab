@@ -57,6 +57,13 @@ colcon build --symlink-install --packages-select manipulation_executive
 colcon test --packages-select manipulation_executive --event-handlers=console_direct+
 ```
 
+## OT-2 tips
+
+Every routine the UI offers takes its tube and tip from `src/shared/tips.js`, and returns the tip
+after use, so a tip only ever touches one liquid: tip 0 (A1) clear, 1 (B1) brown, 2 (C1) red,
+3 (D1) the empty tube A4 of the Anomaly experiment. Keep tips 0–3 in the rack. The FVD demo deck
+drops tips from 0 upward, so reload them if it ran on this rack.
+
 ## Available Scripts
 
 In the project directory, you can run:

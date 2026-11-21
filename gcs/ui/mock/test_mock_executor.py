@@ -243,6 +243,16 @@ def test_ot2_step_attaches_one_tip_check_per_aspirate(ex, clock):
     assert first['files']['crop'].startswith('/runs/')
 
 
+def test_aspirate_with_tip_check_false_is_not_checked(ex, clock):
+    skipped = {**ASPIRATE_A1, 'tip_check': False}  # e.g. clear liquid
+    start(ex, ot2(skipped, ASPIRATE_A2), HOME)
+    seen = _progress_trace(ex, clock, STEP_TIME + 0.5)
+    recs = status(ex)['recordings']
+    assert [r['aspirate'] for r in recs] == [ASPIRATE_A2]
+    assert [r['protocol_step'] for r in recs] == [2]
+    assert {p['command'] for p in seen if p['phase'] == 'tip_check'} == {2}
+
+
 def test_clog_injection_flags_the_nth_tip_check_and_the_protocol_goes_on(clock):
     ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
                       tip_check=FakeTipCheck(clog_checks={2}))

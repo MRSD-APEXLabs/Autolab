@@ -33,6 +33,7 @@ gcs/
 - `ui` service (docker/docker-compose.yaml) — production build served by nginx on port `80` (override with `UI_PORT`). Built via `ui/Dockerfile.ui` (`prod` target: CRA build → nginx).
 - `ui-dev` service — CRA dev server with hot reload on port `3000` (override with `UI_DEV_PORT`), profile `ui-dev`. Mounts `ui/src` and `ui/public` for live editing.
 - Both build from `ui/Dockerfile.ui`; `dev` stage runs `npm start`, `prod` stage runs `npm run build` then serves via nginx.
+- `nlp-proxy` service (profiles `hitl`, `deploy`, host network, port `8090`) — the language planner behind the routine builder's **Describe the experiment** box (`gcs/nlp_proxy/`). Needs Ollama running on the host at `127.0.0.1:11435`. nginx (`ui`) and the dev server forward `/api/nlp` to it; without it the box says "Planner unavailable". See `nlp_proxy/README.md`.
 
 Local (no Docker): `cd gcs/ui && npm install && npm start` (needs a broker reachable at `ws://localhost:9001`, e.g. from the `gcs` container's exposed `9001:9001` port).
 

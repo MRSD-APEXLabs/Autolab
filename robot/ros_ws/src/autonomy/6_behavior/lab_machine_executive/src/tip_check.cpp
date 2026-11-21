@@ -180,15 +180,23 @@ json TipCheckClient::run(const std::string& label) {
 bool run_protocol_step(const json& step, int index, const std::string& run_id,
                        const DispatchFn& dispatch, const TipCheckFn& tip_check,
                        const PublishFn& publish) {
-    if (!dispatch(step)) return false;
-    if (step.value("action", "") != "aspirate" || !tip_check) return true;
+    // "tip_check": false on an aspirate skips the check (e.g. clear liquid). The key is ours, not
+    // the wrapper's, so it is removed before dispatch.
+    json command = step;
+    bool wants_check = true;
+    if (command.is_object() && command.contains("tip_check")) {
+        wants_check = !(command["tip_check"].is_boolean() && !command["tip_check"].get<bool>());
+        command.erase("tip_check");
+    }
+    if (!dispatch(command)) return false;
+    if (command.value("action", "") != "aspirate" || !tip_check || !wants_check) return true;
 
-    json result = tip_check("OT-2 aspirate " + step.dump());
+    json result = tip_check("OT-2 aspirate " + command.dump());
     if (!result.is_object()) result = {{"status", "error"}, {"error", "no tip-check result"}};
     result["type"] = "tip_check";
     result["id"] = run_id + "-" + std::to_string(index);
     result["protocol_step"] = index;
-    result["aspirate"] = step;
+    result["aspirate"] = command;
     publish(result);
     return true;
 }

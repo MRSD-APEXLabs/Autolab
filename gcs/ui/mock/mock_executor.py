@@ -485,6 +485,12 @@ def _manip_phase(fraction):
 OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5, 'disconnecting': 0.5}
 
 
+def _checked(action):
+    """Whether lab_machine_executive runs the tip check after this command: every aspirate
+    unless it has "tip_check": false (e.g. clear liquid the tip camera cannot see)."""
+    return action.get('action') == 'aspirate' and action.get('tip_check') is not False
+
+
 def _ot2_timeline(actions, duration, tips):
     """Events of one OT-2 protocol, as lab_machine_executive reports them on ot2_progress.
 
@@ -495,7 +501,7 @@ def _ot2_timeline(actions, duration, tips):
     passes = FakeTipCheck.PASSES
     units = OT2_UNITS['connecting'] + OT2_UNITS['homing'] + OT2_UNITS['disconnecting']
     for a in actions:
-        units += OT2_UNITS['command'] + (passes * OT2_UNITS['tip_pass'] if a.get('action') == 'aspirate' else 0)
+        units += OT2_UNITS['command'] + (passes * OT2_UNITS['tip_pass'] if _checked(a) else 0)
     scale = duration / units if units else 0
     run_id = uuid.uuid4().hex[:8]
     n = len(actions)
@@ -509,8 +515,9 @@ def _ot2_timeline(actions, duration, tips):
     for k, a in enumerate(actions):
         events.append((t, 'progress', progress('command', k)))
         t += OT2_UNITS['command'] * scale
-        if a.get('action') != 'aspirate':
+        if not _checked(a):
             continue
+        a = {k: v for k, v in a.items() if k != 'tip_check'}  # the executive strips it too
         result = tips.result(a)
         samples = result.get('samples') or []
         if result.get('status') == 'error':  # the service is down: the first pass fails at once

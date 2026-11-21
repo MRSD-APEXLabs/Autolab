@@ -368,6 +368,27 @@ TEST(ProtocolStep, DisabledCheckLeavesAspirateAlone) {
     EXPECT_TRUE(s.published.empty());
 }
 
+TEST(ProtocolStep, AspirateMarkedTipCheckFalseIsNotChecked) {
+    StepRun s;
+    json step = ASPIRATE;
+    step["tip_check"] = false;  // e.g. clear liquid the tip camera cannot see
+    EXPECT_TRUE(s.run(step, 0));
+    EXPECT_TRUE(s.checked.empty());
+    EXPECT_TRUE(s.published.empty());
+    ASSERT_EQ(s.dispatched.size(), 1u);
+    EXPECT_EQ(s.dispatched[0], ASPIRATE);  // the flag never reaches the wrapper
+}
+
+TEST(ProtocolStep, AspirateMarkedTipCheckTrueIsCheckedWithoutTheFlag) {
+    StepRun s;
+    json step = ASPIRATE;
+    step["tip_check"] = true;
+    EXPECT_TRUE(s.run(step, 0));
+    ASSERT_EQ(s.checked.size(), 1u);
+    EXPECT_EQ(s.dispatched[0], ASPIRATE);
+    EXPECT_EQ(s.published[0]["aspirate"], ASPIRATE);
+}
+
 TEST(ProtocolStep, CheckLabelDescribesTheAspirate) {
     StepRun s;
     s.run(ASPIRATE, 3);

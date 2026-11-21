@@ -72,7 +72,8 @@ using DispatchFn = std::function<bool(const nlohmann::json& step)>;
 using TipCheckFn = std::function<nlohmann::json(const std::string& label)>;  // empty: disabled
 using PublishFn = std::function<void(const nlohmann::json& result)>;
 
-// One OT-2 protocol step: dispatch it, and after a successful aspirate run the tip check and
+// One OT-2 protocol step: dispatch it, and after a successful aspirate (unless it has
+// "tip_check": false, which is stripped before dispatch) run the tip check and
 // publish its result ({"type": "tip_check", "id": "<run_id>-<index>", ...}). The check never
 // fails the step; only the dispatch result does.
 bool run_protocol_step(const nlohmann::json& step, int index, const std::string& run_id,
