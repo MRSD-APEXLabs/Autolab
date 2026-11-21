@@ -26,7 +26,7 @@ const hubStatus = (status) => act(() => {
 });
 const robotSrc = () => screen.getAllByRole('img').map((img) => img.getAttribute('src')).find((u) => u && u.includes(':8002/'));
 const fetched = () => fetch.mock.calls.map(([u]) => u);
-const DECK = 'http://192.168.10.19:8765/stream';
+const DECK = 'http://192.168.10.19:8766/stream';
 
 test('shows the active robot camera annotated, with the three station cameras', () => {
   render(<CameraStage />);

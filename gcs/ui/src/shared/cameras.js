@@ -15,7 +15,7 @@ export const cameraLabel = (camera) => (camera ? CAMERA_LABELS[camera] ?? camera
 // Station cameras of the FVD presentation (FVD-Presentation/config.json "cameras"). present.py
 // relays them (USB cameras on the presentation computer, the shaker's Pi camera) as plain MJPEG at
 // /stream/<id>.mjpg. Run it with --lan when this UI is opened on another computer.
-const deckBase = () => (process.env.REACT_APP_DECK_CAMERA_BASE || 'http://192.168.10.19:8765').replace(/\/$/, '');
+const deckBase = () => (process.env.REACT_APP_DECK_CAMERA_BASE || 'http://192.168.10.19:8766').replace(/\/$/, '');
 export const STATION_CAMERAS = [
   { id: 'ot2', label: 'Opentrons OT-2', short: 'OT-2' },
   { id: 'shaker', label: 'Shaker', short: 'Shaker' },
