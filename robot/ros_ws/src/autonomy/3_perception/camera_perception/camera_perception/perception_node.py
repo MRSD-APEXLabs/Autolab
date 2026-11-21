@@ -101,6 +101,7 @@ class PerceptionNode(Node):
             if len(bound) != 2 or bound[0] >= bound[1]:
                 raise ValueError(f'pointcloud.bounds_{axis} must be [low, high], got {list(bound)}')
         self.cloud_edge_threshold = float(param('pointcloud.edge_threshold', 0.02))
+        self.cloud_crop_bottom = int(param('pointcloud.crop_bottom', 0))
         self.cloud_color = bool(param('pointcloud.color', True))
         cloud_rate = float(param('pointcloud.max_rate', 5.0))
         self.cloud_period = 1.0 / cloud_rate if cloud_rate > 0.0 else 0.0
@@ -321,7 +322,8 @@ class PerceptionNode(Node):
         if not self._cloud_rate.ready(time.monotonic()):
             return None
         points, rgb = depth_to_points(depth, intrinsics, self.cloud_stride, self.cloud_bounds,
-                                      self.cloud_edge_threshold, bgr if self.cloud_color else None)
+                                      self.cloud_edge_threshold, bgr if self.cloud_color else None,
+                                      self.cloud_crop_bottom)
         if self.snapshot is None:
             points, rgb = voxel_downsample(points, rgb, self.cloud_voxel)
             if self._needs_clear:

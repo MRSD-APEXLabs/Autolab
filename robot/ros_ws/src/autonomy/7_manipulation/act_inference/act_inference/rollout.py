@@ -107,6 +107,10 @@ class ChunkFollower:
     - Near the goal (the newest chunk predicts less than `approach_distance` of travel) translation slows to
       `approach_speed`. The camera image lags the arm by 0.1-0.2 s: at 10 mm/s the policy's last correction
       comes from where the arm was about a millimetre earlier, at 3 mm/s from 0.4 mm.
+    - Below `slow_below_z` (robot base frame, the servo target's height) translation also slows to
+      `approach_speed`. This is read from the arm, not the camera, so it applies with no lag: the shaker clamp's
+      bounds stand ~8 mm above the seat, and reaching them at full speed with ~0.5 s camera lag meant crossing
+      them on a prediction made several millimetres higher, which is laterally less certain.
     - Near the goal the target for the current time is the mean over the last `ensemble` chunks, so a single
       noisy query cannot decide the final millimetre.
     - Once the policy reports arrival (SettleMonitor) the target is held.
@@ -120,6 +124,8 @@ class ChunkFollower:
         self.initial = np.asarray(initial, dtype=float).copy()
         self.enable_rotation, self.radius = rollout.enable_rotation, rollout.workspace_radius
         self.approach_distance, self.ensemble = rollout.approach_distance, int(rollout.ensemble)
+        self.slow_below_z = float(rollout.slow_below_z)
+        self.slowed = False
         self.settle = SettleMonitor(rollout.settle_motion, rollout.settle_queries)
         self.chunks = deque(maxlen=max(1, self.ensemble))
         self.near = False
@@ -149,7 +155,8 @@ class ChunkFollower:
         proposed = self.proposed(now)
         if self.settle.holding:
             return target, proposed
-        motion = self.slow if self.near else self.motion
+        self.slowed = self.near or (self.slow_below_z > 0 and target[2] < self.slow_below_z)
+        motion = self.slow if self.slowed else self.motion
         return limit_action(target, proposed, motion, 1 / self.hz, self.initial, self.enable_rotation, self.radius), proposed
 
 
@@ -392,7 +399,7 @@ def run_act_rollout(config, rollout, policy=None, stop=None):
                 robot.servo(target, period, measured=pose)
             if now - last_print > .5:
                 print(f't={now-start:.2f}s predicted_mm={np.round(proposed[:3] * 1000, 1).tolist()} '
-                      f'measured_mm={np.round(pose[:3] * 1000, 1).tolist()}' + (' approach' if follower.near else '')
+                      f'measured_mm={np.round(pose[:3] * 1000, 1).tolist()}' + (' approach' if follower.near else ' slow' if follower.slowed else '')
                       + f' camera_age_ms={(now-frame.captured_monotonic)*1000:.0f}', flush=True)
                 last_print = now
             if config.preview:

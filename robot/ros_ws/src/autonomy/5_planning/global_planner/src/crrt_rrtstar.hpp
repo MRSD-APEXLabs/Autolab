@@ -118,6 +118,7 @@ static std::optional<JointVec> constrained_steer(
         rs.copyJointGroupPositions(jmg, q_proj);
         double d_next = joint_dist(q_proj, q_to);
         if (d_next >= d_curr) { ++irrt_stats.not_closer; break; }   // manifold blocks this direction
+        if (crrt_clearance::below_floor(rs)) { ++irrt_stats.collision; break; }
 
         collision_detection::CollisionRequest req;
         collision_detection::CollisionResult  res;

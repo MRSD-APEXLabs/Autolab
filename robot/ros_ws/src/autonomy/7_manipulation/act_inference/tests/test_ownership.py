@@ -216,7 +216,7 @@ def test_restore_only_after_all_motion_succeeds(result, target, base_mode):
     node = SimpleNamespace(rollout=SimpleNamespace(execute=True), config=None,
                            base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5), base_mode=base_mode,
                            runner=SimpleNamespace(status=lambda: dict(target=target), _check_abort=check),
-                           _run_policy=run, _base_move_fn=run, _post_placement_fn=run,
+                           _run_policy=run, _base_move_fn=run, _post_placement_fn=run, _handoff_robot=None,
                            handoff=SimpleNamespace(finish=lambda check: calls.append('finish')))
     if result == 'error':
         with pytest.raises(RuntimeError): ActInferenceNode._run(node, threading.Event())
@@ -354,7 +354,7 @@ def test_ready_handoff_keeps_connection_like_visual_servoing(monkeypatch):
     import act_inference.node as module
     events = []
     class Robot:
-        def __init__(self, *args): events.append('create')
+        def __init__(self, *args, **kwargs): events.append(f'create {kwargs.get("report_type")}')
         def connect(self): events.append('connect')
         def initialize_target_pose(self): events.append('pose')
         def enable(self): events.append('enable')
@@ -364,6 +364,6 @@ def test_ready_handoff_keeps_connection_like_visual_servoing(monkeypatch):
     node = SimpleNamespace(config=SimpleNamespace(robot_ip='unused', motion=None), _handoff_robot=None)
     module.ActInferenceNode._ready_for_ros(node, check)
     module.ActInferenceNode._ready_for_ros(node, check)
-    assert events == ['create', 'connect', 'pose', 'enable', 'hand_back',
+    assert events == ['create real', 'connect', 'pose', 'enable', 'hand_back',
                       'connect', 'pose', 'enable', 'hand_back']
     assert node._handoff_robot is not None and 'close' not in events

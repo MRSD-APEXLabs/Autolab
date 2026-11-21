@@ -35,6 +35,14 @@ def test_colours_are_packed_rgb():
     assert rgb[0] == 0x030201 and set(rgb[1:].tolist()) == {0xFF0000}
 
 
+def test_crop_bottom_drops_the_bottom_image_rows():
+    depth = np.full((600, 960), 800, np.uint16)
+    kept, _ = depth_to_points(depth, INTRINSICS, stride=4, crop_bottom=30)
+    v = np.round(kept[:, 1] / kept[:, 2] * INTRINSICS.fy + INTRINSICS.cy).astype(int)
+    assert v.max() == 568 and len(kept) == 240 * 143      # rows 0..568 of 0..596 sampled every 4 px
+    assert len(depth_to_points(depth, INTRINSICS, stride=4)[0]) == 240 * 150
+
+
 def test_edge_filter_drops_points_on_depth_jumps_only():
     depth = np.full((600, 960), 800, np.uint16)
     depth[:, 480:] = 1500                  # a step

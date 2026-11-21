@@ -256,9 +256,9 @@ def test_no_touch_fails_within_the_probe_depth(monkeypatch):
 def test_no_ridge_fails_within_the_slide_limit(monkeypatch):
     stop = ClockStop()
     placement, calls, commands = setup_robot(monkeypatch, stop, ridge_x=float('nan'))
-    with pytest.raises(RuntimeError, match='no contact during slide within 30.0 mm'):
+    with pytest.raises(RuntimeError, match='no contact during slide within 50.0 mm'):
         bp.run_base_placement(InferenceConfig(), placement, execute=True, stop=stop)
-    assert min(p[0] for p in commands) == pytest.approx(placement.target_pose()[0] - .030)
+    assert min(p[0] for p in commands) == pytest.approx(placement.target_pose()[0] - .050)
     assert calls[-1] == 'close'
 
 
@@ -348,7 +348,7 @@ def test_timeout_requires_measured_arrival_and_closes(monkeypatch):
                                      {'approach_speed_mm_s': 0}, {'approach_clearance_mm': -1},
                                      {'lift_speed_mm_s': float('nan')}, {'accel_mm_s2': 0},
                                      {'fast_speed_mm_s': 50}, {'fast_speed_mm_s': 0}, {'probe_fast_mm': -1},
-                                     {'probe_fast_mm': 11}, {'slide_fast_mm': 30}, {'open_wait_sec': 0}])
+                                     {'probe_fast_mm': 11}, {'slide_fast_mm': 50}, {'open_wait_sec': 0}])
 def test_invalid_configuration(changes):
     with pytest.raises(ValueError):
         bp.BasePlacementConfig(**changes)

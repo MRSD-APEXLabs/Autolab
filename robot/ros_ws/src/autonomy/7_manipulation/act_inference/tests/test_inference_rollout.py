@@ -366,6 +366,22 @@ def test_follower_without_approach_or_ensemble_follows_the_newest_chunk():
     assert proposed[0] == .005 and target[0] == pytest.approx(.01 / 50)
 
 
+def test_follower_slows_below_the_slow_zone_height():
+    f = follower(approach_speed=.0015, approach_distance=0, slow_below_z=.085)
+    for z, speed in ((.100, .01), (.084, .0015)):
+        chunk = toward(.05)
+        chunk[:, 2] = z
+        f.add(chunk, np.zeros(6), 0.0)
+        current = np.array([0, 0, z, 0, 0, 0])
+        target, _ = f.step(current, 0.0)
+        assert target[0] == pytest.approx(speed / 50) and target[2] == pytest.approx(z)
+        assert f.slowed == (z < .085)
+    with pytest.raises(ValueError, match='slow_below_z'):
+        ar.RolloutConfig(Path('unused'), slow_below_z=-.01)
+    _, rollout = configs_from_args(build_parser().parse_args(['--ckpt-dir', 'a', '--slow-below-z-mm', '85']))
+    assert rollout.slow_below_z == pytest.approx(.085)
+
+
 def test_follower_holds_once_the_policy_reports_arrival():
     f = follower(settle_motion=.002, settle_queries=3)
     current = np.array([.001, 0, 0, 0, 0, 0])

@@ -26,6 +26,8 @@ def build_parser():
     parser.add_argument('--approach-speed', type=float, default=0.003,
                         help='m/s once the policy predicts less than --approach-distance of travel (0 keeps full speed)')
     parser.add_argument('--approach-distance', type=float, default=0.012, help='meters of predicted travel that start the slow approach')
+    parser.add_argument('--slow-below-z-mm', type=float, default=0.0,
+                        help='also move at --approach-speed while the TCP target is below this height (mm, robot base frame; 0 disables)')
     parser.add_argument('--ensemble', type=int, default=5, help='near the goal, average this many recent chunks (1 disables)')
     parser.add_argument('--final-offset-mm', type=float, nargs=3, default=(0.0, 0.0, 0.0), metavar=('X', 'Y', 'Z'),
                         help='after the policy settles, move once by this much (mm, robot base frame, at most 10 mm)')
@@ -70,7 +72,8 @@ def configs_from_args(args):
                             contact_gap=args.contact_gap, contact_hold=args.contact_hold,
                             settle_motion=args.settle_motion, settle_queries=args.settle_queries,
                             approach_speed=args.approach_speed, approach_distance=args.approach_distance,
-                            ensemble=args.ensemble, final_offset=tuple(v / 1000 for v in args.final_offset_mm))
+                            ensemble=args.ensemble, final_offset=tuple(v / 1000 for v in args.final_offset_mm),
+                            slow_below_z=args.slow_below_z_mm / 1000)
     return config, rollout
 
 

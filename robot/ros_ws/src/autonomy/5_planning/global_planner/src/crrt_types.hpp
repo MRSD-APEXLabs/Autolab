@@ -81,6 +81,11 @@ static constexpr double APPROACH_RADIUS_M      = 0.08;
 static constexpr double APPROACH_HEIGHT_M      = 0.15;
 static constexpr double APPROACH_BELOW_M       = 0.02;   // joint-space moves dip a little
 
+// Plate floor (crrt_clearance::State::floor_z). Every path keeps the bottom of PLATE_LINK (the held plate in the
+// URDF) no more than PLATE_FLOOR_BELOW_M below the lower of its heights at the start and at the goal.
+static const std::string PLATE_LINK          = "wellplate_link";
+static constexpr double  PLATE_FLOOR_BELOW_M = 0.03;
+
 // Workspace bounds — must match setWorkspace() in move_to_pose_node.cpp
 static constexpr double WS_X_MIN = -0.15;
 static constexpr double WS_X_MAX =  0.85;

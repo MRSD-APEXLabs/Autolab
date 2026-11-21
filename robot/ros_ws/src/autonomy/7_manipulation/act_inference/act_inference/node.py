@@ -42,7 +42,9 @@ Each target has its own placing policy (`ckpt_dir` for OT-2, `shaker_ckpt_dir`, 
 loaded and warmed up once, at startup. Each run switches the camera hub to the Nano (`select_service`), reads
 its rectified image and depth from the zedx_nano_depth topics (camera_source ros), connects to the arm, runs
 up to `duration_sec` and closes the arm again. OT-2/shaker first align yaw to 90 degrees (their demos end
-there), then open the gripper and lift 100 mm after a successful policy run. Base first moves straight to
+there), then open the gripper and lift 100 mm (25 mm/s) after a successful policy run. Shaker moves at
+`shaker_approach_speed` (1.5 mm/s) below `shaker_slow_below_z_mm` (110 mm TCP height, ~47 mm above the clamp seat),
+so the plate reaches the clamp's bounds slowly. Base first moves straight to
 `base_start_pose_mm_deg` (~80 mm above the bracket at yaw ~0, where its demos started) instead of aligning
 yaw, then runs its policy and lifts 60 mm (`base_mode:=policy`). `base_mode:=scripted` (the default) places on
 the base without camera or policy: move to a fixed XYZ/RPY probing start (`base_approach_speed_mm_s` 150 to
@@ -89,10 +91,11 @@ STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 MODELS = Path(__file__).resolve().parents[1] / 'models'
 TARGETS = ('ot2', 'shaker', 'base')
 DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
-                 'shaker': MODELS / 'xarm6_shaker_act_ft_20261113',
+                 'shaker': MODELS / 'xarm6_shaker_act_ft_vg_20261120',
                  'base': MODELS / 'xarm6_base_act_ft_20261108b'}
 DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
 BASE_LIFT_MM = 60.0
+ACT_LIFT_SPEED_MM_S = 25.0   # OT-2/shaker lift after the policy (2.5x the ACT translation_speed default, 10)
 # BasePlacementConfig approach, lift and F/T seating fields, exposed as base_<name> parameters.
 BASE_SEATING_PARAMS = {'approach_speed_mm_s': float, 'approach_clearance_mm': float, 'lift_speed_mm_s': float,
                        'accel_mm_s2': float, 'open_wait_sec': float,
@@ -179,8 +182,12 @@ class ActInferenceNode(Node):
                                      ensemble=int(param('ensemble', 5)),
                                      final_offset=tuple(float(v) / 1000 for v in param('final_offset_mm', [0.0, 0.0, 0.0])))
         base_radius = float(param('base_workspace_radius', 0.15))   # the bracket is ~80 mm below the start pose
-        self.rollouts = {target: replace(self.rollout, ckpt_dir=self.ckpt_dirs[target],
-                                         **({'workspace_radius': base_radius} if target == 'base' else {}))
+        # Shaker: the clamp's bounds stand ~8 mm above the seat (TCP z ~58-67 mm in every demo). Below
+        # shaker_slow_below_z_mm the arm moves at shaker_approach_speed, so the plate crosses them on fresh images.
+        shaker = {'approach_speed': float(param('shaker_approach_speed', 0.0015)),
+                  'slow_below_z': float(param('shaker_slow_below_z_mm', 110.0)) / 1000}
+        overrides = {'base': {'workspace_radius': base_radius}, 'shaker': shaker}
+        self.rollouts = {target: replace(self.rollout, ckpt_dir=self.ckpt_dirs[target], **overrides.get(target, {}))
                          for target in TARGETS}
         self.select_service = param('select_service', '/camera_hub/select_zedx_nano')
         self.select_timeout = float(param('select_timeout', 20.0))
@@ -317,6 +324,12 @@ class ActInferenceNode(Node):
     # -- runs ----------------------------------------------------------------------------------------
     def _run(self, stop):
         target = self.runner.status()['target']
+        if target == 'base' and self._handoff_robot is not None:
+            # A base run's own placement, F/T and release connections use the 'real' report socket; with the
+            # handback connection on it too, the controller dropped the release's report socket (2026-11-21).
+            # The handback reconnects after the run.
+            self._handoff_robot.close()
+            self._handoff_robot = None
         if target == 'base' and self.base_mode == 'scripted':
             result = self._base_move_fn(self.config, self.base_placement, execute=self.rollout.execute, stop=stop)
             if result == 'done' and not stop.is_set():
@@ -341,7 +354,7 @@ class ActInferenceNode(Node):
             return result
         if stop.is_set():
             return 'stopped'
-        lift = base_lift_args(self.base_placement) if target == 'base' else {}
+        lift = base_lift_args(self.base_placement) if target == 'base' else {'speed_mm_s': ACT_LIFT_SPEED_MM_S}
         return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, **lift)
 
     def _jog(self, stop, move):
@@ -537,7 +550,9 @@ class ActInferenceNode(Node):
         # This runs only after successful SDK motion or an explicit clear_errors. Never clear
         # errors here, nor enable the robot after a failed/stopped run.
         if self._handoff_robot is None:
-            self._handoff_robot = XArm6Robot(self.config.robot_ip, self.config.motion)
+            # 'real' (100 Hz) reports: initialize_target_pose() checks the report against a fresh query, and a
+            # 5 Hz 'rich' report can still show the end of a just-finished move (place_base's fast lift).
+            self._handoff_robot = XArm6Robot(self.config.robot_ip, self.config.motion, report_type='real')
         robot = self._handoff_robot
         try:
             check_abort()
