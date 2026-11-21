@@ -47,7 +47,7 @@ export const PRESETS = [
   {
     id: 'anomaly',
     title: 'Anomaly',
-    blurb: 'Aspirates from tube A4, which is empty. The tip comes up dry and the clog check should flag it.',
+    blurb: 'Aspirates from tube A3 (listed as red), which is empty. The tip comes up dry and the clog check should flag it.',
     expect: 'Clog suspected',
     tone: 'bad',
     routine: experiment(EMPTY_TUBE, TIP_FOR_EMPTY_TUBE),
