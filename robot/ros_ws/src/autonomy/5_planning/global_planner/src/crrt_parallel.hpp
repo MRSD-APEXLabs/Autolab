@@ -131,7 +131,8 @@ static bool straight_path(const JointVec& q_start, const JointVec& q_goal,
             req.max_contacts_per_pair = 1;
             scene->checkCollision(req, res, rs);
             why = "invalid at " + std::to_string(pct) + "%: " +
-                  (res.collision ? "collision" : "within the safety margin");
+                  (res.collision ? "collision" : crrt_clearance::below_floor(rs) ? "plate below its floor"
+                                                                                  : "within the safety margin");
             for (const auto& [key, _] : res.contacts) why += " [" + key.first + " <-> " + key.second + "]";
         }
         return false;
@@ -210,6 +211,14 @@ static Result plan(moveit::planning_interface::MoveGroupInterface& arm_group,
         rs.updateLinkTransforms();
         return Eigen::Vector3d(rs.getGlobalLinkTransform(crrt_cfg::EE_LINK).translation());
     };
+    const moveit::core::LinkModel* plate = robot_model->getLinkModel(crrt_cfg::PLATE_LINK);
+    auto plate_bottom = [&](const JointVec& q) {
+        rs.setJointGroupPositions(jmg, q);
+        rs.updateLinkTransforms();
+        return crrt_clearance::bottom_z(rs, plate);
+    };
+    if (!plate)
+        RCLCPP_WARN(log, "[IRRT*] No link '%s' in the robot model: no plate floor.", crrt_cfg::PLATE_LINK.c_str());
     {
         rs.setJointGroupPositions(jmg, q_start);
         rs.updateLinkTransforms();
@@ -257,6 +266,16 @@ static Result plan(moveit::planning_interface::MoveGroupInterface& arm_group,
                                                  nullptr, nullptr};
             crrt_clearance::pad(clearance[i], jmg, scene);
         }
+        std::string floor_note;
+        if (plate) {
+            const double z_start = plate_bottom(q_start), z_goal = plate_bottom(job.q_goal);
+            clearance[i].plate   = plate;
+            clearance[i].floor_z = std::min(z_start, z_goal) - crrt_cfg::PLATE_FLOOR_BELOW_M;
+            char note[96];
+            std::snprintf(note, sizeof note, "; plate bottom %.3f -> %.3f m, floor %.3f m",
+                          z_start, z_goal, clearance[i].floor_z);
+            floor_note = note;
+        }
 
         crrt_clearance::Scope use(clearance[i]);
         std::string why;
@@ -273,8 +292,8 @@ static Result plan(moveit::planning_interface::MoveGroupInterface& arm_group,
             }
         }
         const std::string kept = found[i].size() > 2 ? "; " + found_how[i] + " passes" : "";
-        RCLCPP_INFO(log, "[IRRT*] %s: start->goal %.2f rad; straight path %s%s", job.label.c_str(),
-            joint_dist(q_start, job.q_goal), why.c_str(), kept.c_str());
+        RCLCPP_INFO(log, "[IRRT*] %s: start->goal %.2f rad%s; straight path %s%s", job.label.c_str(),
+            joint_dist(q_start, job.q_goal), floor_note.c_str(), why.c_str(), kept.c_str());
         if (!found[i].empty()) instant = i;
     }
     if (!result.any_goal_valid)

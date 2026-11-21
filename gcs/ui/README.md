@@ -13,6 +13,12 @@ CI=true npx react-scripts test --watchAll=false            # run once, non-inter
 CI=true npx react-scripts test src/debug --watchAll=false   # just the debug console suite
 ```
 
+### Experiment workflow without the robot (manual)
+
+`mock/mock_executor.py` fakes the routine executor, robot, and clog-detection service over
+MQTT, so the full experiment flow can be clicked through with `npm start` and no hardware or
+ROS. See [`mock/README.md`](mock/README.md).
+
 ### Debug / Testing Console (manual)
 
 The `/debug` route (`src/debug/`) is a curated low-level command console for testing
@@ -50,6 +56,13 @@ colcon test --packages-select gcs_monitoring --event-handlers=console_direct+
 colcon build --symlink-install --packages-select manipulation_executive
 colcon test --packages-select manipulation_executive --event-handlers=console_direct+
 ```
+
+## OT-2 tips
+
+Every routine the UI offers takes its tube and tip from `src/shared/tips.js`, and returns the tip
+after use, so a tip only ever touches one liquid: tip 0 (A1) clear, 1 (B1) brown, 2 (C1) red,
+3 (D1) the empty tube A4 of the Anomaly experiment. Keep tips 0–3 in the rack. The FVD demo deck
+drops tips from 0 upward, so reload them if it ran on this rack.
 
 ## Available Scripts
 

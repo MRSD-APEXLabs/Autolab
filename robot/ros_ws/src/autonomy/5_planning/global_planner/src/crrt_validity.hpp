@@ -28,6 +28,8 @@ static bool satisfies_ee_down(moveit::core::RobotState& rs)
 //  `margin` m clear of the world (the octomap), unless the end effector is in the approach column
 //  above the start or the goal (crrt_cfg::APPROACH_*). There only the plain collision check applies,
 //  so poses close to a surface stay reachable, entered and left from above.
+//  is_valid() and the IRRT* steer also keep the bottom of the plate link above floor_z (crrt_cfg::PLATE_*),
+//  approach column included.
 // ─────────────────────────────────────────────────────────────
 namespace crrt_clearance {
 
@@ -36,7 +38,17 @@ struct State {
     std::vector<Eigen::Vector3d> anchors;                      // end-effector positions of the start and goal
     const planning_scene::PlanningScene* source = nullptr;     // the scene `padded` was made from
     planning_scene::PlanningScenePtr padded;                   // child of `source`, arm links padded
+    const moveit::core::LinkModel* plate = nullptr;            // crrt_cfg::PLATE_LINK; null: no floor
+    double floor_z = 0.0;                                      // m, world: lowest the plate's bottom may go
 };
+
+// Lowest world z of `link`'s collision geometry (its box in the link frame); rs's link transforms up to date.
+static double bottom_z(const moveit::core::RobotState& rs, const moveit::core::LinkModel* link)
+{
+    const Eigen::Isometry3d& T = rs.getGlobalLinkTransform(link);
+    const Eigen::Vector3d half = link->getShapeExtentsAtOrigin() / 2.0;
+    return (T * link->getCenteredBoundingBoxOffset()).z() - T.rotation().row(2).cwiseAbs().dot(half);
+}
 
 // Per thread: the parallel search (crrt_parallel.hpp) gives each search thread a copy, padded scene made beforehand.
 static State& state() { static thread_local State s; return s; }
@@ -74,6 +86,13 @@ static bool in_approach_column(const Eigen::Vector3d& ee)
     return false;
 }
 
+// Whether rs (link transforms up to date) has the plate below the floor.
+static bool below_floor(const moveit::core::RobotState& rs)
+{
+    const auto& s = state();
+    return s.plate && bottom_z(rs, s.plate) < s.floor_z;
+}
+
 // Whether rs (link transforms up to date) keeps the margin. A padded child of `scene` is made once per scene.
 static bool clear(const moveit::core::RobotState& rs,
                   const moveit::core::JointModelGroup* jmg,
@@ -94,7 +113,7 @@ static bool clear(const moveit::core::RobotState& rs,
 } // namespace crrt_clearance
 
 // ─────────────────────────────────────────────────────────────
-//  FULL VALIDITY CHECK  (constraint + collision [+ safety margin])
+//  FULL VALIDITY CHECK  (constraint + collision [+ plate floor + safety margin])
 //  Uses a pre-snapshotted scene — no lock acquired here.
 // ─────────────────────────────────────────────────────────────
 static bool is_valid(const JointVec& q,
@@ -106,6 +125,7 @@ static bool is_valid(const JointVec& q,
     rs.updateLinkTransforms();
 
     if (!satisfies_ee_down(rs)) return false;
+    if (crrt_clearance::below_floor(rs)) return false;
 
     collision_detection::CollisionRequest req;
     collision_detection::CollisionResult  res;

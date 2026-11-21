@@ -11,6 +11,17 @@ output.txt
 robot/ros_ws_nav/
 robot/ros_ws/src/autonomy/7_manipulation/act_inference/**/*.jpg
 
+# graphify knowledge graph output (local, rebuilt by git hooks)
+graphify-out/
+
+# Local runtime state, recordings, and backups
+/gcs/ot2_state/
+/behavior_debug_*/
+/.gcs-retry-backup-*/
+/compose.gcs-local.before-ot2.yaml
+**/*.before-*
+**/*.bkp
+/mqtt_ros2_bridge.py_09152026
 # Local navigation recordings, camera frame indexes, and planner logs.
 /robot/ros_ws/src/autonomy/1_navigation/recordings/
 /robot/ros_ws/src/autonomy/7_manipulation/act_inference/data/zedx_base/**/frames.csv

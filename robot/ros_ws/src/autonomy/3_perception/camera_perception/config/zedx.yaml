@@ -49,6 +49,8 @@
       bounds_y: [-0.6, 0.6]
       bounds_z: [0.2, 1.7]
       edge_threshold: 0.02       # drop points on depth jumps above 2% of the depth per pixel (0 = keep)
+      crop_bottom: 30            # px: drop the bottom 30 image rows; the depth smears there (bottom right reads ~0.2 m,
+                                 # really the table edge ~0.67 m) and blocked the OT-2 place goal (0 = keep)
       color: true                # rgb field (RViz); MoveIt uses x, y, z only
       max_rate: 5.0              # Hz, clouds (live) or snapshot republishing
       voxel_size: 0.01           # m, one point per voxel (0 = off); shrinks a snapshot ~5x for the 4 cm octomap

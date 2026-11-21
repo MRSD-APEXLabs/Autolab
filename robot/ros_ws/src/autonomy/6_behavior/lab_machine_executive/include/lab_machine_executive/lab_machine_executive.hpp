@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <behavior_tree/behavior_tree.hpp>
+#include <lab_machine_executive/tip_check.hpp>
 #include <behavior_tree_msgs/msg/lab_machine_command.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -43,19 +44,23 @@ class LabMachineExecutive : public rclcpp::Node {
     bool ot2_terminal_;            // true once success/failure set; cleared on deactivation
     std::future<bool> pending_http_; // in-flight HTTP call
     bool http_in_flight_;
+    std::string ot2_run_id_;       // names this protocol run's tip-check results
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;
     std::string ot2_host_;         // OT-2 robot IP passed to /robot/connect
+    long ot2_command_timeout_s_ = 300;  // per-step wrapper call; blocks until the OT-2 finishes the move
     std::string shaker_base_url_;
     std::string shaker_endpoint_;  // e.g. "/pwm"
-    std::string anomaly_base_url_; // clog-detection service; empty disables recording
+    lab_machine::TipCheckConfig tip_check_cfg_;  // d3:4b tip check after each aspirate
 
     // ── ROS2 infrastructure ───────────────────────────────────────────────────
     rclcpp::Subscription<behavior_tree_msgs::msg::LabMachineCommand>::SharedPtr cmd_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
-    // {"clip_id", "step"} per recorded aspirate; routine_executor attaches it to the run
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr anomaly_recording_pub_;
+    // One tip-check result (JSON) per aspirate; routine_executor attaches it to the run
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr tip_check_pub_;
+    // Live OT-2 progress (JSON, lab_machine::ot2_progress): command, tip-check pass, phase
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr ot2_progress_pub_;
 
     // ── Callbacks ────────────────────────────────────────────────────────────
     void command_callback(const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg);
@@ -64,7 +69,11 @@ class LabMachineExecutive : public rclcpp::Node {
     // ── Helpers ───────────────────────────────────────────────────────────────
     void tick_ot2();
     void tick_shaker();
-    bool dispatch_ot2_step(const nlohmann::json& step);
+    bool dispatch_ot2_step(const nlohmann::json& step, int index);
+    nlohmann::json run_tip_check(const std::string& label, int index);
+    // Thread-safe (called from the timer and from the HTTP worker during a tip check)
+    void publish_ot2_progress(const std::string& phase, int command = -1,
+                              const nlohmann::json& tip_check = nlohmann::json());
 
     // Static HTTP helper — runs in std::async thread
     bool connect_ot2();
@@ -77,6 +86,10 @@ class LabMachineExecutive : public rclcpp::Node {
     static bool http_post_capture(const std::string& url,
                                   const std::string& body,
                                   const std::string& content_type,
-                                  std::string* response);
+                                  std::string* response,
+                                  long timeout_s = 30,
+                                  std::string* error = nullptr);
+    // POST to the OT-2 wrapper with ot2_command_timeout_s_; logs why a call failed.
+    bool ot2_post(const std::string& path, const std::string& body);
     static std::string action_to_endpoint(const std::string& action);
 };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMqttContext } from '../../shared/useMqtt';
 import ConfirmButton from '../ConfirmButton';
+import Ot2Routines from './Ot2Routines';
 
 const DEFAULT_OT2_PARAMS = JSON.stringify({
   steps: [
@@ -12,6 +13,7 @@ const DEFAULT_OT2_PARAMS = JSON.stringify({
 }, null, 2);
 
 function Ot2Section({ publish, connected }) {
+  const [routineActive, setRoutineActive] = useState(true);
   const [paramsJson, setParamsJson] = useState(DEFAULT_OT2_PARAMS);
   const [error, setError] = useState(null);
 
@@ -35,6 +37,7 @@ function Ot2Section({ publish, connected }) {
   return (
     <div className="mb-4">
       <h3 className="text-sm font-semibold text-gray-700 mb-2">OT2</h3>
+      <Ot2Routines onActive={setRoutineActive} />
       <label className="text-xs text-gray-600 block mb-2">
         Parameters JSON
         <textarea
@@ -45,7 +48,7 @@ function Ot2Section({ publish, connected }) {
         />
       </label>
       {error && <p className="text-xs text-red-600 mb-2">Invalid JSON: {error}</p>}
-      <ConfirmButton onConfirm={send} disabled={!connected || !!error}>Send OT2 Protocol</ConfirmButton>
+      <ConfirmButton onConfirm={send} disabled={!connected || !!error || routineActive}>Send OT2 Protocol</ConfirmButton>
     </div>
   );
 }
@@ -54,10 +57,14 @@ function ShakerSection({ publish, connected }) {
   const [pwm, setPwm] = useState('150');
   const [waitTimeS, setWaitTimeS] = useState('20');
 
+  const valid = pwm.trim() !== '' && Number.isInteger(Number(pwm))
+    && Number(pwm) >= 0 && Number(pwm) <= 255 && waitTimeS.trim() !== ''
+    && Number.isFinite(Number(waitTimeS)) && Number(waitTimeS) >= 0;
+
   const send = () => {
     publish('cmd/lab_machine/shaker_command', JSON.stringify({
-      pwm: parseFloat(pwm),
-      wait_time_s: parseFloat(waitTimeS),
+      pwm: Number(pwm),
+      wait_time_s: Number(waitTimeS),
     }));
   };
 
@@ -74,7 +81,11 @@ function ShakerSection({ publish, connected }) {
           <input value={waitTimeS} onChange={(e) => setWaitTimeS(e.target.value)} className="w-full border rounded px-2 py-1 mt-1" />
         </label>
       </div>
-      <ConfirmButton onConfirm={send} disabled={!connected}>Send Shaker Command</ConfirmButton>
+      <p className="text-xs text-gray-600 mb-2">
+        Sends PWM 0 after the wait time to stop the shaker. Set 0 seconds for manual operation.
+      </p>
+      {!valid && <p className="text-xs text-red-600 mb-2">Enter PWM 0–255 and a nonnegative wait time.</p>}
+      <ConfirmButton onConfirm={send} disabled={!connected || !valid}>Send Shaker Command</ConfirmButton>
     </div>
   );
 }

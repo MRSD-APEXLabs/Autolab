@@ -15,7 +15,7 @@
     <collision name="Chassis_1_collision">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://base_urdf/meshes/Chassis_1.stl"/>
+        <mesh filename="package://base_urdf/meshes/collision/Chassis_1.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -278,43 +278,43 @@
 
   <link name="Az_Front_Left_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Az_Front_Left_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Az_Front_Left_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Az_Front_Left_1.stl"/></geometry></collision>
     <inertial><mass value="0.5"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Az_Front_right_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Az_Front_right_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Az_Front_right_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Az_Front_right_1.stl"/></geometry></collision>
     <inertial><mass value="0.5"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Az_Back_Right_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Az_Back_Right_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Az_Back_Right_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Az_Back_Right_1.stl"/></geometry></collision>
     <inertial><mass value="0.5"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Az_Back_left_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Az_Back_left_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Az_Back_left_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Az_Back_left_1.stl"/></geometry></collision>
     <inertial><mass value="0.5"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
 
   <link name="Wheel_Front_Left_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Wheel_Front_Left_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Wheel_Front_Left_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Wheel_Front_Left_1.stl"/></geometry></collision>
     <inertial><mass value="1.0"/><inertia ixx="0.02" iyy="0.02" izz="0.02" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Wheel_Front_Right_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Wheel_Front_Right_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Wheel_Front_Right_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Wheel_Front_Right_1.stl"/></geometry></collision>
     <inertial><mass value="1.0"/><inertia ixx="0.02" iyy="0.02" izz="0.02" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Wheel_Back_Right_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Wheel_Back_Right_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Wheel_Back_Right_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Wheel_Back_Right_1.stl"/></geometry></collision>
     <inertial><mass value="1.0"/><inertia ixx="0.02" iyy="0.02" izz="0.02" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
   <link name="Wheel_Back_Left_1">
     <visual><geometry><mesh filename="package://base_urdf/meshes/Wheel_Back_Left_1.stl"/></geometry></visual>
-    <collision><geometry><mesh filename="package://base_urdf/meshes/Wheel_Back_Left_1.stl"/></geometry></collision>
+    <collision><geometry><mesh filename="package://base_urdf/meshes/collision/Wheel_Back_Left_1.stl"/></geometry></collision>
     <inertial><mass value="1.0"/><inertia ixx="0.02" iyy="0.02" izz="0.02" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
 

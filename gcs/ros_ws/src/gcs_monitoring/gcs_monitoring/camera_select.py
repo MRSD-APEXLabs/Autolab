@@ -33,13 +33,14 @@ def result_payload(camera, ok, message) -> str:
     return json.dumps({'camera': camera, 'ok': bool(ok), 'message': str(message)})
 
 
-def call_select(client, request, service_wait_s=SERVICE_WAIT_S, timeout_s=SELECT_TIMEOUT_S):
+def call_select(client, request, service_wait_s=SERVICE_WAIT_S, timeout_s=SELECT_TIMEOUT_S,
+                missing='camera_hub node is not running'):
     """Call a Trigger client and wait for its reply: (ok, message).
 
-    Blocks; run it off the MQTT thread.
+    Blocks; run it off the MQTT thread. `missing` is the message when the service is not up.
     """
     if not client.wait_for_service(timeout_sec=service_wait_s):
-        return False, 'camera_hub node is not running'
+        return False, missing
     done = threading.Event()
     future = client.call_async(request)
     future.add_done_callback(lambda _: done.set())

@@ -16,6 +16,7 @@ def make_pose_stamped(x: float, y: float, yaw: float) -> PoseStamped:
     return pose
 
 
+# 'retryable' (default True): False means a failure ends the run instead of re-dispatching.
 # What stops a step's action on the robot when the routine is cancelled: 'stop' returns (topic, msg).
 # A topic without a leading '/' is under /<robot>/, like publish_topic; /nav/cancel is nav_api's own.
 def _stop_manipulation():
@@ -27,6 +28,19 @@ def _stop_manipulation():
 def _stop_navigation():
     # nav_api cancels every goal; navigation_executive then fails the action (CANCELED)
     return '/nav/cancel', Empty()
+
+
+def make_shaker_msg(pwm) -> LabMachineCommand:
+    return LabMachineCommand(
+        device='shaker',
+        action='protocol',
+        parameters_json=json.dumps({'pwm': pwm}),
+    )
+
+
+def _stop_shaker():
+    # a cancelled run never leaves the shaker spinning (also ends a timed step's hold)
+    return 'behavior/lab_machine_command', make_shaker_msg(0)
 
 
 STEPS = {
@@ -78,16 +92,15 @@ STEPS = {
         'watch_topic': 'behavior/pick_object_status',
         'stop': _stop_manipulation,
     },
+    # Optional 'wait_time_s': run at pwm that long, then the executor sends PWM 0 itself
+    # (routine_executor/shaker_step.py); without it the PWM is set and left.
     'shaker': {
         'msg_type': 'lab_machine',
         'publish_topic': 'behavior/lab_machine_command',
         'required_params': ['pwm'],
-        'make_msg': lambda params: LabMachineCommand(
-            device='shaker',
-            action='protocol',
-            parameters_json=json.dumps({'pwm': params['pwm']}),
-        ),
+        'make_msg': lambda params: make_shaker_msg(params['pwm']),
         'watch_topic': 'behavior/execute_shaker_protocol_status',
+        'stop': _stop_shaker,
     },
     'ot2': {
         'msg_type': 'lab_machine',
@@ -99,6 +112,9 @@ STEPS = {
             parameters_json=params['parameters_json'] if isinstance(params['parameters_json'], str) else json.dumps(params['parameters_json']),
         ),
         'watch_topic': 'behavior/execute_ot2_protocol_status',
+        # Liquid handling: never re-sent automatically (a second send could aspirate twice);
+        # an operator retry needs force. No 'stop': a cancelled run lets the protocol finish.
+        'retryable': False,
     },
     'wait': {
         'msg_type': 'wait',

@@ -4,15 +4,21 @@ _ACTIVE = frozenset({'running', 'paused'})
 class RoutineStateMachine:
     """Pure state machine — no ROS2 dependency. Tracks routine execution progress."""
 
-    def __init__(self, steps: list, max_retries: int = 3):
+    def __init__(self, steps: list, max_retries: int = 3, no_retry=frozenset()):
         self.steps = list(steps)  # list[dict], each dict has at least {'name': str}
         self.max_retries = max_retries
+        # Step names that are never re-sent: a failure ends the run, and an operator retry
+        # needs force (liquid handling: re-sending could aspirate twice).
+        self.no_retry = frozenset(no_retry)
         self.state = 'idle'          # idle | running | paused | success | failed
         self.current_step_idx = 0
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = False  # True when a command needs to be published
-        self.recordings = []         # clog-detection clip_ids recorded during this run
+        self.recordings = []         # clog-detection results ({'type', 'id', 'step', ...}) of this run
+        # Live progress of the current step from its executive (e.g. which OT-2 command is running,
+        # how far the tip check is), tagged with the routine step it belongs to. None when unknown.
+        self.step_progress = None
 
     def start(self):
         if self.state in _ACTIVE:
@@ -22,6 +28,7 @@ class RoutineStateMachine:
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = True
+        self.step_progress = None
 
     def pause(self):
         if self.state != 'running':
@@ -46,6 +53,7 @@ class RoutineStateMachine:
             return
         self.retry_count = 0
         self.current_step_idx += 1
+        self.step_progress = None
         if self.current_step_idx >= len(self.steps):
             self.state = 'success'
             self.needs_dispatch = False
@@ -55,7 +63,15 @@ class RoutineStateMachine:
     def on_failure(self):
         if self.state not in _ACTIVE:
             return
-        self.retry_count += 1
+        if self._current_is_no_retry():
+            self.state = 'failed'
+            self.error = (
+                f"Step '{self.current_step_name()}' failed and was not retried: it handles liquid, "
+                'so the tip may still hold liquid. Inspect the machine before retrying.'
+            )
+            self.needs_dispatch = False
+            return
+        # max_retries counts re-dispatches after the initial attempt.
         if self.retry_count >= self.max_retries:
             self.state = 'failed'
             self.error = (
@@ -63,7 +79,9 @@ class RoutineStateMachine:
             )
             self.needs_dispatch = False
         else:
+            self.retry_count += 1
             self.needs_dispatch = True  # retry: re-dispatch same step
+            self.step_progress = None
 
     def cancel(self):
         if self.state not in _ACTIVE:
@@ -72,11 +90,52 @@ class RoutineStateMachine:
         self.error = 'cancelled'
         self.needs_dispatch = False
 
-    def add_recording(self, clip_id: str) -> bool:
-        """Attach a clog-detection clip to this run. Only while active; no duplicates."""
-        if self.state not in _ACTIVE or not clip_id or clip_id in self.recordings:
+    def _current_is_no_retry(self) -> bool:
+        return self.current_step_name() in self.no_retry
+
+    def _retry_needs_force(self) -> bool:
+        return (self.state == 'failed' and self.current_step_idx < len(self.steps)
+                and self._current_is_no_retry())
+
+    def retry(self, force: bool = False) -> bool:
+        """Restart a failed (or cancelled) routine at the step it stopped on.
+
+        The retry budget starts fresh; completed steps are not rerun and recordings are kept.
+        A no-retry step is only restarted with force (the operator confirmed it is safe).
+        """
+        if self.state != 'failed' or self.current_step_idx >= len(self.steps):
             return False
-        self.recordings.append(clip_id)
+        if self._retry_needs_force() and not force:
+            return False
+        self.state = 'running'
+        self.retry_count = 0
+        self.error = None
+        self.needs_dispatch = True
+        self.step_progress = None
+        return True
+
+    def add_recording(self, record: dict) -> bool:
+        """Attach a clog-detection result to this run, tagged with the routine step it came from.
+
+        Only while active; needs a 'type' and an 'id'; no duplicate ids.
+        """
+        if self.state not in _ACTIVE or not isinstance(record, dict):
+            return False
+        if not record.get('type') or not record.get('id'):
+            return False
+        if any(r['id'] == record['id'] for r in self.recordings):
+            return False
+        self.recordings.append({**record, 'step': self.current_step_idx})
+        return True
+
+    def set_step_progress(self, progress: dict) -> bool:
+        """Record the current step's live progress (replaces the previous one). Only while active.
+
+        Kept after the run fails, so the operator sees where the step stopped.
+        """
+        if self.state not in _ACTIVE or not isinstance(progress, dict):
+            return False
+        self.step_progress = {**progress, 'step': self.current_step_idx}
         return True
 
     def acknowledge_dispatch(self):
@@ -96,4 +155,6 @@ class RoutineStateMachine:
             'max_retries': self.max_retries,
             'error': self.error,
             'recordings': list(self.recordings),
+            'retry_needs_force': self._retry_needs_force(),
+            'step_progress': self.step_progress,
         }

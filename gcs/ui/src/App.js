@@ -1,32 +1,86 @@
 // import logo from './logo.svg';
 import './App.css';
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import './theme.css';
+import React, { useEffect, useState } from 'react';
 import mqtt from 'mqtt';
 import LoaderPage from "./LoaderPage";
-import CameraPanel from './CameraPanel';
+import ExperimentSequence from './Experiment';
+import RoutineBuilder, { parseRoutine, routineProblems } from './RoutineBuilder';
+import { Brand, TitleBar } from './Chrome';
+import { TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './shared/tips';
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
+const STATUS_TOPIC = 'ros2/routine_executor/status';
+
+// Which page this tab is on, kept across reloads (Safari reloads background tabs it evicted).
+// 'loader' is stored as 'experiment' so a reload skips the 5 s loader.
+const VIEW_KEY = 'apex.view';
+// Last routine sent, so "New experiment" (and reloads) start from it instead of the default.
+const ROUTINE_KEY = 'apex.routine';
+
+function loadRoutine() {
+  try {
+    return window.sessionStorage.getItem(ROUTINE_KEY) ?? DEFAULT_ROUTINE;
+  } catch {
+    return DEFAULT_ROUTINE;
+  }
+}
+
+function saveRoutine(json) {
+  try {
+    window.sessionStorage.setItem(ROUTINE_KEY, json);
+  } catch {
+    // storage unavailable: the editor keeps it in memory only
+  }
+}
+
+function loadView() {
+  try {
+    return window.sessionStorage.getItem(VIEW_KEY) === 'experiment' ? 'experiment' : false;
+  } catch {
+    return false;
+  }
+}
+
+function saveView(started) {
+  try {
+    if (started === 'loader' || started === 'experiment') {
+      window.sessionStorage.setItem(VIEW_KEY, 'experiment');
+    } else {
+      window.sessionStorage.removeItem(VIEW_KEY);
+    }
+  } catch {
+    // storage unavailable (private mode): reloads fall back to the executor status check
+  }
+}
+
+function routineState(payload) {
+  const outer = JSON.parse(payload.toString());
+  const status = typeof outer?.data === 'string' ? JSON.parse(outer.data) : outer;
+  return status?.state;
+}
 
 const DEFAULT_ROUTINE = JSON.stringify(
   {
     steps: [
+      { name: 'go_to', target_machine: 'ot2' },
       { name: 'pick_base' },
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
-                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [0]},
-                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200]},
+                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [TIP_FOR_LIQUID.clear]},
+                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.clear], volumes: [200], tip_check: false},
                   {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 5, 10, 15, 20], volumes: [40, 40, 40, 40, 40]},
                   {action: 'return_tips'}
                   ]}
       },
       { name: 'pick', target_machine: 'ot2' },
+      { name: 'go_to', target_machine: 'shaker' },
       { name: 'place', target_machine: 'shaker' },
-      { name: 'shaker', pwm: 150 },
-      { name: 'wait', 'time_s': 20 },
-      { name: 'shaker', pwm: 0 },
+      { name: 'shaker', pwm: 150, wait_time_s: 20 },
       { name: 'pick', target_machine: 'shaker' },
+      { name: 'place_base' },
+      { name: 'go_to', target_machine: 'home' }
     ],
     max_retries: 3,
     robot: 'robot_1',
@@ -36,8 +90,37 @@ const DEFAULT_ROUTINE = JSON.stringify(
 );
 
 export default function App() {
-  const [started, setStarted] = useState(false);
-  const [routineJson, setRoutineJson] = useState(DEFAULT_ROUTINE);
+  // false = welcome, true = routine editor, 'loader' = starting, 'experiment' = live status
+  const [started, setStarted] = useState(loadView);
+  const [routineJson, setRoutineJson] = useState(loadRoutine);
+
+  useEffect(() => saveView(started), [started]);
+  useEffect(() => saveRoutine(routineJson), [routineJson]);
+
+  const newExperiment = () => setStarted(true);
+  const goHome = () => setStarted(false);
+
+  // On load, if a routine is already running (new tab, or a reload that lost storage), go straight to
+  // its status. Only the first status message counts, so the user is never pulled off a page later.
+  useEffect(() => {
+    if (loadView()) return undefined;
+    const client = mqtt.connect(BROKER_URL);
+    client.on('connect', () => client.subscribe(STATUS_TOPIC));
+    client.on('message', (topic, payload) => {
+      if (topic !== STATUS_TOPIC) return;
+      let state;
+      try {
+        state = routineState(payload);
+      } catch {
+        return;
+      }
+      if (state === 'running' || state === 'paused') {
+        setStarted((current) => (current === false ? 'experiment' : current));
+      }
+      client.end();
+    });
+    return () => client.end();
+  }, []);
 
   function handleContinue() {
     const client = mqtt.connect(BROKER_URL);
@@ -54,122 +137,93 @@ export default function App() {
     });
   }
 
+  const routine = parseRoutine(routineJson);
+  const problems = routineProblems(routine);
+
   return (
     <>
       {!started && (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-center px-6 py-10">
-          <header className="w-full max-w-5xl flex justify-between items-center mb-12">
-            <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-            <span className="text-sm text-orange-600 font-medium">SYSTEM READY</span>
-          </header>
+        <div className="ax-page ax-home-page">
+          <div className="ax-wrap">
+            <header className="ax-top">
+              <Brand />
+              <span className="ax-badge ok live"><i />System ready</span>
+            </header>
 
-          <div className="w-full max-w-5xl shadow-xl border border-gray-200 rounded-2xl bg-white p-10">
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
-                Welcome to Apex
-                <span className="bg-orange-100 text-orange-600 text-sm font-semibold px-2 py-0.5 rounded-md">Alpha</span>
-              </h2>
-              <p className="text-gray-600 mt-2 max-w-3xl">
-                AI-powered laboratory automation platform. Apex combines advanced AI planning, computer vision, and precision robotics
-                to automate laboratory workflows — from pipetting to automated plate handling.
-              </p>
-            </div>
+            <section className="ax-home">
+              <p className="ax-h3">Team H · Workcell control</p>
+              <h1 className="ax-home-title">Apex Labs</h1>
+              <i className="ax-rule" />
+              <p className="ax-home-tag">Automated Precision EXperimentation Laboratories</p>
+              <div className="flex flex-wrap gap-3 mt-8">
+                <button onClick={() => setStarted(true)} className="ax-btn solid lg">
+                  Begin →
+                </button>
+                <a href="/debug" className="ax-btn ghost lg">Debug console</a>
+              </div>
+            </section>
 
-            <div className="grid md:grid-cols-3 gap-6 mb-10">
+            <ol className="ax-home-steps">
               {[
-                {
-                  title: 'Vision Understanding',
-                  desc: 'Precise object detection and spatial analysis with high-fidelity environment mapping.',
-                  icon: '👁️',
-                },
-                {
-                  title: 'Intelligent Planning',
-                  desc: 'Advanced LLM planners generate optimized laboratory protocols with contextual awareness.',
-                  icon: '🧠',
-                },
-                {
-                  title: 'Robotic Execution',
-                  desc: 'Precision control systems with real-time feedback for reliable laboratory workflow automation.',
-                  icon: '🤖',
-                },
-              ].map((item, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="p-5 border border-gray-200 rounded-xl hover:shadow-md transition bg-gray-50/60"
-                >
-                  <div className="text-3xl mb-3">{item.icon}</div>
-                  <h3 className="text-lg font-semibold text-gray-800 mb-1">{item.title}</h3>
-                  <p className="text-gray-600 text-sm leading-relaxed">{item.desc}</p>
-                </motion.div>
+                ['Build', 'Put the routine together from blocks: moves, plate handling, OT-2 and shaker.'],
+                ['Send', 'The routine executor runs it step by step on the robot.'],
+                ['Watch', 'Follow the run on the robot and station cameras, with progress alongside.'],
+              ].map(([title, text], i) => (
+                <li key={title}>
+                  <b>{String(i + 1).padStart(2, '0')}</b>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </li>
               ))}
-            </div>
-
-            <div className="flex justify-between items-center">
-              <p className="text-gray-600 text-sm">Getting Started — Begin by mapping your workspace objects.</p>
-              <button
-                onClick={() => setStarted(true)}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg"
-              >
-                Begin →
-              </button>
-            </div>
+            </ol>
           </div>
-
-          <div className="mt-6 text-sm text-green-600 font-medium">AI system initialized</div>
         </div>
       )}
 
-      {started === 'loader' && <LoaderPage />}
+      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} onHome={goHome} />}
 
-      {started && started !== 'loader' && (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center px-6 py-10">
-          <header className="w-full max-w-4xl flex justify-between items-center mb-8">
-            <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-            <span className="text-sm text-green-600 font-medium">AI Planning Ready</span>
-          </header>
+      {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} onHome={goHome} />}
 
-          <div className="w-full max-w-4xl bg-white shadow-lg border border-gray-200 rounded-2xl p-8">
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-              <strong>Objects detected:</strong> 3 items with spatial coordinates loaded.
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-gray-700 font-medium mb-2">Routine Command (JSON)</label>
-              <textarea
-                value={routineJson}
-                onChange={(e) => setRoutineJson(e.target.value)}
-                rows="12"
-                className="w-full border-2 border-orange-300 focus:border-orange-500 rounded-lg p-3 outline-none text-gray-800 font-mono text-sm"
-              />
-              <p className="text-sm text-gray-500 mt-1">
-                Edit the JSON directly to customise steps and parameters before sending.
-              </p>
-            </div>
-
-            <div className="flex justify-between items-center">
-              <button
-                onClick={() => setStarted(false)}
-                className="text-gray-600 hover:text-gray-800 text-sm"
-              >
+      {started === true && (
+        <div className="ax-page">
+          <div className="ax-wrap">
+            <header className="ax-top">
+              <Brand />
+              <button onClick={() => setStarted(false)} className="ax-btn ghost">
                 ← Back
               </button>
-              <button
-                onClick={handleContinue}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg"
-              >
+            </header>
+
+            <TitleBar
+              title="Build the routine"
+              right={routine
+                ? <span className="ax-badge">{routine.steps.length} step{routine.steps.length === 1 ? '' : 's'}</span>
+                : <span className="ax-badge warn">Invalid JSON</span>}
+            />
+
+            <div className="ax-panel mt-6">
+              <RoutineBuilder value={routineJson} onChange={setRoutineJson} />
+            </div>
+
+            <div className="rb-send">
+              <div className="min-w-0">
+                {problems.length > 0 ? (
+                  <ul className="rb-problems">
+                    {problems.slice(0, 3).map((p) => <li key={p}>{p}</li>)}
+                    {problems.length > 3 && <li>and {problems.length - 3} more</li>}
+                  </ul>
+                ) : (
+                  <p className="ax-hint">Ready to send {routine.steps.length} steps to the routine executor.</p>
+                )}
+              </div>
+              <button onClick={handleContinue} className="ax-btn solid lg" disabled={problems.length > 0}>
                 Continue →
               </button>
             </div>
           </div>
-
-          <p className="text-gray-500 text-sm mt-6 italic">*No coding required*</p>
         </div>
       )}
 
-      <CameraPanel />
     </>
   );
 }

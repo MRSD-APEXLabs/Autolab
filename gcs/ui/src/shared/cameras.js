@@ -5,10 +5,22 @@ export const HUB_STATUS_TOPIC = 'ros2/camera_hub/status';
 export const SELECT_CAMERA_TOPIC = 'cmd/perception/select_camera';
 export const SELECT_RESULT_TOPIC = 'perception/select_camera_result';
 
-export const ROBOT_HOST = process.env.REACT_APP_ROBOT_HOST || window.location.hostname;
-export const STREAM_PORT = process.env.REACT_APP_STREAM_PORT || '8002';
-
-const streamBase = () => `http://${ROBOT_HOST}:${STREAM_PORT}`;
+// Stream directly from the camera server by IP; no client DNS or GCS relay.
+// An explicit base URL can still be supplied for other deployments.
+const streamBase = () => (process.env.REACT_APP_CAMERA_STREAM_BASE || 'http://192.168.10.3:8002').replace(/\/$/, '');
 export const streamUrl = (kind, camera) => `${streamBase()}/stream/${kind}/${camera}.mjpg`;
 export const healthUrl = () => `${streamBase()}/health`;
 export const cameraLabel = (camera) => (camera ? CAMERA_LABELS[camera] ?? camera : 'none');
+
+// Station cameras of the FVD presentation (FVD-Presentation/config.json "cameras"). present.py
+// relays them (USB cameras on the presentation computer, the shaker's Pi camera) as plain MJPEG at
+// /stream/<id>.mjpg. Run it with --lan when this UI is opened on another computer.
+const deckBase = () => (process.env.REACT_APP_DECK_CAMERA_BASE || 'http://192.168.10.19:8765').replace(/\/$/, '');
+export const STATION_CAMERAS = [
+  { id: 'ot2', label: 'Opentrons OT-2', short: 'OT-2' },
+  { id: 'shaker', label: 'Shaker', short: 'Shaker' },
+  { id: 'home', label: 'Home', short: 'Home' },
+];
+export const deckStreamUrl = (id) => `${deckBase()}/stream/${id}.mjpg`;
+// Same stream sent as octet-stream (present.py ?fetch=1): Safari's fetch can't read multipart.
+export const deckFetchUrl = (id) => `${deckStreamUrl(id)}?fetch=1`;

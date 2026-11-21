@@ -1,19 +1,35 @@
 import React, { useState, useEffect, useRef } from "react";
 import mqtt from "mqtt";
 import ClogCheckCard from "./ClogCheckCard";
+import CameraStage from "./CameraStage";
+import Ot2Progress from "./Ot2Progress";
+import { Brand, TitleBar } from "./Chrome";
+import { GROUPS, OT2_ACTIONS, ot2Commands, stepDetail, stepGroup, stepName, stepStation, stepTitle } from "./shared/steps";
+import { OT2_PHASE_LABEL, ot2ProgressFor, tipCheckStageText } from "./shared/ot2Progress";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
 const CANCEL_TOPIC = "cmd/routine_executor/cancel";
 const PAUSE_TOPIC = "cmd/routine_executor/pause";
 const RESUME_TOPIC = "cmd/routine_executor/resume";
+const RETRY_TOPIC = "cmd/routine_executor/retry";
+// Give up on "Retrying…" if the executor never reports running (it publishes status at 1 Hz).
+const RETRY_PENDING_MS = 5000;
 
-// Mirror of step_config.py display_topics.
+// Same default robot as routine_executor/node.py. behavior.launch.xml pushes the
+// /<ROBOT_NAME>/behavior namespace, so executive topics live under it.
+const ROBOT = "robot_1";
+
 // Keys are step names; values are absolute ROS2 topic paths.
-// MQTT topic = "ros2" + ros2_path  (e.g. /behavior/manipulation_phase → ros2/behavior/manipulation_phase)
+// MQTT topic = "ros2" + ros2_path  (e.g. /robot_1/behavior/manipulation_phase → ros2/robot_1/behavior/manipulation_phase)
+// manipulation_phase is published every executive tick; /planning_state only on planner transitions.
+const MANIP_TOPICS = [`/${ROBOT}/behavior/manipulation_phase`, "/planning_state"];
+const TOPIC_LABEL = { [MANIP_TOPICS[0]]: "Manipulation phase", "/planning_state": "Planner" };
 const STEP_DISPLAY_TOPICS = {
-  pick_base: ["/behavior/manipulation_phase", "/planning_status"],
-  place_base: ["/behavior/manipulation_phase", "/planning_status"],
+  pick: MANIP_TOPICS,
+  place: MANIP_TOPICS,
+  pick_base: MANIP_TOPICS,
+  place_base: MANIP_TOPICS,
 };
 
 const ALL_DISPLAY_MQTT_TOPICS = [
@@ -24,12 +40,20 @@ const ALL_DISPLAY_MQTT_TOPICS = [
   ),
 ];
 
-const STATE_STYLE = {
-  idle:    { label: "Idle",    badge: "bg-gray-200 text-gray-600",     text: "text-gray-500" },
-  running: { label: "Running", badge: "bg-orange-100 text-orange-600", text: "text-orange-600" },
-  paused:  { label: "Paused",  badge: "bg-yellow-100 text-yellow-700", text: "text-yellow-600" },
-  success: { label: "Done",    badge: "bg-green-100 text-green-700",   text: "text-green-600" },
-  failed:  { label: "Failed",  badge: "bg-red-100 text-red-600",       text: "text-red-600" },
+const STATE_LABEL = {
+  idle: "Idle",
+  running: "Running",
+  paused: "Paused",
+  success: "Done",
+  failed: "Failed",
+};
+
+const STATE_TONE = {
+  idle: "var(--slate)",
+  running: "var(--orange)",
+  paused: "var(--amber)",
+  success: "var(--green)",
+  failed: "var(--red)",
 };
 
 function formatExecPayload(payload) {
@@ -40,8 +64,55 @@ function formatExecPayload(payload) {
   return JSON.stringify(payload);
 }
 
-export default function ExperimentSequence() {
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// One line for the timeline under the running OT-2 step: "Aspirate · clog check pass 2 of 5".
+function ot2LiveLine(step, progress) {
+  if (!progress) return null;
+  if (progress.phase !== "command" && progress.phase !== "tip_check") return OT2_PHASE_LABEL[progress.phase] ?? null;
+  const cmd = ot2Commands(step)?.[progress.command];
+  const label = OT2_ACTIONS[cmd?.action]?.label ?? cmd?.action ?? `Command ${progress.command + 1}`;
+  return progress.phase === "tip_check" ? `Clog check · ${tipCheckStageText(progress.tip_check)}` : label;
+}
+
+// Right-hand run timeline: one node per step, the rail filled up to the current step.
+function Timeline({ steps, state, currentStepIdx, completedCount, liveLine }) {
+  const total = steps.length;
+  const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+  return (
+    <aside className="xt" aria-label="Run progress">
+      <div className="xt-head">
+        <span className="ax-h3">Progress</span>
+        <div className="xt-pct"><b>{pct}</b>%</div>
+        <div className="xt-count">{completedCount}/{total} Steps Completed</div>
+      </div>
+      <ol className="xt-list">
+        {steps.map((step, i) => {
+          let cls = "todo";
+          if (state === "success" || i < currentStepIdx) cls = "done";
+          else if (i === currentStepIdx && state === "failed") cls = "fail";
+          else if (i === currentStepIdx && state !== "idle") cls = state === "paused" ? "now paused" : "now";
+          const detail = (i === currentStepIdx && liveLine) || stepDetail(step);
+          return (
+            <li key={i} className={`xt-step ${cls}`} style={{ "--g": GROUPS[stepGroup(step)].color }}
+              aria-current={cls.startsWith("now") ? "step" : undefined}>
+              <i className="xt-node">{cls === "done" ? "✓" : cls === "fail" ? "✕" : i + 1}</i>
+              <div className="min-w-0">
+                <span className="xt-name" title={stepName(step)}>{stepTitle(step)}</span>
+                {detail && <small>{detail}</small>}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
+  );
+}
+
+export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
+  const [retryPending, setRetryPending] = useState(false);
+  const [confirmForce, setConfirmForce] = useState(false);
   const [connected, setConnected] = useState(false);
   const [executorStatus, setExecutorStatus] = useState({});
   const clientRef = useRef(null);
@@ -57,6 +128,23 @@ export default function ExperimentSequence() {
   function handleResume() {
     clientRef.current?.publish(RESUME_TOPIC, '');
   }
+
+  function handleRetry() {
+    // A liquid-handling step is never re-sent without the operator confirming the machine is safe.
+    if (status?.retry_needs_force && !confirmForce) {
+      setConfirmForce(true);
+      return;
+    }
+    clientRef.current?.publish(RETRY_TOPIC, status?.retry_needs_force ? JSON.stringify({ force: true }) : '');
+    setConfirmForce(false);
+    setRetryPending(true);
+  }
+
+  useEffect(() => {
+    if (!retryPending) return undefined;
+    const timer = setTimeout(() => setRetryPending(false), RETRY_PENDING_MS);
+    return () => clearTimeout(timer);
+  }, [retryPending]);
 
   useEffect(() => {
     const client = mqtt.connect(BROKER_URL);
@@ -97,207 +185,204 @@ export default function ExperimentSequence() {
   const totalSteps = steps.length;
   const currentStepIdx = status?.current_step ?? 0;
   const state = status?.state ?? "idle";
-  const { label: stateLabel, badge: stateBadge, text: stateText } =
-    STATE_STYLE[state] ?? STATE_STYLE.idle;
+  const failedStepName = stepName(steps[currentStepIdx]);
+  const canRetry = state === "failed" && currentStepIdx < totalSteps;
+
+  // The executor left "failed": the retry went through.
+  useEffect(() => {
+    if (state !== "failed") {
+      setRetryPending(false);
+      setConfirmForce(false);
+    }
+  }, [state]);
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
+  const active = state === "running" || state === "paused";
+  const tone = STATE_TONE[state] ?? STATE_TONE.idle;
+  const currentStep = steps[currentStepIdx];
+  const displayTopics = (active && STEP_DISPLAY_TOPICS[stepName(currentStep)]) || [];
+  const station = active || state === "failed" ? stepStation(currentStep) : null;
+  const nextStep = active ? steps[currentStepIdx + 1] : null;
+  const isOt2 = stepName(currentStep) === "ot2";
+  const ot2Progress = isOt2 ? ot2ProgressFor(status) : null;
+  const recordings = status?.recordings ?? [];
+  // The tip check running right now, until its result is attached to the run.
+  const pendingCheck = ot2Progress?.phase === "tip_check"
+    && !recordings.some((r) => r?.id === `${ot2Progress.run_id}-${ot2Progress.command}`)
+    ? { progress: ot2Progress.tip_check, aspirate: ot2Commands(currentStep)?.[ot2Progress.command], step: currentStepIdx }
+    : null;
 
-  const currentStepName = status?.current_step_name ?? null;
-  const displayTopics = (currentStepName && STEP_DISPLAY_TOPICS[currentStepName]) ?? [];
+  // Ways out when the executor has nothing to run.
+  const idleActions = (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {onNewExperiment && (
+        <button onClick={onNewExperiment} className="ax-btn solid">
+          New experiment
+        </button>
+      )}
+      {onHome && (
+        <button onClick={onHome} className="ax-btn ghost">
+          Back to home
+        </button>
+      )}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-6">
-        <div className="w-6 h-6 rounded-full bg-gray-800" />
-        <h1 className="text-2xl font-semibold text-gray-800">APEX Labs</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={handleCancel}
-            className="text-xs px-3 py-1 rounded-full bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-40"
-            disabled={state !== "running" && state !== "paused"}
-          >
-            Cancel
-          </button>
-          {state === "running" && (
-            <button
-              onClick={handlePause}
-              className="text-xs px-3 py-1 rounded-full bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-            >
-              Pause
+    <div className="ax-page">
+      <div className="ax-wrap wide">
+        <header className="ax-top">
+          <Brand />
+          <div className="ax-top-right">
+            {state === "running" && (
+              <button onClick={handlePause} className="ax-btn amber">
+                Pause
+              </button>
+            )}
+            {state === "paused" && (
+              <button onClick={handleResume} className="ax-btn green">
+                Resume
+              </button>
+            )}
+            <button onClick={handleCancel} className="ax-btn stop" disabled={!active}>
+              Cancel
             </button>
-          )}
-          {state === "paused" && (
-            <button
-              onClick={handleResume}
-              className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-700 hover:bg-green-200"
-            >
-              Resume
-            </button>
-          )}
-          <span
-            className={`text-xs px-2 py-1 rounded-full ${
-              connected ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"
-            }`}
-          >
-            {connected ? "Connected" : "Disconnected"}
-          </span>
-        </div>
-      </div>
-
-      {/* Title */}
-      <div className="mb-4 w-full flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Experiment Sequence</h2>
-          <p className="text-gray-500 text-sm">Live routine executor status</p>
-        </div>
-        <span className={`text-sm font-medium px-3 py-1 rounded-full ${stateBadge}`}>
-          {stateLabel}
-        </span>
-      </div>
-
-      {/* Waiting placeholder */}
-      {!status && (
-        <div className="bg-white p-8 rounded-2xl shadow text-center text-gray-400 text-sm">
-          Waiting for routine executor…
-        </div>
-      )}
-
-      {/* Progress Tracker */}
-      {status && totalSteps > 0 && (
-        <div className="bg-white p-4 rounded-2xl shadow mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <span className={`font-medium ${stateText}`}>{stateLabel}</span>
-            <span className="text-sm text-gray-500">
-              {completedCount}/{totalSteps} Steps Completed
+            <span className={`ax-badge ${connected ? "ok live" : ""}`}>
+              <i />
+              {connected ? "Connected" : "Disconnected"}
             </span>
           </div>
+        </header>
 
-          <div className="flex gap-2 flex-wrap">
-            {steps.map((name, i) => {
-              let bg;
-              if (state === "success") {
-                bg = "bg-green-500";
-              } else if (i < currentStepIdx) {
-                bg = "bg-green-500";
-              } else if (i === currentStepIdx && state === "paused") {
-                bg = "bg-yellow-500";
-              } else if (i === currentStepIdx && state === "running") {
-                bg = "bg-orange-500";
-              } else if (i === currentStepIdx && state === "failed") {
-                bg = "bg-red-500";
-              } else {
-                bg = "bg-gray-300";
-              }
+        <TitleBar
+          title="Experiment Sequence"
+          right={<span className="ax-state fill" style={{ "--k": tone }}>{STATE_LABEL[state] ?? STATE_LABEL.idle}</span>}
+        />
 
-              return (
-                <div
-                  key={i}
-                  title={name}
-                  className={`w-6 h-6 rounded-full ${bg} text-white flex items-center justify-center text-xs font-medium`}
-                >
-                  {i + 1}
-                </div>
-              );
-            })}
-          </div>
+        <div className="xp">
+          <div className="xp-cams"><CameraStage station={station} /></div>
 
-          <p className="text-sm mt-2 text-gray-500">
-            {(state === "running" || state === "paused") && status.current_step_name && (
-              <>
-                {state === "paused" ? "Paused on:" : "Currently executing:"}{" "}
-                <span className={`font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-600"}`}>
-                  {status.current_step_name}
-                </span>
-              </>
-            )}
-            {state === "success" && (
-              <span className="text-green-600 font-medium">Routine complete</span>
-            )}
-            {state === "failed" && (
-              <span className="text-red-600 font-medium">
-                {status.error ?? "Failed"}
-              </span>
-            )}
-            {state === "idle" && "No routine running"}
-          </p>
-        </div>
-      )}
-
-      {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
-      {status?.recordings?.length > 0 && <ClogCheckCard clipIds={status.recordings} />}
-
-      {/* Active Step Card */}
-      {status && (state === "running" || state === "paused") && status.current_step_name && (
-        <div className="bg-white rounded-2xl shadow p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              Step {currentStepIdx + 1} of {totalSteps}
-            </h3>
-            <span className={`text-sm font-medium ${state === "paused" ? "text-yellow-600" : "text-orange-500"}`}>
-              {state === "paused" ? "Paused" : "Running"}
-            </span>
-          </div>
-
-          <div className="mb-4">
-            <label className="text-gray-700 text-sm font-medium">Step name</label>
-            <input
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
-              value={status.current_step_name}
-              readOnly
-            />
-          </div>
-
-          {status.retry_count > 0 && (
-            <p className="text-sm text-amber-600">
-              Retry {status.retry_count} of {status.max_retries}
-            </p>
-          )}
-
-          {/* Executor status for this step */}
-          {displayTopics.length > 0 && (
-            <div className="mt-4 border-t pt-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                Executor Status
-              </p>
-              <div className="space-y-2">
-                {displayTopics.map((ros2Topic) => {
-                  const mqttTopic = `ros2${ros2Topic}`;
-                  const val = executorStatus[mqttTopic];
-                  return (
-                    <div key={ros2Topic} className="flex items-center justify-between gap-4">
-                      <span className="text-xs text-gray-400 font-mono truncate">
-                        {ros2Topic}
-                      </span>
-                      <span className="text-xs text-gray-700 font-medium shrink-0">
-                        {formatExecPayload(val)}
-                      </span>
-                    </div>
-                  );
-                })}
+          <div className="xp-detail">
+            {!status && (
+              <div className="ax-panel flex items-center gap-4">
+                <div className="ax-spinner" />
+                <p className="ax-hint">Waiting for routine executor…</p>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {/* Error Card */}
-      {status && state === "failed" && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
-          <h3 className="font-semibold mb-1">Routine Failed</h3>
-          <p className="text-sm">{status.error ?? "Unknown error"}</p>
-        </div>
-      )}
+            {/* Current step */}
+            {status && active && currentStep && (
+              <div className="ax-panel ax-accent" style={{ "--k": tone }}>
+                <div className="ax-panel-head">
+                  <span className="ax-h3">
+                    {state === "paused" ? "Paused on" : "Now running"} · Step {currentStepIdx + 1} of {totalSteps}
+                  </span>
+                  {status.retry_count > 0 && (
+                    <span className="ax-badge warn">Retry {status.retry_count} of {status.max_retries}</span>
+                  )}
+                </div>
+                <div key={currentStepIdx} className="xp-now flip">
+                  <b>{pad2(currentStepIdx + 1)}</b>
+                  <span>{stepTitle(currentStep)}</span>
+                </div>
+                {stepDetail(currentStep) && !isOt2 && <p className="xp-sub">{stepDetail(currentStep)}</p>}
+                {isOt2 && <Ot2Progress step={currentStep} progress={ot2Progress} />}
 
-      {/* Success Card */}
-      {status && state === "success" && (
-        <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-green-700">
-          <h3 className="font-semibold">Routine Complete</h3>
-          <p className="text-sm mt-1">
-            All {totalSteps} steps executed successfully.
-          </p>
+                {displayTopics.length > 0 && (
+                  <dl className="ax-kv mt-4 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
+                    {displayTopics.map((ros2Topic) => (
+                      <React.Fragment key={ros2Topic}>
+                        <dt title={ros2Topic}>{TOPIC_LABEL[ros2Topic] ?? ros2Topic}</dt>
+                        <dd>{formatExecPayload(executorStatus[`ros2${ros2Topic}`])}</dd>
+                      </React.Fragment>
+                    ))}
+                  </dl>
+                )}
+                {nextStep && <p className="ax-hint mt-4">Next: {stepTitle(nextStep)}</p>}
+              </div>
+            )}
+
+            {/* Failed */}
+            {status && state === "failed" && (
+              <div className="ax-panel ax-accent k-bad">
+                <span className="ax-h3" style={{ color: "var(--red)" }}>Fault</span>
+                <h3 className="xp-big">Routine Failed</h3>
+                <p className="ax-mono text-sm mt-1" style={{ color: "var(--dim)" }}>
+                  {status.error ?? "Unknown error"}
+                </p>
+                {isOt2 && ot2Progress && <Ot2Progress step={currentStep} progress={ot2Progress} />}
+                {canRetry && confirmForce && (
+                  <p className="text-sm mt-3 font-semibold" style={{ color: "var(--amber)" }}>
+                    This step handles liquid and was not retried automatically: the tip may still hold liquid.
+                    Check the OT-2 before running the step again.
+                  </p>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {canRetry && (
+                    <button
+                      onClick={handleRetry}
+                      disabled={!connected || retryPending}
+                      className={`ax-btn solid ${confirmForce ? "amber" : "stop"}`}
+                    >
+                      {retryPending
+                        ? "Retrying…"
+                        : confirmForce
+                        ? "I've inspected the OT-2 — retry"
+                        : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
+                    </button>
+                  )}
+                  {onNewExperiment && (
+                    <button onClick={onNewExperiment} className="ax-btn ghost">
+                      New experiment
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Done */}
+            {status && state === "success" && (
+              <div className="ax-panel ax-accent k-ok">
+                <span className="ax-h3" style={{ color: "var(--green)" }}>Done</span>
+                <h3 className="xp-big">Routine Complete</h3>
+                <p className="text-sm mt-1" style={{ color: "var(--dim)" }}>
+                  All {totalSteps} steps executed successfully.
+                </p>
+                {onNewExperiment && (
+                  <button onClick={onNewExperiment} className="ax-btn solid green mt-4">
+                    New experiment
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Idle */}
+            {status && state === "idle" && (
+              <div className="ax-panel ax-accent k-none">
+                <h3 className="xp-big">No routine running</h3>
+                {totalSteps === 0 && (
+                  <p className="text-sm mt-1" style={{ color: "var(--dim)" }}>
+                    The routine executor is idle. Start a new experiment or head back home.
+                  </p>
+                )}
+                {idleActions}
+              </div>
+            )}
+
+            {/* Clog-detection verdicts for this run's aspirates (stay after the run ends) */}
+            {(recordings.length > 0 || pendingCheck) && <ClogCheckCard recordings={recordings} pending={pendingCheck} />}
+          </div>
+
+          <div className="xp-time">
+            {status && totalSteps > 0 ? (
+              <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount}
+                liveLine={active && isOt2 ? ot2LiveLine(currentStep, ot2Progress) : null} />
+            ) : (
+              <aside className="xt"><span className="ax-h3">Progress</span><p className="ax-hint mt-3">No steps loaded</p></aside>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

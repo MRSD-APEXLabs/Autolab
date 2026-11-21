@@ -3,13 +3,14 @@
 export const ANOMALY_URL =
   process.env.REACT_APP_ANOMALY_URL || `http://${window.location.hostname}:8100`;
 
-async function request(method, path, body) {
+// JSON request to a service at base; throws with the service's {error} message on failure.
+export async function requestAt(base, method, path, body) {
   const opts = { method };
   if (body !== undefined) {
     opts.headers = { 'Content-Type': 'application/json' };
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(`${ANOMALY_URL}${path}`, opts);
+  const res = await fetch(`${base}${path}`, opts);
   let data = null;
   try {
     data = await res.json();
@@ -23,6 +24,8 @@ async function request(method, path, body) {
   }
   return data;
 }
+
+const request = (method, path, body) => requestAt(ANOMALY_URL, method, path, body);
 
 export const getResult = (clipId) => request('GET', `/result/${encodeURIComponent(clipId)}`);
 export const getJobs = () => request('GET', '/jobs');

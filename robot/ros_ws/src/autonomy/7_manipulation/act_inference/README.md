@@ -8,15 +8,16 @@ weighted x4):
 | target | checkpoint | demos | held-out check (80:20 run, median end error) |
 |---|---|---|---|
 | `ot2` | `models/xarm6_placing_act_ft_all_20261105b/` | 103, 11000 steps | 1.34 mm |
-| `shaker` | `models/xarm6_shaker_act_ft_20261113/` | 77 (about 8 base parking spots + 28 at newer spots), 10500 steps | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
+| `shaker` | `models/xarm6_shaker_act_ft_vg_20261120/` | 82 (about 8 base parking spots + 33 at newer spots), 30000 steps; RGB + F/T (no depth), trained with virtual-grasp augmentation (frames re-rendered as if the plate sat up to 4 mm elsewhere in the gripper) | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
 | `base` | `models/xarm6_base_act_ft_20261108b/` | 43 (robot base deck bracket; 4 started at the base start pose), 4500 steps | 1.42 mm (x/y 0.74, height 0.84) for the 39-demo version |
 
 The ROS node and the wrapper scripts default to these. The previous OT-2 checkpoints
 `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
 `models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
 `models/xarm_final_ckpt_placing/` remain available by explicit path.
-The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261110/` (66 demonstrations, 9000 steps),
-`models/xarm6_shaker_act_ft_20261108c/` (59, 8000 steps), `models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and
+The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261120/` (the same 82 demonstrations, RGB-D, no grasp augmentation,
+11000 steps), `models/xarm6_shaker_act_ft_20261113/` (77 demonstrations, 10500 steps),
+`models/xarm6_shaker_act_ft_20261110/` (66, 9000 steps), `models/xarm6_shaker_act_ft_20261108c/` (59, 8000 steps), `models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and
 `models/xarm6_shaker_act_ft_20261108/` (49, 6500 steps) are kept too, and so is the previous base
 checkpoint `models/xarm6_base_act_ft_20261108/` (39 demonstrations, 4000 steps).
 
@@ -91,12 +92,15 @@ ROS parameters also expose `ckpt_dir` (OT-2), `shaker_ckpt_dir`, `base_ckpt_dir`
 `translation_speed`, `rotation_speed`, `max_tracking_error`, `enable_rotation`,
 `workspace_radius`, `duration_sec`, `query_interval`, `prediction_timeout`,
 `contact_gap`, `contact_hold`, `contact_max_lag`, `settle_motion`, `settle_queries`,
-`approach_speed`, `approach_distance`, `ensemble`, and `final_offset_mm` (XYZ).
+`approach_speed`, `approach_distance`, `ensemble`, `final_offset_mm` (XYZ), and for shaker only
+`shaker_approach_speed` (0.0015 m/s) and `shaker_slow_below_z_mm` (110.0; 0 turns the slow zone off).
 Camera parameters are `camera_host`, `camera_port`, `record_image_width`, `depth_width`,
 `depth_backend`, `depth_model`, `depth_repo`, `depth_models_dir`, `max_frame_age`, and `preview`.
 
 Arrival holds the target after a chunk predicts under 2 mm of travel and ends after
-three consecutive arrived chunks. Near the goal, translation slows to 3 mm/s and
+three consecutive arrived chunks. Shaker also moves at 1.5 mm/s whenever the TCP target is below 110 mm
+(robot base frame; the clamp seat is at 58-67 mm and its bounds ~8 mm above it), so the plate crosses the
+bounds on fresh camera images instead of a prediction made several millimetres higher. Near the goal, translation slows to 3 mm/s and
 averages up to five recent chunks. Execution stops if downward target lag indicates
 sustained contact. `/stop` also interrupts initial inference and any final-offset move.
 
@@ -104,8 +108,8 @@ sustained contact. `/stop` also interrupts initial inference and any final-offse
 
 After the ACT rollout returns `done`, the node opens the custom gripper (Modbus device
 0x08, setpoint 0 at 57600 baud), waits **4 seconds** for jaw travel, then moves **100 mm up
-along robot base-frame +Z**, holding XY and orientation. The lift uses the ACT translation
-speed (`translation_speed`, default **10 mm/s**), independently of base-placement speed.
+along robot base-frame +Z**, holding XY and orientation, at **25 mm/s** (`ACT_LIFT_SPEED_MM_S`
+in node.py), independently of the ACT `translation_speed` and of base-placement speed.
 The gripper acknowledgement confirms command acceptance; this gripper has no measured
 jaw-position feedback. A rejected command fails the run before lifting.
 
@@ -144,7 +148,7 @@ wrist F/T sensor finish the job:
 3. Hold at the touch height, re-baseline, then slide along base **-X** until the sideways force
    |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. The first **12 mm** go at
    **10 mm/s** (`base_slide_fast_mm`; the ridge is ~19 mm along), the rest at **4 mm/s**. No ridge within
-   **30 mm** fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
+   **50 mm** fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
 
 The fast parts are force-guarded like the slow ones; a touch or ridge inside them stops the move, only with more
 overshoot. The touch and ridge positions (and how far each is from the start) are printed every run: if either is
@@ -180,7 +184,7 @@ Node parameters: `base_mode` (`scripted` or `policy`); `base_pose_mm_deg` (six X
 (150.0, both modes), `base_accel_mm_s2` (500.0, the lift and the scripted approach); scripted
 `base_approach_speed_mm_s` (150.0), `base_approach_clearance_mm` (20.0); scripted seating
 `base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (4.0), `base_slide_max_mm`
-(30.0), `base_ridge_force_n` (1.0), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
+(50.0), `base_ridge_force_n` (0.7), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
 `base_slide_fast_mm` (12.0), `base_force_count` (2), `base_settle_sec` (0.2), `base_baseline_sec` (0.2),
 `base_open_wait_sec` (1.5, both modes),
 `base_debug` (false), `base_debug_dir`; policy mode `base_ckpt_dir`, `base_start_pose_mm_deg`,

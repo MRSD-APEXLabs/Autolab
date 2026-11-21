@@ -52,3 +52,16 @@ test('shows service error on start', async () => {
   fireEvent.click(screen.getByText('Start recording'));
   expect(await screen.findByText('Error: already recording c9')).toBeInTheDocument();
 });
+
+test('clog detection has separate tip-check and O-VAD sections', async () => {
+  mockService();
+  render(<AnomalyPanel />);
+  const tip = screen.getByRole('region', { name: /tip check/i });
+  const ovad = screen.getByRole('region', { name: /O-VAD/i });
+  expect(tip).toHaveTextContent('Run clog check');
+  expect(tip).not.toHaveTextContent('Start recording');
+  expect(ovad).toHaveTextContent('Start recording');
+  expect(ovad).toHaveTextContent('Recent jobs');
+  expect(ovad).not.toHaveTextContent('Run clog check');
+  expect(await screen.findByText('c1')).toBeInTheDocument();
+});

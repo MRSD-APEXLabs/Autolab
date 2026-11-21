@@ -73,12 +73,13 @@ class RolloutConfig:
     approach_distance: float = 0.012 # m
     ensemble: int = 5                # near the goal, average the current waypoint of this many recent chunks; 1 disables
     final_offset: tuple = (0.0, 0.0, 0.0)  # m, robot base frame: one straight move after the policy reports arrival
+    slow_below_z: float = 0.0        # m, robot base frame: below this TCP target height move at approach_speed; 0 disables
 
     def __post_init__(self):
         for name in ('duration_sec', 'query_interval', 'prediction_timeout', 'workspace_radius', 'contact_hold'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be finite and positive')
-        for name in ('contact_gap', 'contact_max_lag', 'settle_motion', 'approach_speed', 'approach_distance'):
+        for name in ('contact_gap', 'contact_max_lag', 'settle_motion', 'approach_speed', 'approach_distance', 'slow_below_z'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
                 raise ValueError(f'{name} must be finite and non-negative')
         if int(self.settle_queries) != self.settle_queries or self.settle_queries < 1:

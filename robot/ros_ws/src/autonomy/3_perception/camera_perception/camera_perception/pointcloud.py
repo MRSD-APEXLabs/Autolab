@@ -7,12 +7,13 @@ from pathlib import Path
 import numpy as np
 
 
-def depth_to_points(depth_mm, intrinsics, stride=4, bounds=None, edge_threshold=0.0, bgr=None):
+def depth_to_points(depth_mm, intrinsics, stride=4, bounds=None, edge_threshold=0.0, bgr=None, crop_bottom=0):
     """(points (N, 3) float32 m, rgb (N,) uint32 0x00RRGGBB or None) of every `stride`-th pixel in x and y.
 
     bounds: ((x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi)) in the camera frame, None to keep everything valid.
     edge_threshold: drop points whose depth differs from a grid neighbour (stride px away) by more than
     this fraction of their depth per pixel of separation: the "flying pixels" smeared across depth edges.
+    crop_bottom: drop the bottom `crop_bottom` image rows (the ZED X depth smears there: fake points ~0.2 m away).
     """
     stride = max(1, int(stride))
     z = depth_mm[::stride, ::stride].astype(np.float32) / 1000.0
@@ -30,6 +31,8 @@ def depth_to_points(depth_mm, intrinsics, stride=4, bounds=None, edge_threshold=
         valid &= jump <= limit
     us = np.arange(cols, dtype=np.float32) * stride
     vs = np.arange(rows, dtype=np.float32) * stride
+    if crop_bottom > 0:
+        valid &= (vs < depth_mm.shape[0] - crop_bottom)[:, None]
     x = (us[None, :] - intrinsics.cx) / intrinsics.fx * z
     y = (vs[:, None] - intrinsics.cy) / intrinsics.fy * z
     if bounds is not None:

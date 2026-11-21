@@ -133,6 +133,11 @@ prm_plan_from_to(
 // Helper lambda you can reuse anywhere
 // Add this near the top of crrt_plan.hpp, alongside prm_plan_from_to
 
+// Shortcut smoothing, `iters` random tries. Each try picks two random points along the path (by joint-space
+// arc length, so partway along a segment as well as at a waypoint) and, when the straight segment between them
+// is valid at STEP_SIZE resolution, replaces the stretch between them with it. Cutting from points partway
+// along segments pulls the path tight: a waypoint the random search put far out is replaced by two points
+// nearer the obstacle, rather than kept wherever the search left it.
 static void shortcut(
     std::vector<JointVec>& path,
     moveit::core::RobotState& rs_sc,
@@ -140,20 +145,59 @@ static void shortcut(
     const planning_scene::PlanningScenePtr& scene_snapshot,
     int iters = 200)
 {
+    constexpr double SNAP_RAD = 1e-3;   // a cut point this close to a waypoint is that waypoint
+    constexpr double GAIN_RAD = 1e-3;   // a cut must shorten the path at least this much
     std::mt19937 rng_sc(42);
-    for (int i = 0; i < iters; ++i) {
+    std::uniform_real_distribution<double> u(0.0, 1.0);
+    std::vector<double> at;   // at[k]: arc length from path[0] to path[k]
+    for (int it = 0; it < iters; ++it) {
         if (path.size() < 3) break;
-        std::uniform_int_distribution<int> d(0, path.size() - 1);
-        int a = d(rng_sc), b = d(rng_sc);
-        if (a > b) std::swap(a, b);
-        if (b - a < 2) continue;
-        bool ok = true;
-        JointVec cur = path[a];
-        while (joint_dist(cur, path[b]) > crrt_cfg::STEP_SIZE) {
-            cur = steer(cur, path[b], crrt_cfg::STEP_SIZE);
-            if (!is_valid(cur, rs_sc, jmg, scene_snapshot)) { ok = false; break; }
-        }
-        if (ok) path.erase(path.begin() + a + 1, path.begin() + b);
+        at.assign(1, 0.0);
+        for (size_t k = 1; k < path.size(); ++k) at.push_back(at.back() + joint_dist(path[k - 1], path[k]));
+        double sa = u(rng_sc) * at.back(), sb = u(rng_sc) * at.back();
+        if (sa > sb) std::swap(sa, sb);
+        // segment i (path[i] -> path[i+1]) holds sa, segment j holds sb
+        const size_t last = path.size() - 2;
+        const size_t i = std::min<size_t>(std::upper_bound(at.begin(), at.end(), sa) - at.begin() - 1, last);
+        const size_t j = std::min<size_t>(std::upper_bound(at.begin(), at.end(), sb) - at.begin() - 1, last);
+        if (i == j) continue;   // one straight segment: nothing to cut
+        auto on_segment = [&](size_t k, double s) {
+            const double t = (s - at[k]) / (at[k + 1] - at[k]);
+            JointVec q(path[k].size());
+            for (size_t d = 0; d < q.size(); ++d) q[d] = path[k][d] + t * (path[k + 1][d] - path[k][d]);
+            return q;
+        };
+        // Cut from path[keep_to] (inclusive, plus `a` when new) to path[keep_from] (preceded by `b` when new).
+        size_t keep_to = i, keep_from = j + 1;
+        bool new_a = false, new_b = false;
+        if (at[i + 1] - sa < SNAP_RAD)  keep_to = i + 1, sa = at[i + 1];
+        else if (sa - at[i] < SNAP_RAD) sa = at[i];
+        else new_a = true;
+        if (sb - at[j] < SNAP_RAD)          keep_from = j, sb = at[j];
+        else if (at[j + 1] - sb < SNAP_RAD) sb = at[j + 1];
+        else new_b = true;
+        const JointVec a = new_a ? on_segment(i, sa) : path[keep_to];
+        const JointVec b = new_b ? on_segment(j, sb) : path[keep_from];
+        if ((sb - sa) - joint_dist(a, b) < GAIN_RAD) continue;
+        if ((new_a && !is_valid(a, rs_sc, jmg, scene_snapshot)) ||
+            (new_b && !is_valid(b, rs_sc, jmg, scene_snapshot))) continue;
+        // The kept parts of segments i and j (path[i] -> a, b -> path[j+1]) step through other points than
+        // the whole segments were checked at, so they are checked again.
+        auto segment_valid = [&](const JointVec& from, const JointVec& to) {
+            JointVec cur = from;
+            while (joint_dist(cur, to) > crrt_cfg::STEP_SIZE) {
+                cur = steer(cur, to, crrt_cfg::STEP_SIZE);
+                if (!is_valid(cur, rs_sc, jmg, scene_snapshot)) return false;
+            }
+            return true;
+        };
+        if (!segment_valid(a, b) || (new_a && !segment_valid(path[keep_to], a)) ||
+            (new_b && !segment_valid(b, path[keep_from]))) continue;
+        std::vector<JointVec> cut(path.begin(), path.begin() + keep_to + 1);
+        if (new_a) cut.push_back(a);
+        if (new_b) cut.push_back(b);
+        cut.insert(cut.end(), path.begin() + keep_from, path.end());
+        path = std::move(cut);
     }
 }
 

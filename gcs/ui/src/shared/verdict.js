@@ -52,3 +52,25 @@ export function stepLabel(job, fallback) {
   }
   return fallback ?? job?.clip_id ?? '—';
 }
+
+// Maps one tip-check result (lab_machine_executive, averaged over several checks) to a badge.
+// A failed check is a warning, never a clog: the protocol went on regardless.
+export function tipCheckVerdict(result) {
+  const p = typeof result?.p_tip_empty === 'number' ? `P(empty) ${result.p_tip_empty.toFixed(2)}` : null;
+  if (result?.status === 'done' && result.anomaly_detected === false) {
+    return { label: 'Liquid in tip', tone: 'ok', detail: p };
+  }
+  if (result?.status === 'done' && result.anomaly_detected === true) {
+    return { label: 'Clog suspected', tone: 'bad', detail: p };
+  }
+  if (result?.status === 'error') return { label: 'Check failed', tone: 'warn', detail: null };
+  return { label: 'No result', tone: 'none', detail: null };
+}
+
+// "tube_rack wells 0 · 200 µL" for the aspirate a tip check followed.
+export function aspirateLabel(step) {
+  if (!step || typeof step !== 'object' || !step.resource_name) return 'aspirate';
+  const wells = Array.isArray(step.well_indices) ? ` wells ${step.well_indices.join(', ')}` : '';
+  const volumes = Array.isArray(step.volumes) ? ` · ${step.volumes.join(', ')} µL` : '';
+  return `${step.resource_name}${wells}${volumes}`;
+}

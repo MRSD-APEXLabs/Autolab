@@ -7,7 +7,9 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Empty, String
 
 from routine_executor.state_machine import RoutineStateMachine
-from routine_executor.step_config import STEPS, KNOWN_STEPS
+from routine_executor import shaker_step
+from routine_executor.shaker_step import ShakerPhase
+from routine_executor.step_config import STEPS, KNOWN_STEPS, make_shaker_msg
 
 STEP_MSG_CLASSES = {
     'manipulation': ManipulationCommand,
@@ -17,6 +19,9 @@ STEP_MSG_CLASSES = {
 }
 
 NAV_CANCEL_TOPIC = '/nav/cancel'
+
+# Steps whose failure ends the run (never re-dispatched); operator retry needs force.
+NO_RETRY_STEPS = frozenset(name for name, cfg in STEPS.items() if not cfg.get('retryable', True))
 
 STATUS_QOS = rclpy.qos.QoSProfile(
     reliability=rclpy.qos.ReliabilityPolicy.BEST_EFFORT,
@@ -35,7 +40,8 @@ class RoutineExecutorNode(Node):
         self._listening = False    # ignore status msgs until after command is published
         self._seen_running = False  # ignore FAILURE until action has reported RUNNING
         self._listen_timer = None
-        self._wait_timer = None
+        self._wait_timer = None     # a wait step's timer, or a timed shaker step's hold
+        self._shaker = ShakerPhase()
 
         # Input topics
         self.create_subscription(String, '/routine_executor/start_routine_cmd',
@@ -46,6 +52,8 @@ class RoutineExecutorNode(Node):
                                  self._on_pause_cmd, 10)
         self.create_subscription(String, '/routine_executor/resume',
                                  self._on_resume_cmd, 10)
+        self.create_subscription(String, '/routine_executor/retry',
+                                 self._on_retry_cmd, 10)
 
         # Status output
         self._status_pub = self.create_publisher(String, '/routine_executor/status', 10)
@@ -59,8 +67,10 @@ class RoutineExecutorNode(Node):
         self._status_subs: dict = {}  # step_name -> subscription
         self._setup_status_subscriptions(self._robot)
 
-        # Clog-detection clip_ids published by lab_machine_executive per aspirate
+        # Tip-check results published by lab_machine_executive after each aspirate, and its live
+        # OT-2 progress (current command, tip-check pass)
         self._recording_sub = None
+        self._progress_sub = None
         self._setup_recording_subscription(self._robot)
 
         # 1 Hz status publish + execution loop
@@ -90,16 +100,38 @@ class RoutineExecutorNode(Node):
         if self._recording_sub is not None:
             self.destroy_subscription(self._recording_sub)
         self._recording_sub = self.create_subscription(
-            String, f'/{robot}/behavior/anomaly_recording', self._on_recording, 10)
+            String, f'/{robot}/behavior/tip_check_result', self._on_tip_check_result, 10)
+        if self._progress_sub is not None:
+            self.destroy_subscription(self._progress_sub)
+        self._progress_sub = self.create_subscription(
+            String, f'/{robot}/behavior/ot2_progress', self._on_ot2_progress, 10)
 
-    def _on_recording(self, msg: String) -> None:
+    def _on_ot2_progress(self, msg: String) -> None:
         try:
-            clip_id = json.loads(msg.data).get('clip_id')
-        except (json.JSONDecodeError, AttributeError) as e:
-            self.get_logger().warn(f'Malformed anomaly_recording message: {e}')
+            progress = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f'Malformed ot2_progress message: {e}')
             return
-        if self._sm.add_recording(clip_id):
-            self.get_logger().info(f'Attached clog-detection clip {clip_id} to this run')
+        if not isinstance(progress, dict):
+            self.get_logger().warn('Malformed ot2_progress message: not an object')
+            return
+        # Only the OT-2 step's own progress; a late message after the step ended is dropped.
+        if self._sm.current_step_name() != 'ot2':
+            return
+        if self._sm.set_step_progress({**progress, 'machine': 'ot2'}):
+            self._publish_status()  # don't wait for the 1 Hz tick: the UI follows each command
+
+    def _on_tip_check_result(self, msg: String) -> None:
+        try:
+            result = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f'Malformed tip_check_result message: {e}')
+            return
+        if not isinstance(result, dict):
+            self.get_logger().warn('Malformed tip_check_result message: not an object')
+            return
+        if self._sm.add_recording(result):
+            self.get_logger().info(f'Attached tip check {result.get("id")} to this run')
 
     def _get_cmd_pub(self, robot: str, topic_suffix: str, msg_type):
         key = (robot, topic_suffix)
@@ -146,6 +178,12 @@ class RoutineExecutorNode(Node):
                     f'Step "{name}" missing required params: {missing}'
                 )
                 return
+            if name == 'shaker':
+                try:
+                    shaker_step.validate(step)
+                except ValueError as e:
+                    self.get_logger().error(f'Step "shaker" rejected: {e}')
+                    return
 
         # Re-subscribe if robot changed
         if robot != self._robot:
@@ -156,9 +194,10 @@ class RoutineExecutorNode(Node):
             self._setup_status_subscriptions(robot)
             self._setup_recording_subscription(robot)
 
-        self._sm = RoutineStateMachine(steps, max_retries=max_retries)
+        self._sm = RoutineStateMachine(steps, max_retries=max_retries, no_retry=NO_RETRY_STEPS)
         self._listening = False
         self._seen_running = False
+        self._shaker.reset()
         self._sm.start()
         self.get_logger().info(f'Starting routine: {steps} (robot={robot}, retries={max_retries})')
 
@@ -177,7 +216,7 @@ class RoutineExecutorNode(Node):
             self.get_logger().warn('Cancel received but no routine is running')
 
     def _stop_step_on_robot(self, step_name: str) -> None:
-        """Stop the cancelled step's action on the robot too (a wait or lab machine step has no stop)."""
+        """Stop the cancelled step's action on the robot too (a wait or OT-2 step has no stop)."""
         stop = STEPS.get(step_name, {}).get('stop')
         if stop is None:
             return
@@ -203,6 +242,26 @@ class RoutineExecutorNode(Node):
         else:
             self.get_logger().warn(f'Resume received but state is {self._sm.state}')
 
+    def _on_retry_cmd(self, msg: String) -> None:
+        # Payload '' or {"force": true}; force restarts a no-retry (liquid-handling) step.
+        try:
+            force = json.loads(msg.data).get('force') is True if msg.data else False
+        except (json.JSONDecodeError, AttributeError):
+            force = False
+        if self._sm.retry(force=force):
+            self._listening = False
+            self._seen_running = False
+            self.get_logger().info(
+                f'Retrying routine from step {self._sm.current_step_idx + 1} '
+                f'"{self._sm.current_step_name()}"'
+            )
+        elif self._sm.to_dict()['retry_needs_force']:
+            self.get_logger().warn(
+                f'Retry refused: step "{self._sm.current_step_name()}" handles liquid; '
+                'send {"force": true} after inspecting the machine')
+        else:
+            self.get_logger().warn(f'Retry received but state is {self._sm.state}')
+
     def _on_action_status(self, msg: Status, step_name: str) -> None:
         if self._sm.state not in ('running', 'paused'):
             return
@@ -214,15 +273,26 @@ class RoutineExecutorNode(Node):
         if msg.status == Status.RUNNING:
             self._seen_running = True
         elif msg.status == Status.SUCCESS and self._seen_running:
+            if step_name == 'shaker' and self._shaker.on_success(self._sm.current_step()) == 'hold':
+                self._listening = False
+                self._seen_running = False
+                self._start_shaker_hold()
+                return
             self.get_logger().info(f'Step "{step_name}" succeeded')
             self._sm.on_success()
             self._listening = False
             self._seen_running = False
         elif msg.status == Status.FAILURE and self._seen_running:
+            # Status is broadcast repeatedly. Consume this attempt's terminal
+            # result once, then wait for a new dispatch/RUNNING before counting
+            # another failure. Otherwise one failed plan exhausts every retry.
+            self._listening = False
+            self._seen_running = False
             self._sm.on_failure()
             self.get_logger().warn(
                 f'Step "{step_name}" failed '
-                f'(attempt {self._sm.retry_count}/{self._sm.max_retries})'
+                f'(retry {self._sm.retry_count}/{self._sm.max_retries}; '
+                f'state={self._sm.state})'
             )
 
     # ------------------------------------------------------------------
@@ -252,26 +322,45 @@ class RoutineExecutorNode(Node):
             self.get_logger().info(f'Waiting {time_s}s for step "{step_name}"')
             return
 
-        msg = config['make_msg'](step)
-        topic_suffix = config['publish_topic']
-        msg_type = STEP_MSG_CLASSES[config['msg_type']]
+        if step_name == 'shaker':
+            msg = make_shaker_msg(self._shaker.dispatch_pwm(self._sm.current_step_idx, step))
+        else:
+            msg = config['make_msg'](step)
+        self._sm.acknowledge_dispatch()
+        self._publish_and_listen(config, msg)
+        self.get_logger().info(
+            f'Dispatched step "{step_name}" '
+            f'(retry {self._sm.retry_count}/{self._sm.max_retries})'
+        )
 
-        pub = self._get_cmd_pub(self._robot, topic_suffix, msg_type)
+    def _publish_and_listen(self, config: dict, msg) -> None:
+        """Send a step's command, then listen for this attempt's status (not a stale one)."""
+        pub = self._get_cmd_pub(
+            self._robot, config['publish_topic'], STEP_MSG_CLASSES[config['msg_type']])
         pub.publish(msg)
 
         self._listening = False
         self._seen_running = False
-        self._sm.acknowledge_dispatch()
 
         # One-shot timer: enable listening after 100ms
         if self._listen_timer is not None and not self._listen_timer.is_canceled():
             self._listen_timer.cancel()
         self._listen_timer = self.create_timer(0.1, self._enable_listening_once)
 
-        self.get_logger().info(
-            f'Dispatched step "{step_name}" '
-            f'(retry {self._sm.retry_count}/{self._sm.max_retries})'
-        )
+    def _start_shaker_hold(self) -> None:
+        hold_s = shaker_step.hold_time_s(self._sm.current_step())
+        if self._wait_timer is not None and not self._wait_timer.is_canceled():
+            self._wait_timer.cancel()
+        self._wait_timer = self.create_timer(hold_s, self._on_shaker_hold_complete)
+        self.get_logger().info(f'Shaker running; stopping it in {hold_s}s')
+
+    def _on_shaker_hold_complete(self) -> None:
+        # Sent straight away, even while paused: the shaker stops on time regardless.
+        self._wait_timer.cancel()
+        self._wait_timer = None
+        self._shaker.on_hold_done()
+        self._publish_and_listen(STEPS['shaker'], make_shaker_msg(0))
+        self.get_logger().info('Shaker hold complete; sent PWM 0')
 
     def _on_wait_complete(self) -> None:
         self._wait_timer.cancel()

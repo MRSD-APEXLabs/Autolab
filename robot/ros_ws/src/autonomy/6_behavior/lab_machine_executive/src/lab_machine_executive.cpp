@@ -3,7 +3,59 @@
 
 #include <lab_machine_executive/lab_machine_executive.hpp>
 
+#include <algorithm>
+#include <chrono>
+#include <thread>
+
 using namespace std::chrono_literals;
+
+namespace {
+
+// libcurl client for the tip-check service (JSON in, JSON out).
+class CurlHttp : public lab_machine::HttpClient {
+   public:
+    explicit CurlHttp(long timeout_s) : timeout_s_(timeout_s) {}
+    lab_machine::HttpResponse post(const std::string& url, const std::string& body) override {
+        return request(url, &body);
+    }
+    lab_machine::HttpResponse get(const std::string& url) override { return request(url, nullptr); }
+
+   private:
+    static size_t collect(char* ptr, size_t size, size_t nmemb, void* userdata) {
+        static_cast<std::string*>(userdata)->append(ptr, size * nmemb);
+        return size * nmemb;
+    }
+    lab_machine::HttpResponse request(const std::string& url, const std::string* body) {
+        lab_machine::HttpResponse r{false, 0, "", ""};
+        CURL* curl = curl_easy_init();
+        if (!curl) { r.error = "curl init failed"; return r; }
+        struct curl_slist* headers = curl_slist_append(nullptr, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        if (body) {
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body->c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body->size()));
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        }
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_s_);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, collect);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &r.body);
+        CURLcode res = curl_easy_perform(curl);
+        if (res == CURLE_OK) {
+            r.sent = true;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &r.code);
+        } else {
+            r.error = curl_easy_strerror(res);
+        }
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        return r;
+    }
+    long timeout_s_;
+};
+
+}  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constructor
@@ -19,25 +71,38 @@ LabMachineExecutive::LabMachineExecutive()
     // ROS2 parameters
     this->declare_parameter<std::string>("ot2_base_url",     "http://192.168.1.100:8000");
     this->declare_parameter<std::string>("ot2_host",         "192.168.1.100");
+    // Wrapper calls block until the OT-2 finishes (travel to safe Z + aspirate + retract), which
+    // routinely exceeds 30 s.
+    this->declare_parameter<int>("ot2_command_timeout_s", 300);
     this->declare_parameter<std::string>("shaker_base_url",  "http://192.168.1.101:8080");
     this->declare_parameter<std::string>("shaker_endpoint",  "/pwm");
-    // Clog-detection service (Anomaly-Detection/automation). Empty disables recording.
-    this->declare_parameter<std::string>("anomaly_base_url", "");
+    // d3:4b tip-check service, run after each aspirate. Empty disables the check.
+    this->declare_parameter<std::string>("tip_check_base_url", "");
+    this->declare_parameter<int>("tip_check_passes", 5);
+    this->declare_parameter<double>("tip_check_timeout_s", 900.0);
 
     this->get_parameter("ot2_base_url",     ot2_base_url_);
     this->get_parameter("ot2_host",         ot2_host_);
+    int ot2_timeout = 300;
+    this->get_parameter("ot2_command_timeout_s", ot2_timeout);
+    ot2_command_timeout_s_ = std::max(1, ot2_timeout);
     this->get_parameter("shaker_base_url",  shaker_base_url_);
     this->get_parameter("shaker_endpoint",  shaker_endpoint_);
-    this->get_parameter("anomaly_base_url", anomaly_base_url_);
+    this->get_parameter("tip_check_base_url", tip_check_cfg_.base_url);
+    int passes = 5;
+    this->get_parameter("tip_check_passes", passes);
+    tip_check_cfg_.passes = std::max(1, passes);
+    this->get_parameter("tip_check_timeout_s", tip_check_cfg_.timeout_s);
 
     RCLCPP_INFO(this->get_logger(), "OT-2 base URL: %s (robot host: %s)",
                 ot2_base_url_.c_str(), ot2_host_.c_str());
     RCLCPP_INFO(this->get_logger(), "Shaker base URL: %s%s",
                 shaker_base_url_.c_str(), shaker_endpoint_.c_str());
-    if (anomaly_base_url_.empty())
-        RCLCPP_INFO(this->get_logger(), "Aspirate recording disabled (anomaly_base_url empty)");
+    if (tip_check_cfg_.base_url.empty())
+        RCLCPP_INFO(this->get_logger(), "Tip check disabled (tip_check_base_url empty)");
     else
-        RCLCPP_INFO(this->get_logger(), "Aspirate recording via %s", anomaly_base_url_.c_str());
+        RCLCPP_INFO(this->get_logger(), "Tip check after each aspirate via %s (%d passes)",
+                    tip_check_cfg_.base_url.c_str(), tip_check_cfg_.passes);
 
     // BT conditions
     command_lab_machine_condition_ = new bt::Condition("Command Lab Machine", this);
@@ -58,8 +123,10 @@ LabMachineExecutive::LabMachineExecutive()
         "lab_machine_command", 10,
         std::bind(&LabMachineExecutive::command_callback, this, std::placeholders::_1));
 
-    anomaly_recording_pub_ = this->create_publisher<std_msgs::msg::String>(
-        "anomaly_recording", rclcpp::QoS(10).reliable());
+    tip_check_pub_ = this->create_publisher<std_msgs::msg::String>(
+        "tip_check_result", rclcpp::QoS(10).reliable());
+    ot2_progress_pub_ = this->create_publisher<std_msgs::msg::String>(
+        "ot2_progress", rclcpp::QoS(10).reliable());
 
     // Timer at 20 Hz to match behavior_executive cadence
     timer_ = rclcpp::create_timer(
@@ -134,7 +201,9 @@ bool LabMachineExecutive::http_post(const std::string& url,
 bool LabMachineExecutive::http_post_capture(const std::string& url,
                                             const std::string& body,
                                             const std::string& content_type,
-                                            std::string* response)
+                                            std::string* response,
+                                            long timeout_s,
+                                            std::string* error)
 {
     CURL* curl = curl_easy_init();
     if (!curl) return false;
@@ -148,7 +217,7 @@ bool LabMachineExecutive::http_post_capture(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS,     body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,  static_cast<long>(body.size()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER,     headers);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT,        timeout_s);
     if (response) {
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, collect_response);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA,     response);
@@ -163,15 +232,30 @@ bool LabMachineExecutive::http_post_capture(const std::string& url,
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    return (res == CURLE_OK) && (http_code >= 200) && (http_code < 300);
+    const bool ok = (res == CURLE_OK) && (http_code >= 200) && (http_code < 300);
+    if (!ok && error) {
+        *error = (res != CURLE_OK) ? std::string(curl_easy_strerror(res))
+                                   : "HTTP " + std::to_string(http_code);
+    }
+    return ok;
+}
+
+bool LabMachineExecutive::ot2_post(const std::string& path, const std::string& body) {
+    std::string response, error;
+    if (http_post_capture(ot2_base_url_ + path, body, "application/json", &response,
+                          ot2_command_timeout_s_, &error))
+        return true;
+    RCLCPP_ERROR(this->get_logger(), "OT-2 POST %s failed (%s, timeout %lds): %s", path.c_str(),
+                 error.c_str(), ot2_command_timeout_s_, response.substr(0, 500).c_str());
+    return false;
 }
 
 bool LabMachineExecutive::home_ot2() {
-    return http_post(ot2_base_url_ + "/robot/home", "{}", "application/json");
+    return ot2_post("/robot/home", "{}");
 }
 
 bool LabMachineExecutive::disconnect_ot2() {
-    return http_post(ot2_base_url_ + "/robot/disconnect", "{}", "application/json");
+    return ot2_post("/robot/disconnect", "{}");
 }
 
 // Converts OT-2 step action name to REST endpoint path.
@@ -266,9 +350,12 @@ void LabMachineExecutive::tick_ot2() {
             return;
         }
         ot2_current_step_ = 0;
+        ot2_run_id_       = std::to_string(
+            std::chrono::system_clock::now().time_since_epoch() / std::chrono::milliseconds(1));
         ot2_phase_        = OT2Phase::CONNECTING;
         http_in_flight_   = true;
         RCLCPP_INFO(this->get_logger(), "OT-2 connecting to %s…", ot2_host_.c_str());
+        publish_ot2_progress("connecting");
         pending_http_ = std::async(std::launch::async,
                                    &LabMachineExecutive::connect_ot2, this);
         ot2_action_->set_running();
@@ -285,6 +372,7 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed");
                 ot2_action_->set_failure();
                 return;
             }
@@ -302,6 +390,7 @@ void LabMachineExecutive::tick_ot2() {
             if (ot2_current_step_ >= static_cast<int>(ot2_steps_.size())) {
                 RCLCPP_INFO(this->get_logger(), "OT-2 steps complete — homing…");
                 ot2_phase_      = OT2Phase::HOMING;
+                publish_ot2_progress("homing");
                 http_in_flight_ = true;
                 pending_http_   = std::async(std::launch::async,
                                              &LabMachineExecutive::home_ot2, this);
@@ -311,9 +400,10 @@ void LabMachineExecutive::tick_ot2() {
             const auto& step = ot2_steps_[ot2_current_step_];
             RCLCPP_INFO(this->get_logger(), "OT-2 step %d: %s",
                         ot2_current_step_, step.value("action", "?").c_str());
+            publish_ot2_progress("command", ot2_current_step_);
             pending_http_   = std::async(std::launch::async,
                                          &LabMachineExecutive::dispatch_ot2_step,
-                                         this, step);
+                                         this, step, ot2_current_step_);
             http_in_flight_ = true;
             ot2_action_->set_running();
             return;
@@ -327,6 +417,7 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
@@ -346,11 +437,13 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 homed — disconnecting…");
             ot2_phase_      = OT2Phase::DISCONNECTING;
+            publish_ot2_progress("disconnecting");
             http_in_flight_ = true;
             pending_http_   = std::async(std::launch::async,
                                          &LabMachineExecutive::disconnect_ot2, this);
@@ -369,10 +462,12 @@ void LabMachineExecutive::tick_ot2() {
                 command_lab_machine_condition_->set(false);
                 ot2_condition_->set(false);
                 ot2_terminal_ = true;
+                publish_ot2_progress("failed", ot2_current_step_);
                 ot2_action_->set_failure();
                 return;
             }
             RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            publish_ot2_progress("done");
             command_lab_machine_condition_->set(false);
             ot2_condition_->set(false);
             ot2_terminal_ = true;
@@ -384,58 +479,55 @@ void LabMachineExecutive::tick_ot2() {
     }
 }
 
-bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step) {
-    std::string action = step.value("action", "");
-    if (action.empty()) return false;
+// Runs one protocol step on the wrapper. After a successful aspirate the tip check runs here, in
+// the same worker thread, so the protocol waits for it; its result never fails the step.
+bool LabMachineExecutive::dispatch_ot2_step(const nlohmann::json& step, int index) {
+    auto dispatch = [this](const nlohmann::json& s) {
+        std::string action = s.value("action", "");
+        if (action.empty()) return false;
+        nlohmann::json body = s;  // step object minus the "action" key
+        body.erase("action");
+        return ot2_post(action_to_endpoint(action), body.dump());
+    };
+    lab_machine::TipCheckFn check;
+    if (!tip_check_cfg_.base_url.empty())
+        check = [this, index](const std::string& label) { return run_tip_check(label, index); };
+    auto publish = [this](const nlohmann::json& result) {
+        std_msgs::msg::String msg;
+        msg.data = result.dump();
+        tip_check_pub_->publish(msg);
+        if (result.value("status", "") == "done")
+            RCLCPP_INFO(this->get_logger(), "Tip check: %s",
+                        result.value("summary", "").c_str());
+        else
+            RCLCPP_WARN(this->get_logger(), "Tip check failed, protocol continues: %s",
+                        result.value("error", "").c_str());
+    };
+    return lab_machine::run_protocol_step(step, index, ot2_run_id_, dispatch, check, publish);
+}
 
-    // Build body: step object minus the "action" key
-    nlohmann::json body = step;
-    body.erase("action");
+void LabMachineExecutive::publish_ot2_progress(const std::string& phase, int command,
+                                               const nlohmann::json& tip_check) {
+    std_msgs::msg::String msg;
+    msg.data = lab_machine::ot2_progress(ot2_run_id_, phase, ot2_steps_, command, tip_check).dump();
+    ot2_progress_pub_->publish(msg);
+}
 
-    std::string url      = ot2_base_url_ + action_to_endpoint(action);
-    std::string body_str = body.dump();
-
-    // Record aspirate steps for clog detection. Recording failures are logged
-    // but never fail the pipetting step.
-    const bool record = (action == "aspirate") && !anomaly_base_url_.empty();
-    if (record) {
-        // May block up to ~9 s while the previous clip finishes its tail.
-        std::string response;
-        if (!http_post_capture(anomaly_base_url_ + "/recording/start",
-                               nlohmann::json{{"step", step.dump()}}.dump(),
-                               "application/json", &response)) {
-            RCLCPP_WARN(this->get_logger(), "Anomaly recording start failed — continuing");
-        } else {
-            // Publish the clip_id so routine_executor can attach it to this run.
-            try {
-                auto job = nlohmann::json::parse(response);
-                if (job.contains("clip_id") && job["clip_id"].is_string()) {
-                    std_msgs::msg::String msg;
-                    msg.data = nlohmann::json{{"clip_id", job["clip_id"]},
-                                              {"step", step}}.dump();
-                    anomaly_recording_pub_->publish(msg);
-                    RCLCPP_INFO(this->get_logger(), "Recording aspirate as clip %s",
-                                job["clip_id"].get<std::string>().c_str());
-                }
-            } catch (const std::exception& e) {
-                RCLCPP_WARN(this->get_logger(),
-                            "Unparseable recording/start response: %s", e.what());
-            }
-        }
-    }
-
-    bool ok = http_post(url, body_str, "application/json");
-
-    if (record) {
-        // stop: returns at once, service records the tail and queues analysis.
-        // abort: discard the clip when the aspirate itself failed.
-        const std::string endpoint = ok ? "/recording/stop" : "/recording/abort";
-        if (!http_post(anomaly_base_url_ + endpoint, "{}", "application/json"))
-            RCLCPP_WARN(this->get_logger(), "Anomaly recording %s failed",
-                        endpoint.c_str());
-    }
-
-    return ok;
+nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label, int index) {
+    RCLCPP_INFO(this->get_logger(), "Tip check: %d passes via %s", tip_check_cfg_.passes,
+                tip_check_cfg_.base_url.c_str());
+    CurlHttp http(static_cast<long>(tip_check_cfg_.timeout_s) + 30);
+    lab_machine::TipCheckClient client(
+        http, tip_check_cfg_,
+        [](double s) { std::this_thread::sleep_for(std::chrono::duration<double>(s)); },
+        []() {
+            return std::chrono::duration<double>(
+                       std::chrono::steady_clock::now().time_since_epoch()).count();
+        });
+    client.on_progress([this, index](const nlohmann::json& p) {
+        publish_ot2_progress("tip_check", index, p);
+    });
+    return client.run(label);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

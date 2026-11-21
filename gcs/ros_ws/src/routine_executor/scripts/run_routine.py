@@ -10,11 +10,12 @@ Steps accept parameters using colon-separated key=value pairs:
     place:target_machine=ot2
     pick:target_machine=shaker
     place_base
-    shaker:pwm=200
+    shaker:pwm=200                  (set and leave; pwm=0 stops it)
+    shaker:pwm=200,wait_time_s=20   (run 20 s, then stop)
     ot2:parameters_json='{"steps":[]}'
 
 Examples:
-    python3 run_routine.py pick_base "place:target_machine=ot2" ot2 "pick:target_machine=ot2" "shaker:pwm=200"
+    python3 run_routine.py pick_base "place:target_machine=ot2" ot2 "pick:target_machine=ot2" "shaker:pwm=200,wait_time_s=20"
     python3 run_routine.py --robot robot_1 --retries 3 pick_base "place:target_machine=shaker"
     python3 run_routine.py "pick:target_machine=shaker" place_base
 """

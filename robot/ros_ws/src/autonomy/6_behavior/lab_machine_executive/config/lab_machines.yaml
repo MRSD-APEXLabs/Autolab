@@ -6,4 +6,8 @@ robot_1:
         ot2_host: "192.168.10.17"
         shaker_base_url: "http://192.168.10.14"
         shaker_endpoint: "/pwm_control/"
-        anomaly_base_url: "http://gcs.autolab:8100"  # "" disables aspirate recording
+        # d3:4b tip check after each aspirate (5 checks averaged); "" disables it. An aspirate
+        # command with "tip_check": false skips it (e.g. clear liquid).
+        tip_check_base_url: "http://192.168.10.19:8110"
+        tip_check_passes: 5
+        tip_check_timeout_s: 900.0

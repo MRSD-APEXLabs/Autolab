@@ -26,7 +26,7 @@ def test_base_release_and_60_mm_retreat_before_handback(move_result, retreat_res
     node = SimpleNamespace(config=None, base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5),
                            rollout=SimpleNamespace(execute=True), base_mode='scripted',
                            runner=SimpleNamespace(status=lambda: dict(target='base'), _check_abort=lambda: None),
-                           _base_move_fn=move, _post_placement_fn=retreat,
+                           _base_move_fn=move, _post_placement_fn=retreat, _handoff_robot=None,
                            handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
     if move_result == 'error' or (move_result == 'done' and retreat_result == 'error'):
         with pytest.raises(RuntimeError):
@@ -36,6 +36,28 @@ def test_base_release_and_60_mm_retreat_before_handback(move_result, retreat_res
         assert ActInferenceNode._run(node, threading.Event()) == expected
     assert events == (['place'] + (['release_and_lift'] if move_result == 'done' else [])
                       + (['handback'] if move_result == retreat_result == 'done' else []))
+
+
+@pytest.mark.parametrize('target', ['base', 'ot2'])
+def test_base_run_closes_the_handback_connection_first(target):
+    pytest.importorskip('rclpy')
+    from act_inference.node import ActInferenceNode
+    events = []
+    handback_robot = SimpleNamespace(close=lambda: events.append('close handback connection'))
+    node = SimpleNamespace(config=None, base_placement=SimpleNamespace(lift_speed_mm_s=40., accel_mm_s2=500., open_wait_sec=1.5),
+                           rollout=SimpleNamespace(execute=True), base_mode='scripted',
+                           runner=SimpleNamespace(status=lambda: dict(target=target), _check_abort=lambda: None),
+                           _base_move_fn=lambda *a, **kw: events.append('place') or 'done',
+                           _post_placement_fn=lambda *a, **kw: events.append('release_and_lift') or 'done',
+                           _run_policy=lambda stop, target: events.append('policy') or 'done',
+                           _handoff_robot=handback_robot,
+                           handoff=SimpleNamespace(finish=lambda check: events.append('handback')))
+    assert ActInferenceNode._run(node, threading.Event()) == 'done'
+    if target == 'base':
+        assert events == ['close handback connection', 'place', 'release_and_lift', 'handback']
+        assert node._handoff_robot is None
+    else:
+        assert events == ['policy', 'handback'] and node._handoff_robot is handback_robot
 
 
 def test_cancelled_yaw_does_not_start_policy():
@@ -91,7 +113,7 @@ def test_policy_then_release_only_on_success(outcome, target):
     # Base moves to its start pose (no 90 degree yaw alignment) and lifts 60 mm.
     expected = (['start pose'] if target == 'base' else ['yaw']) + ['policy']
     if outcome == 'done':
-        expected.append('release/lift 60 at 40 ramp 500 wait 1.5 real' if target == 'base' else 'release/lift 100')
+        expected.append('release/lift 60 at 40 ramp 500 wait 1.5 real' if target == 'base' else 'release/lift 100 at 25')
     assert stages == expected
 
 
@@ -131,7 +153,7 @@ def test_start_stop_and_status_over_ros(target):
         aligned.append('start pose')
         return 'done'
 
-    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_20261113',
+    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_vg_20261120',
                    'base': 'xarm6_base_act_ft_20261108b'}
 
     def rollout(config, rollout_config, policy, stop):
@@ -139,6 +161,9 @@ def test_start_stop_and_status_over_ros(target):
         assert policy == 'policy' and not rollout_config.execute
         assert rollout_config.ckpt_dir.name == checkpoints[target or 'ot2']
         assert rollout_config.workspace_radius == .15
+        # Shaker only: 1.5 mm/s below 110 mm, so the plate reaches the clamp's bounds on fresh images.
+        assert (rollout_config.approach_speed, rollout_config.slow_below_z) == (
+            (.0015, .11) if target == 'shaker' else (.003, 0.))
         stop.wait(5)
         return 'stopped'
 
