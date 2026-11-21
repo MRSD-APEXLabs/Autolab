@@ -3,6 +3,28 @@ const http = require('http');
 const https = require('https');
 
 module.exports = function setupProxy(app) {
+  // Language planner (gcs/nlp_proxy). In Docker, ui-dev sets NLP_UPSTREAM to the host's nlp-proxy.
+  const nlp = new URL(process.env.NLP_UPSTREAM || 'http://localhost:8090');
+  app.use('/api/nlp', (req, res) => {
+    const proxy = http.request({
+      hostname: nlp.hostname,
+      port: nlp.port,
+      method: req.method,
+      path: req.originalUrl,
+      headers: { ...req.headers, host: nlp.host },
+    }, (response) => {
+      res.writeHead(response.statusCode, response.headers);
+      response.pipe(res);
+    });
+    proxy.on('error', () => {
+      if (res.headersSent) return res.destroy();
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ ok: false, error: 'nlp-proxy unavailable' }));
+    });
+    req.pipe(proxy);
+  });
+
   const upstream = new URL(process.env.CAMERA_STREAM_UPSTREAM || 'http://thor.autolab:8002');
   const transport = upstream.protocol === 'https:' ? https : http;
   app.use('/camera-stream', (req, res) => {

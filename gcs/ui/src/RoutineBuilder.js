@@ -4,6 +4,7 @@ import {
   missingParams, newOt2Command, ot2Commands, stepName, stepTitle,
 } from './shared/steps';
 import { PRESETS, matchingPreset } from './shared/presets';
+import NlpPanel from './NlpPanel';
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -161,6 +162,19 @@ function Ot2Editor({ step, onChange }) {
                     className="rb-input w-28" aria-label={`Command ${i + 1} volumes`} value={cmd.volumes}
                     parse={parseList} format={formatList} onCommit={(v) => update(i, { volumes: v })}
                   />
+                </label>
+              )}
+              {cmd?.action === 'aspirate' && (
+                <label className="rb-field inline" title="Off for liquids the tip camera cannot see (e.g. clear)">
+                  <input
+                    type="checkbox" aria-label={`Command ${i + 1} clog check`} checked={cmd.tip_check !== false}
+                    onChange={(e) => setCmds(cmds.map((c, j) => {
+                      if (j !== i) return c;
+                      const { tip_check, ...rest } = c;
+                      return e.target.checked ? rest : { ...rest, tip_check: false };
+                    }))}
+                  />
+                  <span>clog check</span>
                 </label>
               )}
               </span>
@@ -324,6 +338,7 @@ export default function RoutineBuilder({ value, onChange }) {
 
   return (
     <div className="rb">
+      <NlpPanel routine={routine} onRoutine={(r) => { onChange(serialize(r)); setMode('blocks'); }} />
       <PresetPicker routine={routine} onPick={(p) => { onChange(serialize(p.routine)); setMode('blocks'); }} />
       <div className="rb-toolbar">
         <div className="rb-seg" role="tablist" aria-label="Editor">

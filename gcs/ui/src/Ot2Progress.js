@@ -53,6 +53,7 @@ export default function Ot2Progress({ step, progress }) {
               <div className="min-w-0">
                 <span className="o2-name">{label}</span>
                 {c?.resource_name && <small>{c.action === 'aspirate' || c.action === 'dispense' ? aspirateLabel(c) : c.resource_name.replace('_', ' ')}</small>}
+                {c?.action === 'aspirate' && c.tip_check === false && <small>no clog check</small>}
                 {st === 'check' && <TipCheckLine tc={progress.tip_check} />}
               </div>
             </li>

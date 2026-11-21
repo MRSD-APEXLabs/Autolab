@@ -334,6 +334,19 @@ select.rb-input { font-family: var(--body); padding-right: 4px; }
 .cc-pulse { animation: cc-blink 1s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { .o2-cmd.now .o2-node, .o2-passes i.now, .cc-pulse { animation: none !important; } }
 
+/* routine builder: describe the experiment (language planner) */
+.rb-nlp { display: grid; gap: 10px; margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.rb-nlp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rb-nlp-form { display: flex; gap: 10px; }
+.rb-nlp-input { flex: 1; min-width: 0; font-family: var(--body); font-size: 15px; padding: 11px 13px; }
+.rb-nlp-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rb-nlp-chips button { font: 600 12px/1 var(--body); color: var(--dim); background: var(--panel); border: 1px solid var(--line2);
+  border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.rb-nlp-chips button:hover:not(:disabled) { color: var(--text); border-color: var(--navy); }
+.rb-nlp-chips button:disabled { opacity: .4; cursor: default; }
+.rb-nlp-result { display: grid; gap: 4px; font: 600 13px/1.4 var(--body); color: var(--dim); padding: 8px 12px; border-radius: 6px; }
+.rb-nlp-result.k-ok, .rb-nlp-result.k-warn, .rb-nlp-result.k-bad { color: var(--k); background: color-mix(in srgb, var(--k) 10%, transparent); }
+
 /* routine builder: ready-made experiments */
 .rb-presets { display: grid; gap: 8px; margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .rb-presets-label { font: 700 11px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }

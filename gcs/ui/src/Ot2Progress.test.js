@@ -36,3 +36,11 @@ test('waits for the OT-2 before any progress arrives, and names the other phases
   rerender(<Ot2Progress step={step} progress={{ phase: 'homing', command: null, commands: 4 }} />);
   expect(screen.getByText('Homing the OT-2')).toBeInTheDocument();
 });
+
+test('marks an aspirate that skips the clog check', () => {
+  const skip = { name: 'ot2', parameters_json: { steps: [
+    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200], tip_check: false },
+  ] } };
+  render(<Ot2Progress step={skip} progress={{ phase: 'command', command: 0, commands: 1 }} />);
+  expect(screen.getByText('no clog check')).toBeInTheDocument();
+});
