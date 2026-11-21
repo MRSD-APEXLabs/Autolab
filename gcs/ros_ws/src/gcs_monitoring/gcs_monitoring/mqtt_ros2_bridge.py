@@ -69,6 +69,7 @@ STRING_CMD_TOPIC_MAP = {
     'cmd/routine_executor/pause': '/routine_executor/pause',
     'cmd/routine_executor/resume': '/routine_executor/resume',
     'cmd/routine_executor/retry': '/routine_executor/retry',
+    'cmd/routine_executor/skip': '/routine_executor/skip',
     'cmd/planning/command': '/planning_command',
     'cmd/navigation/go_to_location': '/robot_1/behavior/go_to_location_command',
 }

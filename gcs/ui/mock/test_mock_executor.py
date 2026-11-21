@@ -420,3 +420,17 @@ def test_ot2_time_sets_the_ot2_step_length_only(clock, tips):
     assert status(ex)['current_step'] == 0
     advance(ex, clock, 10.0 - STEP_TIME)
     assert status(ex)['current_step'] == 1
+
+
+def test_skip_of_a_failed_step_goes_on_with_the_next_one(clock, tips):
+    ex = MockExecutor(load_step_specs(), step_time=STEP_TIME, clock=clock,
+                      tip_check=tips, fail_steps={'pick': 4})
+    start(ex, GO, PICK, HOME)
+    advance(ex, clock, STEP_TIME + 5 * STEP_TIME)
+    assert status(ex)['state'] == 'failed'
+    ex.handle('cmd/routine_executor/skip', '')
+    ex.step()
+    s = status(ex)
+    assert (s['state'], s['current_step'], s['skipped_steps']) == ('running', 2, [1])
+    advance(ex, clock, STEP_TIME + 0.5)
+    assert status(ex)['state'] == 'success'

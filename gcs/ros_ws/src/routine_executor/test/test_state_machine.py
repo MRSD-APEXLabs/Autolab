@@ -534,3 +534,65 @@ def test_step_progress_cleared_on_operator_retry_and_new_start():
     sm.cancel()
     sm.start()
     assert sm.step_progress is None
+
+
+# ── Operator skip of a failed step ─────────────────────────────────────────────
+
+def test_skip_moves_a_failed_routine_on_to_the_next_step():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick', 'target_machine': 'ot2'}])
+    _fail_second_step(sm)
+    assert sm.skip() is True
+    assert sm.state == 'running'
+    assert sm.current_step_idx == 2
+    assert sm.retry_count == 0
+    assert sm.error is None
+    assert sm.needs_dispatch is True
+    assert sm.to_dict()['skipped_steps'] == [1]
+
+
+def test_skipping_the_last_step_completes_the_routine():
+    sm = make_sm()
+    _fail_second_step(sm)
+    assert sm.skip() is True
+    assert sm.state == 'success'
+    assert sm.needs_dispatch is False
+    assert sm.to_dict()['skipped_steps'] == [1]
+
+
+def test_skip_after_cancel_skips_the_cancelled_step():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick', 'target_machine': 'ot2'}])
+    sm.start()
+    sm.cancel()
+    assert sm.skip() is True
+    assert sm.current_step_name() == 'place'
+
+
+def test_skip_of_a_no_retry_step_needs_no_force():
+    # Skipping never re-sends the step, so it cannot aspirate twice.
+    sm = _ot2_routine()
+    sm.start()
+    sm.on_success()
+    sm.on_failure()
+    assert sm.skip() is True
+    assert sm.current_step_name() == 'home'
+
+
+def test_skip_only_from_failed():
+    for setup in (lambda sm: None, lambda sm: sm.start(), lambda sm: (sm.start(), sm.pause())):
+        sm = make_sm()
+        setup(sm)
+        before = (sm.state, sm.current_step_idx)
+        assert sm.skip() is False
+        assert (sm.state, sm.current_step_idx) == before
+
+
+def test_skip_clears_step_progress_and_new_start_clears_skipped():
+    sm = make_sm([{'name': 'pick_base'}, {'name': 'place', 'target_machine': 'ot2'}, {'name': 'pick', 'target_machine': 'ot2'}])
+    sm.start()
+    sm.set_step_progress({'phase': 'x'})
+    sm.cancel()
+    sm.skip()
+    assert sm.step_progress is None
+    sm.cancel()
+    sm.start()
+    assert sm.to_dict()['skipped_steps'] == []

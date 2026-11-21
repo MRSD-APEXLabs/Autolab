@@ -56,11 +56,13 @@ test('a reload during an experiment comes back to the experiment view', () => {
   expect(screen.getByText('Experiment Sequence')).toBeInTheDocument();
 });
 
-test('the loader page is remembered as the experiment view', () => {
+test('continue goes straight to the experiment page, with no loader in between', () => {
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: /begin/i }));
   fireEvent.click(screen.getByRole('button', { name: /continue/i }));
   emit('connect');
+  expect(screen.getByText('Experiment Sequence')).toBeInTheDocument();
+  expect(screen.queryByText('Preparing your experiment')).not.toBeInTheDocument();
   expect(window.sessionStorage.getItem('apex.view')).toBe('experiment');
 });
 

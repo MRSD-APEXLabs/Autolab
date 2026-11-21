@@ -19,6 +19,7 @@ class RoutineStateMachine:
         # Live progress of the current step from its executive (e.g. which OT-2 command is running,
         # how far the tip check is), tagged with the routine step it belongs to. None when unknown.
         self.step_progress = None
+        self.skipped_steps = []      # indices the operator skipped after they failed
 
     def start(self):
         if self.state in _ACTIVE:
@@ -29,6 +30,7 @@ class RoutineStateMachine:
         self.error = None
         self.needs_dispatch = True
         self.step_progress = None
+        self.skipped_steps = []
 
     def pause(self):
         if self.state != 'running':
@@ -114,6 +116,27 @@ class RoutineStateMachine:
         self.step_progress = None
         return True
 
+    def skip(self) -> bool:
+        """Give up on a failed (or cancelled) step and go on with the next one.
+
+        The step is never re-sent, so a no-retry step needs no force. Skipping the last step
+        ends the routine in success; skipped_steps says which steps never completed.
+        """
+        if self.state != 'failed' or self.current_step_idx >= len(self.steps):
+            return False
+        self.skipped_steps.append(self.current_step_idx)
+        self.state = 'running'
+        self.retry_count = 0
+        self.error = None
+        self.step_progress = None
+        self.current_step_idx += 1
+        if self.current_step_idx >= len(self.steps):
+            self.state = 'success'
+            self.needs_dispatch = False
+        else:
+            self.needs_dispatch = True
+        return True
+
     def add_recording(self, record: dict) -> bool:
         """Attach a clog-detection result to this run, tagged with the routine step it came from.
 
@@ -157,4 +180,5 @@ class RoutineStateMachine:
             'recordings': list(self.recordings),
             'retry_needs_force': self._retry_needs_force(),
             'step_progress': self.step_progress,
+            'skipped_steps': list(self.skipped_steps),
         }

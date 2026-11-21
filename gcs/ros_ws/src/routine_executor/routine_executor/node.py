@@ -54,6 +54,8 @@ class RoutineExecutorNode(Node):
                                  self._on_resume_cmd, 10)
         self.create_subscription(String, '/routine_executor/retry',
                                  self._on_retry_cmd, 10)
+        self.create_subscription(String, '/routine_executor/skip',
+                                 self._on_skip_cmd, 10)
 
         # Status output
         self._status_pub = self.create_publisher(String, '/routine_executor/status', 10)
@@ -261,6 +263,18 @@ class RoutineExecutorNode(Node):
                 'send {"force": true} after inspecting the machine')
         else:
             self.get_logger().warn(f'Retry received but state is {self._sm.state}')
+
+    def _on_skip_cmd(self, msg: String) -> None:
+        # Only from a failed run: the skipped step is not running on the robot any more.
+        step_idx, step_name = self._sm.current_step_idx, self._sm.current_step_name()
+        if self._sm.skip():
+            self._listening = False
+            self._seen_running = False
+            self.get_logger().warn(
+                f'Skipped step {step_idx + 1} "{step_name}" at operator request '
+                f'(state={self._sm.state})')
+        else:
+            self.get_logger().warn(f'Skip received but state is {self._sm.state}')
 
     def _on_action_status(self, msg: Status, step_name: str) -> None:
         if self._sm.state not in ('running', 'paused'):

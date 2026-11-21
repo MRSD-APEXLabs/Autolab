@@ -335,6 +335,12 @@ class MockExecutor:
                      'send {"force": true}')
             else:
                 _log(f'retry received but state is {self._sm.state}')
+        elif cmd == 'skip':
+            idx, name = self._sm.current_step_idx, self._sm.current_step_name()
+            if self._sm.skip():
+                _log(f'skipped step {idx + 1} "{name}"')
+            else:
+                _log(f'skip received but state is {self._sm.state}')
         else:
             _log(f'ignoring unknown command topic {topic}')
 
