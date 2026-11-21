@@ -254,10 +254,6 @@ bool LabMachineExecutive::home_ot2() {
     return ot2_post("/robot/home", "{}");
 }
 
-bool LabMachineExecutive::disconnect_ot2() {
-    return ot2_post("/robot/disconnect", "{}");
-}
-
 // Converts OT-2 step action name to REST endpoint path.
 // e.g. "pick_up_tips" → "/commands/pick-up-tips"
 std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
@@ -266,8 +262,9 @@ std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
     return "/commands/" + slug;
 }
 
-// POST /robot/connect {"host": ot2_host_}
-// Returns true on 200 (connected) or 400 (already connected).
+// POST /robot/connect {"host": ot2_host_}, before every protocol. The wrapper keeps a healthy
+// session (200, "reused": true — no new run, no homing) and rebuilds a dead one.
+// 400 = "already connected" from an older wrapper; also fine.
 bool LabMachineExecutive::connect_ot2() {
     nlohmann::json body = {{"host", ot2_host_}};
     std::string body_str = body.dump();
@@ -441,32 +438,9 @@ void LabMachineExecutive::tick_ot2() {
                 ot2_action_->set_failure();
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "OT-2 homed — disconnecting…");
-            ot2_phase_      = OT2Phase::DISCONNECTING;
-            publish_ot2_progress("disconnecting");
-            http_in_flight_ = true;
-            pending_http_   = std::async(std::launch::async,
-                                         &LabMachineExecutive::disconnect_ot2, this);
-        }
-        ot2_action_->set_running();
-        return;
-    }
-
-    // ── DISCONNECTING ─────────────────────────────────────────────────────────
-    if (ot2_phase_ == OT2Phase::DISCONNECTING) {
-        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
-            http_in_flight_ = false;
-            if (!ok) {
-                RCLCPP_ERROR(this->get_logger(), "OT-2 disconnect failed — FAILURE");
-                command_lab_machine_condition_->set(false);
-                ot2_condition_->set(false);
-                ot2_terminal_ = true;
-                publish_ot2_progress("failed", ot2_current_step_);
-                ot2_action_->set_failure();
-                return;
-            }
-            RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            // Homed = safe; the session stays open. The next run's connect reuses it, or
+            // rebuilds it if it died (wrapper checks the OT-2 run), so no disconnect here.
+            RCLCPP_INFO(this->get_logger(), "OT-2 homed — SUCCESS (session kept open)");
             publish_ot2_progress("done");
             command_lab_machine_condition_->set(false);
             ot2_condition_->set(false);

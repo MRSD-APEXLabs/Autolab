@@ -12,7 +12,7 @@ Stands in for everything behind the MQTT broker that the experiment flow needs:
 * manipulation exec. — pick/place steps publish ros2/<robot>/behavior/manipulation_phase and
                        ros2/planning_state like the real executive.
 * lab_machine exec.  — an ot2 step walks through its commands (connecting → each command →
-                       homing → disconnecting) and reports them as status.step_progress, like
+                       homing) and reports them as status.step_progress, like
                        lab_machine_executive's ot2_progress; after each aspirate the tip check runs
                        pass by pass (live progress) and then attaches its result (five averaged
                        checks); --clog / --tip-check-error / --tip-check-down inject outcomes.
@@ -488,7 +488,7 @@ def _manip_phase(fraction):
 
 
 # Relative length of each part of an OT-2 protocol in the mock (scaled to the step's duration).
-OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5, 'disconnecting': 0.5}
+OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5}
 
 
 def _checked(action):
@@ -505,7 +505,7 @@ def _ot2_timeline(actions, duration, tips):
     outcome (clog / error) is drawn from `tips` when the step is dispatched.
     """
     passes = FakeTipCheck.PASSES
-    units = OT2_UNITS['connecting'] + OT2_UNITS['homing'] + OT2_UNITS['disconnecting']
+    units = OT2_UNITS['connecting'] + OT2_UNITS['homing']
     for a in actions:
         units += OT2_UNITS['command'] + (passes * OT2_UNITS['tip_pass'] if _checked(a) else 0)
     scale = duration / units if units else 0
@@ -544,9 +544,8 @@ def _ot2_timeline(actions, duration, tips):
             t += OT2_UNITS['tip_pass'] * scale
         events.append((t, 'tip', (k, a, result)))
     events.append((t, 'progress', progress('homing')))
-    t += OT2_UNITS['homing'] * scale
-    events.append((t, 'progress', progress('disconnecting')))
-    # 'done' is not sent: the step's success moves the routine on (and clears step_progress)
+    # 'done' is not sent: the step succeeds once homed (the executive keeps its OT-2
+    # session open) and that success moves the routine on (and clears step_progress)
     return events
 
 
