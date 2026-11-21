@@ -325,7 +325,8 @@ select.rb-input { font-family: var(--body); padding-right: 4px; }
 .o2-passes i.now { animation: cc-blink 1s ease-in-out infinite alternate; }
 @keyframes cc-blink { to { background: color-mix(in srgb, var(--sky-strong) 55%, transparent); } }
 
-/* clog check card: images shown whole, side by side when they fit */
+/* clog check card: each row carries its own verdict stripe; images shown whole, side by side when they fit */
+.cc-row { border-left: 4px solid var(--k); padding-left: 12px; }
 .cc-imgs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding-top: 8px; }
 .cc-img { margin: 0; min-width: 0; }
 .cc-img a { display: grid; place-items: center; background: #0e1620; border-radius: 8px; border: 1px solid var(--line2); overflow: hidden; }

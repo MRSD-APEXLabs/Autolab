@@ -25,7 +25,7 @@ function PendingRow({ pending, n }) {
   const tc = pending.progress;
   const mean = runningMean(tc);
   return (
-    <li className="py-3" data-testid="pending-check">
+    <li className="py-3 cc-row k-busy" data-testid="pending-check">
       <div className="w-full flex items-center justify-between gap-4">
         <span className="min-w-0">
           <span className="block" style={{ font: '700 17px/1.2 var(--display)' }}>
@@ -66,16 +66,18 @@ export default function ClogCheckCard({ recordings = [], pending = null }) {
   const counts = verdicts.reduce((acc, v) => ({ ...acc, [v.label]: (acc[v.label] || 0) + 1 }), {});
   const summary = Object.entries(counts).map(([label, n]) => `${n} ${label}`).join(', ');
 
-  const worst = verdicts.some((v) => v.tone === 'bad') ? 'bad'
-    : verdicts.some((v) => v.tone === 'warn') ? 'warn'
-    : pending ? 'busy' : 'ok';
+  // Card stripe only when every check agrees; mixed results stay neutral so one clog
+  // doesn't paint the good rows red too (each row carries its own stripe).
+  const tones = new Set(verdicts.map((v) => TONE[v.tone] || 'none'));
+  if (pending) tones.add('busy');
+  const cardTone = tones.size === 1 ? [...tones][0] : 'none';
   const head = [
     checks.length ? `${checks.length} tip check${checks.length === 1 ? '' : 's'} — ${summary}` : null,
     pending ? 'checking the tip now' : null,
   ].filter(Boolean).join(' · ');
 
   return (
-    <div className={`ax-panel ax-accent k-${worst} ax-rise`} style={{ '--i': 3 }}>
+    <div className={`ax-panel ax-accent k-${cardTone} ax-rise`} style={{ '--i': 3 }}>
       <div className="ax-panel-head">
         <h3 className="ax-h3">Clog check</h3>
         <span className="ax-hint">{head}</span>
@@ -85,7 +87,7 @@ export default function ClogCheckCard({ recordings = [], pending = null }) {
           const v = verdicts[i];
           const open = expanded === r.id;
           return (
-            <li key={r.id} className="py-3">
+            <li key={r.id} className={`py-3 cc-row k-${TONE[v.tone] || 'none'}`}>
               <button
                 type="button"
                 onClick={() => setExpanded(open ? null : r.id)}
