@@ -49,6 +49,13 @@ class LabMachineExecutive : public rclcpp::Node {
     // Timer-gap watchdog: the BT drops a condition whose status is older than its timeout (1 s),
     // so a stall of this node's 20 Hz timer is logged with its length.
     std::chrono::steady_clock::time_point last_tick_{};
+    // An action that has finished stays active until the BT sees its conditions go false (about
+    // one tick). A command arriving in that window is held here and applied once it is released:
+    // dropping it left the GCS waiting forever, and applying it at once would re-set the
+    // conditions before the BT saw them false, so the next action would never activate.
+    bool shaker_done_ = false;     // shaker finished, action not yet released by the BT
+    behavior_tree_msgs::msg::LabMachineCommand::SharedPtr held_command_;
+    bool awaiting_release() const;
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;

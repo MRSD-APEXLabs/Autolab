@@ -141,6 +141,17 @@ LabMachineExecutive::LabMachineExecutive()
 void LabMachineExecutive::command_callback(
     const behavior_tree_msgs::msg::LabMachineCommand::SharedPtr msg)
 {
+    if (awaiting_release()) {
+        if (held_command_)
+            RCLCPP_WARN(this->get_logger(), "Replacing held %s command with a new %s command",
+                        held_command_->device.c_str(), msg->device.c_str());
+        else
+            RCLCPP_INFO(this->get_logger(),
+                        "Holding %s command until the BT releases the finished %s action",
+                        msg->device.c_str(), ot2_terminal_ ? "OT-2" : "shaker");
+        held_command_ = msg;
+        return;
+    }
     if (msg->device == "ot2") {
         if (ot2_phase_ != OT2Phase::IDLE) {
             RCLCPP_WARN(this->get_logger(),
@@ -314,6 +325,13 @@ void LabMachineExecutive::timer_callback() {
 
     tick_ot2();
     tick_shaker();
+
+    if (held_command_ && !awaiting_release()) {
+        auto cmd = std::move(held_command_);
+        held_command_.reset();
+        RCLCPP_INFO(this->get_logger(), "Applying held %s command", cmd->device.c_str());
+        command_callback(cmd);
+    }
 
     for (auto* c : conditions_) c->publish();
     for (auto* a : actions_)    a->publish();
@@ -570,10 +588,15 @@ nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label, int 
 // Shaker action (single HTTP call)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// A finished action whose conditions are already false but which the BT has not yet deactivated.
+// ot2_terminal_ and shaker_done_ are both cleared when the BT deactivates the action.
+bool LabMachineExecutive::awaiting_release() const { return ot2_terminal_ || shaker_done_; }
+
 void LabMachineExecutive::tick_shaker() {
     if (!shaker_action_->is_active()) {
         if (shaker_action_->active_has_changed()) {
             http_in_flight_ = false;
+            shaker_done_    = false;
         }
         return;
     }
@@ -629,6 +652,7 @@ void LabMachineExecutive::tick_shaker() {
             shaker_condition_->set(false);
             shaker_action_->set_failure();
         }
+        shaker_done_ = true;
         return;
     }
 
