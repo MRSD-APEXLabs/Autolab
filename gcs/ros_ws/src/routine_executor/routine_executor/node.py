@@ -1,4 +1,5 @@
 import json
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -19,6 +20,8 @@ STEP_MSG_CLASSES = {
 }
 
 NAV_CANCEL_TOPIC = '/nav/cancel'
+
+STATUS_NAMES = {Status.RUNNING: 'RUNNING', Status.SUCCESS: 'SUCCESS', Status.FAILURE: 'FAILURE'}
 
 # Steps whose failure ends the run (never re-dispatched); operator retry needs force.
 NO_RETRY_STEPS = frozenset(name for name, cfg in STEPS.items() if not cfg.get('retryable', True))
@@ -41,6 +44,9 @@ class RoutineExecutorNode(Node):
         self._seen_running = False  # ignore FAILURE until action has reported RUNNING
         self._last_status_id: dict = {}  # step_name -> latest Status.id (BT activation id)
         self._dispatch_status_id = None  # that id when the current command was sent
+        self._status_trace: set = set()  # (id, status, listening) already logged since dispatch
+        self._last_status_time: dict = {}  # step_name -> monotonic time of the latest Status
+        self._silence_warned = False
         self._listen_timer = None
         self._wait_timer = None     # a wait step's timer, or a timed shaker step's hold
         self._shaker = ShakerPhase()
@@ -281,12 +287,11 @@ class RoutineExecutorNode(Node):
     def _on_action_status(self, msg: Status, step_name: str) -> None:
         # Tracked on every message: the id the BT gave the action's latest activation.
         self._last_status_id[step_name] = msg.id
+        self._last_status_time[step_name] = time.monotonic()
         if self._sm.state not in ('running', 'paused'):
             return
         if step_name != self._sm.current_step_name():
             return
-        if not self._listening:
-            return  # ignore stale messages published before this step started
 
         # A terminal status belongs to this attempt once RUNNING was heard, or once its id differs
         # from the one before dispatch (the BT re-activated the action). The id check matters when
@@ -294,6 +299,24 @@ class RoutineExecutorNode(Node):
         # come and go inside the 100 ms deaf window and the SUCCESS was then ignored forever.
         fresh = self._seen_running or (
             self._dispatch_status_id is not None and msg.id != self._dispatch_status_id)
+
+        # Trace each distinct (id, status) once per dispatch, so a stuck step shows what it heard.
+        key = (msg.id, msg.status, self._listening)
+        if key not in self._status_trace:
+            self._status_trace.add(key)
+            if not self._listening:
+                verdict = 'not listening yet'
+            elif msg.status == Status.RUNNING:
+                verdict = 'running'
+            else:
+                verdict = 'accepted' if fresh else 'IGNORED as stale'
+            self.get_logger().info(
+                f'"{step_name}" status {STATUS_NAMES.get(msg.status, msg.status)} '
+                f'id={msg.id} (id at send={self._dispatch_status_id}, '
+                f'RUNNING heard={self._seen_running}): {verdict}')
+
+        if not self._listening:
+            return  # ignore stale messages published before this step started
 
         if msg.status == Status.RUNNING:
             self._seen_running = True
@@ -329,6 +352,18 @@ class RoutineExecutorNode(Node):
 
         if self._sm.state != 'running':
             return
+
+        # The robot re-publishes action status at 20 Hz; silence while waiting means the link
+        # (or the robot's executive) dropped, not that the step is still running.
+        if self._listening and not self._silence_warned:
+            step_name = self._sm.current_step_name()
+            last = self._last_status_time.get(step_name)
+            if STEPS.get(step_name, {}).get('watch_topic') and (
+                    last is None or time.monotonic() - last > 3.0):
+                self._silence_warned = True
+                age = 'never' if last is None else f'{time.monotonic() - last:.1f}s ago'
+                self.get_logger().warn(
+                    f'No "{step_name}" status from the robot (last one {age})')
 
         if self._sm.needs_dispatch:
             self._dispatch_current_step()
@@ -366,7 +401,13 @@ class RoutineExecutorNode(Node):
 
         self._listening = False
         self._seen_running = False
-        self._dispatch_status_id = self._last_status_id.get(self._sm.current_step_name())
+        step_name = self._sm.current_step_name()
+        self._dispatch_status_id = self._last_status_id.get(step_name)
+        self._status_trace = set()
+        self._silence_warned = False
+        self.get_logger().info(
+            f'Sent "{step_name}" command on {pub.topic_name} '
+            f'(status id before send={self._dispatch_status_id})')
 
         # One-shot timer: enable listening after 100ms
         if self._listen_timer is not None and not self._listen_timer.is_canceled():

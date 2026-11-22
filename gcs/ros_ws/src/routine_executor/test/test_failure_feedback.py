@@ -13,6 +13,7 @@ def make_node():
     logger = SimpleNamespace(info=lambda message: None, warn=lambda message: None)
     return SimpleNamespace(_sm=sm, _listening=True, _seen_running=False,
                            _last_status_id={}, _dispatch_status_id=None,
+                           _status_trace=set(), _last_status_time={},
                            get_logger=lambda: logger)
 
 
@@ -99,3 +100,24 @@ def test_status_id_is_tracked_even_while_not_listening():
     status_with_id(node, Status.SUCCESS, 7)
     assert node._last_status_id == {'pick': 7}
     assert node._sm.state == 'running'
+
+
+def test_each_distinct_status_is_traced_once_with_its_verdict():
+    # A stuck step must show what it heard: the stale re-broadcast is logged as ignored (once,
+    # not 20 times a second), and the new activation's SUCCESS as accepted.
+    node = make_node()
+    logs = []
+    node.get_logger = lambda: SimpleNamespace(info=logs.append, warn=logs.append)
+    node._dispatch_status_id = 4
+    node._listening = False
+    status_with_id(node, Status.RUNNING, 5)
+    node._listening = True
+    for _ in range(20):
+        status_with_id(node, Status.SUCCESS, 4)
+    status_with_id(node, Status.SUCCESS, 5)
+    trace = [line for line in logs if 'status' in line and 'id=' in line]
+    assert len(trace) == 3
+    assert 'not listening yet' in trace[0]
+    assert 'id=4' in trace[1] and 'IGNORED as stale' in trace[1]
+    assert 'id=5' in trace[2] and 'accepted' in trace[2]
+    assert node._sm.state == 'success'
