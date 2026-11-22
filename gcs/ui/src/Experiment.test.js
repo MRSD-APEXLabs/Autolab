@@ -1,4 +1,4 @@
-import { render, screen, act, within } from '@testing-library/react';
+import { render, screen, act, within, fireEvent } from '@testing-library/react';
 import mqtt from 'mqtt';
 import Experiment from './Experiment';
 import { PRESETS } from './shared/presets';
@@ -64,4 +64,63 @@ test('progress of an earlier step is not shown', () => {
   render(<Experiment />);
   sendStatus({ step_progress: progress({ step: OT2 - 1, phase: 'homing' }) });
   expect(within(screen.getByLabelText('OT-2 protocol progress')).getByText('Waiting for the OT-2…')).toBeInTheDocument();
+});
+
+// Each client gets its own handlers, so a stale client's events can be told apart.
+function perClientMqtt() {
+  const clients = [];
+  mqtt.connect.mockImplementation(() => {
+    const h = {};
+    const c = {
+      h, on: jest.fn((event, cb) => { (h[event] ||= []).push(cb); }),
+      publish: jest.fn(), subscribe: jest.fn(), unsubscribe: jest.fn(), end: jest.fn(),
+    };
+    clients.push(c);
+    return c;
+  });
+  return clients;
+}
+const fire = (c, event, ...args) => act(() => { (c.h[event] || []).forEach((cb) => cb(...args)); });
+// The page's own clients (CameraStage has one more): connect them all, keep those that subscribe to status.
+function runClients(clients) {
+  clients.forEach((c) => fire(c, 'connect'));
+  return clients.filter((c) => c.subscribe.mock.calls.some(([t]) => t === 'ros2/routine_executor/status'));
+}
+
+test('a client closed by a remount does not flip the badge to disconnected', () => {
+  const clients = perClientMqtt();
+  const { unmount } = render(<Experiment />);
+  unmount();
+  render(<Experiment />);
+  const [stale] = runClients(clients);
+  fire(stale, 'close'); // the ended client's socket closes after the new one connected
+  expect(screen.getByText('Connected')).toBeInTheDocument();
+});
+
+test('a status message marks the page connected', () => {
+  render(<Experiment />);
+  sendStatus({});
+  expect(screen.getByText('Connected')).toBeInTheDocument();
+});
+
+test('a failed step can be skipped after confirming', () => {
+  const clients = perClientMqtt();
+  render(<Experiment />);
+  const [c] = runClients(clients);
+  const payload = Buffer.from(JSON.stringify({ data: JSON.stringify({
+    state: 'failed', steps, current_step: 1, error: 'boom', retry_count: 0, max_retries: 3, recordings: [],
+  }) }));
+  fire(c, 'message', 'ros2/routine_executor/status', payload);
+  fireEvent.click(screen.getByRole('button', { name: /skip step 2/i }));
+  expect(c.publish).not.toHaveBeenCalledWith('cmd/routine_executor/skip', '');
+  fireEvent.click(screen.getByRole('button', { name: /confirm skip/i }));
+  expect(c.publish).toHaveBeenCalledWith('cmd/routine_executor/skip', '');
+});
+
+test('skipped steps are marked on the timeline and in the result', () => {
+  render(<Experiment />);
+  sendStatus({ state: 'success', current_step: steps.length, skipped_steps: [1] });
+  const timeline = screen.getByLabelText('Run progress');
+  expect(within(timeline).getAllByText('Skipped')).toHaveLength(1);
+  expect(screen.getByText(/1 step was skipped/i)).toBeInTheDocument();
 });

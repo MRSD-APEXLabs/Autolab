@@ -3,7 +3,6 @@ import './App.css';
 import './theme.css';
 import React, { useEffect, useState } from 'react';
 import mqtt from 'mqtt';
-import LoaderPage from "./LoaderPage";
 import ExperimentSequence from './Experiment';
 import RoutineBuilder, { parseRoutine, routineProblems } from './RoutineBuilder';
 import { Brand, TitleBar } from './Chrome';
@@ -14,7 +13,6 @@ const START_CMD_TOPIC = 'cmd/routine_executor/start_routine_cmd';
 const STATUS_TOPIC = 'ros2/routine_executor/status';
 
 // Which page this tab is on, kept across reloads (Safari reloads background tabs it evicted).
-// 'loader' is stored as 'experiment' so a reload skips the 5 s loader.
 const VIEW_KEY = 'apex.view';
 // Last routine sent, so "New experiment" (and reloads) start from it instead of the default.
 const ROUTINE_KEY = 'apex.routine';
@@ -45,7 +43,7 @@ function loadView() {
 
 function saveView(started) {
   try {
-    if (started === 'loader' || started === 'experiment') {
+    if (started === 'experiment') {
       window.sessionStorage.setItem(VIEW_KEY, 'experiment');
     } else {
       window.sessionStorage.removeItem(VIEW_KEY);
@@ -90,7 +88,7 @@ const DEFAULT_ROUTINE = JSON.stringify(
 );
 
 export default function App() {
-  // false = welcome, true = routine editor, 'loader' = starting, 'experiment' = live status
+  // false = welcome, true = routine editor, 'experiment' = live status
   const [started, setStarted] = useState(loadView);
   const [routineJson, setRoutineJson] = useState(loadRoutine);
 
@@ -127,13 +125,13 @@ export default function App() {
     client.on('connect', () => {
       client.publish(START_CMD_TOPIC, routineJson, {}, () => {
         client.end();
-        setStarted('loader');
+        setStarted('experiment');
       });
     });
     // If broker is unreachable, still navigate so the UI doesn't freeze
     client.on('error', () => {
       client.end();
-      setStarted('loader');
+      setStarted('experiment');
     });
   }
 
@@ -179,8 +177,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {started === 'loader' && <LoaderPage onNewExperiment={newExperiment} onHome={goHome} />}
 
       {started === 'experiment' && <ExperimentSequence onNewExperiment={newExperiment} onHome={goHome} />}
 

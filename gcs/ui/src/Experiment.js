@@ -13,8 +13,9 @@ const CANCEL_TOPIC = "cmd/routine_executor/cancel";
 const PAUSE_TOPIC = "cmd/routine_executor/pause";
 const RESUME_TOPIC = "cmd/routine_executor/resume";
 const RETRY_TOPIC = "cmd/routine_executor/retry";
-// Give up on "Retrying…" if the executor never reports running (it publishes status at 1 Hz).
-const RETRY_PENDING_MS = 5000;
+const SKIP_TOPIC = "cmd/routine_executor/skip";
+// Give up on "Retrying…"/"Skipping…" if the executor never leaves "failed" (it publishes status at 1 Hz).
+const PENDING_MS = 5000;
 
 // Same default robot as routine_executor/node.py. behavior.launch.xml pushes the
 // /<ROBOT_NAME>/behavior namespace, so executive topics live under it.
@@ -76,7 +77,7 @@ function ot2LiveLine(step, progress) {
 }
 
 // Right-hand run timeline: one node per step, the rail filled up to the current step.
-function Timeline({ steps, state, currentStepIdx, completedCount, liveLine }) {
+function Timeline({ steps, state, currentStepIdx, completedCount, liveLine, skipped }) {
   const total = steps.length;
   const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
   return (
@@ -89,14 +90,15 @@ function Timeline({ steps, state, currentStepIdx, completedCount, liveLine }) {
       <ol className="xt-list">
         {steps.map((step, i) => {
           let cls = "todo";
-          if (state === "success" || i < currentStepIdx) cls = "done";
+          if (skipped.has(i)) cls = "skip";
+          else if (state === "success" || i < currentStepIdx) cls = "done";
           else if (i === currentStepIdx && state === "failed") cls = "fail";
           else if (i === currentStepIdx && state !== "idle") cls = state === "paused" ? "now paused" : "now";
-          const detail = (i === currentStepIdx && liveLine) || stepDetail(step);
+          const detail = cls === "skip" ? "Skipped" : (i === currentStepIdx && liveLine) || stepDetail(step);
           return (
             <li key={i} className={`xt-step ${cls}`} style={{ "--g": GROUPS[stepGroup(step)].color }}
               aria-current={cls.startsWith("now") ? "step" : undefined}>
-              <i className="xt-node">{cls === "done" ? "✓" : cls === "fail" ? "✕" : i + 1}</i>
+              <i className="xt-node">{cls === "done" ? "✓" : cls === "fail" ? "✕" : cls === "skip" ? "↷" : i + 1}</i>
               <div className="min-w-0">
                 <span className="xt-name" title={stepName(step)}>{stepTitle(step)}</span>
                 {detail && <small>{detail}</small>}
@@ -111,8 +113,10 @@ function Timeline({ steps, state, currentStepIdx, completedCount, liveLine }) {
 
 export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const [status, setStatus] = useState(null);
-  const [retryPending, setRetryPending] = useState(false);
+  // "retry" | "skip" while a command waits for the executor to leave "failed"
+  const [pending, setPending] = useState(null);
   const [confirmForce, setConfirmForce] = useState(false);
+  const [confirmSkip, setConfirmSkip] = useState(false);
   const [connected, setConnected] = useState(false);
   const [executorStatus, setExecutorStatus] = useState({});
   const clientRef = useRef(null);
@@ -137,26 +141,45 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
     }
     clientRef.current?.publish(RETRY_TOPIC, status?.retry_needs_force ? JSON.stringify({ force: true }) : '');
     setConfirmForce(false);
-    setRetryPending(true);
+    setConfirmSkip(false);
+    setPending("retry");
+  }
+
+  function handleSkip() {
+    // Skipping leaves the step undone: the operator confirms the next step can run without it.
+    if (!confirmSkip) {
+      setConfirmSkip(true);
+      setConfirmForce(false);
+      return;
+    }
+    clientRef.current?.publish(SKIP_TOPIC, '');
+    setConfirmSkip(false);
+    setPending("skip");
   }
 
   useEffect(() => {
-    if (!retryPending) return undefined;
-    const timer = setTimeout(() => setRetryPending(false), RETRY_PENDING_MS);
+    if (!pending) return undefined;
+    const timer = setTimeout(() => setPending(null), PENDING_MS);
     return () => clearTimeout(timer);
-  }, [retryPending]);
+  }, [pending]);
 
   useEffect(() => {
     const client = mqtt.connect(BROKER_URL);
     clientRef.current = client;
+    // A client this effect already ended (a remount, StrictMode's double effect) can still emit
+    // "close" after the new client connected; it must not flip the badge to Disconnected.
+    let live = true;
+    const setLive = (value) => { if (live) setConnected(value); };
 
     client.on("connect", () => {
-      setConnected(true);
+      setLive(true);
       client.subscribe(STATUS_TOPIC);
       ALL_DISPLAY_MQTT_TOPICS.forEach((t) => client.subscribe(t));
     });
 
     client.on("message", (topic, payload) => {
+      if (!live) return;
+      setConnected(true); // a message only arrives over an open connection
       const raw = payload.toString();
       if (topic === STATUS_TOPIC) {
         try {
@@ -176,9 +199,13 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
       }
     });
 
-    client.on("close", () => setConnected(false));
+    client.on("close", () => setLive(false));
+    client.on("offline", () => setLive(false));
 
-    return () => client.end();
+    return () => {
+      live = false;
+      client.end(true);
+    };
   }, []);
 
   const steps = status?.steps ?? [];
@@ -187,14 +214,17 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const state = status?.state ?? "idle";
   const failedStepName = stepName(steps[currentStepIdx]);
   const canRetry = state === "failed" && currentStepIdx < totalSteps;
+  const skipped = new Set(status?.skipped_steps ?? []);
+  const nextAfterSkip = steps[currentStepIdx + 1];
 
-  // The executor left "failed": the retry went through.
+  // The executor left "failed" (or moved to another step): the retry or skip went through.
   useEffect(() => {
     if (state !== "failed") {
-      setRetryPending(false);
+      setPending(null);
       setConfirmForce(false);
+      setConfirmSkip(false);
     }
-  }, [state]);
+  }, [state, currentStepIdx]);
 
   const completedCount = state === "success" ? totalSteps : currentStepIdx;
   const active = state === "running" || state === "paused";
@@ -317,18 +347,45 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
                     Check the OT-2 before running the step again.
                   </p>
                 )}
+                {canRetry && confirmSkip && (
+                  <p className="text-sm mt-3 font-semibold" style={{ color: "var(--amber)" }}>
+                    Step {currentStepIdx + 1} will not run. Make sure the robot and plate are where
+                    {nextAfterSkip ? ` step ${currentStepIdx + 2} (${stepTitle(nextAfterSkip)}) expects them` : " the routine can end"} before
+                    going on.
+                  </p>
+                )}
                 <div className="mt-4 flex flex-wrap gap-2">
                   {canRetry && (
                     <button
                       onClick={handleRetry}
-                      disabled={!connected || retryPending}
+                      disabled={!connected || pending !== null}
+                      title={!connected ? "Not connected to the GCS broker" : undefined}
                       className={`ax-btn solid ${confirmForce ? "amber" : "stop"}`}
                     >
-                      {retryPending
+                      {pending === "retry"
                         ? "Retrying…"
                         : confirmForce
                         ? "I've inspected the OT-2 — retry"
                         : `Retry from step ${currentStepIdx + 1}${failedStepName ? ` (${failedStepName})` : ""}`}
+                    </button>
+                  )}
+                  {canRetry && (
+                    <button
+                      onClick={handleSkip}
+                      disabled={!connected || pending !== null}
+                      title={!connected ? "Not connected to the GCS broker" : undefined}
+                      className={`ax-btn ${confirmSkip ? "solid amber" : "ghost"}`}
+                    >
+                      {pending === "skip"
+                        ? "Skipping…"
+                        : confirmSkip
+                        ? `Confirm skip — ${nextAfterSkip ? `continue from step ${currentStepIdx + 2}` : "end the routine"}`
+                        : `Skip step ${currentStepIdx + 1}`}
+                    </button>
+                  )}
+                  {canRetry && confirmSkip && (
+                    <button onClick={() => setConfirmSkip(false)} className="ax-btn ghost">
+                      Keep step
                     </button>
                   )}
                   {onNewExperiment && (
@@ -346,7 +403,9 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
                 <span className="ax-h3" style={{ color: "var(--green)" }}>Done</span>
                 <h3 className="xp-big">Routine Complete</h3>
                 <p className="text-sm mt-1" style={{ color: "var(--dim)" }}>
-                  All {totalSteps} steps executed successfully.
+                  {skipped.size === 0
+                    ? `All ${totalSteps} steps executed successfully.`
+                    : `${totalSteps - skipped.size} of ${totalSteps} steps executed; ${skipped.size} step${skipped.size === 1 ? " was" : "s were"} skipped.`}
                 </p>
                 {onNewExperiment && (
                   <button onClick={onNewExperiment} className="ax-btn solid green mt-4">
@@ -375,7 +434,7 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
 
           <div className="xp-time">
             {status && totalSteps > 0 ? (
-              <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount}
+              <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount} skipped={skipped}
                 liveLine={active && isOt2 ? ot2LiveLine(currentStep, ot2Progress) : null} />
             ) : (
               <aside className="xt"><span className="ax-h3">Progress</span><p className="ax-hint mt-3">No steps loaded</p></aside>

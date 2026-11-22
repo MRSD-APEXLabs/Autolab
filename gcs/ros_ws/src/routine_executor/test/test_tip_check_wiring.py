@@ -14,6 +14,7 @@ def make_node(steps):
     logs = []
     logger = SimpleNamespace(info=logs.append, warn=logs.append)
     return SimpleNamespace(_sm=sm, _listening=True, _seen_running=False,
+                           _last_status_id={}, _dispatch_status_id=None,
                            get_logger=lambda: logger, logs=logs)
 
 

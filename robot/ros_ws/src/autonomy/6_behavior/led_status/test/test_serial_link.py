@@ -115,6 +115,16 @@ def test_resends_periodically():
     assert opener.ports[0].written == [b'M\n', b'M\n']
 
 
+def test_resend_period_can_be_overridden_per_update():
+    opener = FakeOpener()
+    link = make_link(opener)
+    link.update('V100,0,0', 0.0, resend_s=0.5)
+    for t in (2.0, 2.4, 2.5, 2.6):
+        link.update('V100,0,0', t, resend_s=0.5)
+    link.update('V110,0,0', 2.7, resend_s=0.5)
+    assert opener.ports[0].written == [b'V100,0,0\n', b'V100,0,0\n', b'V110,0,0\n']
+
+
 def test_retries_open_after_delay_when_missing():
     opener = FakeOpener()
     opener.available = False

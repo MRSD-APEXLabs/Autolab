@@ -10,6 +10,7 @@ int main()
 {
   SdkCommandGate gate;
   assert(!gate.may_write());  // No controller: no periodic joint hold.
+  assert(gate.may_claim(1));
   assert(gate.switch_claims(0, 1));
   assert(gate.may_write());
   assert(!gate.acquire());
@@ -17,10 +18,13 @@ int main()
   assert(!gate.may_write());
   assert(gate.acquire());
   assert(!gate.acquire());  // A second SDK client cannot acquire.
+  assert(!gate.may_claim(1));  // The controller manager is refused before it activates anything.
+  assert(gate.may_claim(0));  // Stopping controllers stays allowed.
   assert(!gate.switch_claims(0, 1));  // No ROS reactivation during SDK motion.
   assert(!gate.may_write());
   assert(gate.release());
   assert(gate.resync_pending());
+  assert(gate.may_claim(1));  // The handback may reactivate as soon as the SDK releases.
   assert(!gate.acquire());
   assert(gate.switch_claims(0, 1));
   assert(!gate.may_write());  // Even a claim cannot bypass measured-joint resync.

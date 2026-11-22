@@ -14,7 +14,8 @@ steps) are not shown.
 | Robot state | Letter | Pattern |
 |---|---|---|
 | Nothing active | `I` | Idle: slow teal breathing |
-| `Go To Location` / `Navigate To Pose` active | `M` | Moving: cyan packets flow rear → front |
+| `Go To Location` / `Navigate To Pose` active, base odometry fresh | `V<vx>,<vy>,<turn>` | Navigating: cyan packets flow with the base's measured motion (below) |
+| `Go To Location` / `Navigate To Pose` active, no odometry for 0.5 s | `M` | Moving: cyan packets flow rear → front |
 | `Pick Object` / `Place Object` / `Pick Base Object` / `Place Base Object` active | `A` | Arm working: purple halo, front ripples |
 | `Execute OT2 Protocol` / `Execute Shaker Protocol` active | `W` | Waiting: amber double pulse |
 | A watched action failed | `E` | Fault: red breathing perimeter, held until the next action starts |
@@ -22,7 +23,29 @@ steps) are not shown.
 | Node shut down | `O` | Off |
 
 The firmware also has patterns for turning left/right (`L`/`T`) and charging (`C`). They are
-not used yet because the robot publishes no signal for them.
+not used: `V` already shows turning, and nothing publishes a charging signal.
+
+### Navigation: following the motion
+
+While a navigation action runs, the node sends the base's measured velocity from
+`/nav/odom` as `V<vx>,<vy>,<turn>` in mm/s:
+- `vx` and `vy` are in the robot frame (+x forward, +y left).
+- `turn` is `wz` × 0.34 m, the rotation's speed at the strip (+ = counter-clockwise).
+
+It sends at every 10 Hz tick when the value changes, and at least every
+`velocity_resend_s` (0.5 s). Values are rounded to 10 mm/s, and anything under 15 mm/s is sent
+as 0. The firmware draws the motion like this:
+- **Flow:** packets flow along each side at that side's share of the motion, so they move over
+  the strip at the base's real ground speed. Driving forward, both sides flow rear → front.
+  Driving sideways, the front and back flow; turning in place, the whole ring circulates.
+- **Leading side:** the side facing the direction of travel glows brighter, more so the faster
+  the base moves.
+- **Stopped:** with no motion during navigation (planning, waiting), the strip breathes calmly.
+- **Stale:** the firmware treats a velocity older than 1.5 s as stopped.
+
+`/nav/odom` is the swerve bridge's `/odom` from navigation's private domain 42. It is carried
+across by `navigation_executive/config/nav_domain_bridge.yaml` and renamed on domain 0. Without
+it, the node falls back to `M`.
 
 ### Rules
 
@@ -50,6 +73,7 @@ replaced by `_`; this matches `bt::Action::get_*_topic_name`.
 |---|---|
 | `<action>_active` | `behavior_tree_msgs/Active` (published by the BT engine) |
 | `<action>_status` | `behavior_tree_msgs/Status` (published by the executive: `FAILURE=0 RUNNING=1 SUCCESS=2`) |
+| `/nav/odom` (`odom_topic`) | `nav_msgs/Odometry`: the base's measured velocity (twist in `base_footprint`), 50 Hz |
 
 Watched actions:
 - `go_to_location`, `navigate_to_pose`
@@ -71,6 +95,9 @@ The node publishes nothing. Its pattern changes appear in the log as `LED status
 | `resend_s` | `3.0` | The current letter is resent this often, so the strip recovers if the Nano resets |
 | `retry_s` | `5.0` | Delay between attempts to reopen the port when it is missing or fails |
 | `settle_s` | `2.0` | Wait after opening the port; opening resets the Nano into its bootloader |
+| `odom_topic` | `/nav/odom` | Base odometry used while navigating |
+| `odom_stale_s` | `0.5` | Odometry older than this is ignored, and navigation shows `M` |
+| `velocity_resend_s` | `0.5` | The `V` command is resent at least this often (the firmware treats 1.5 s as stopped) |
 
 The launch file exposes only `port`: `ros2 launch led_status led_status.launch.xml port:=/dev/ttyUSB1`.
 
@@ -80,6 +107,7 @@ The launch file exposes only `port`: `ros2 launch led_status led_status.launch.x
 |---|---|
 | `led_status/logic.py` | `LedLogic`: pure pattern selection; takes `now` explicitly. Unit tested |
 | `led_status/serial_link.py` | `find_port` (by-id path, then sysfs search), `SerialPort` (raw termios at 115200), `LedLink` (send on change, resend, reconnect). No ROS. Unit tested |
+| `led_status/motion.py` | `velocity_command` (odometry → `V` command) and `pattern` (`M` + fresh odometry → `V`). No ROS. Unit tested |
 | `led_status/node.py` | Thin rclpy wrapper. `GROUPS` maps actions to letters, in priority order |
 | `launch/led_status.launch.xml` | Starts the node; included by `behavior_bringup/launch/behavior.launch.xml` |
 
@@ -175,10 +203,8 @@ cd led && python3 robot_status/send_status.py M     # or no arg for interactive
   1. Add a command letter and an effect to `led/robot_status/robot_status.ino`, then reflash
      (`led/THOR.md`).
   2. Map an action group to that letter in `GROUPS`.
-- **Turning (`L`/`T`):** needs a turn signal. `/cmd_vel` lives on nav's private ROS domain 42
-  and is not bridged (`navigation_executive/config/nav_domain_bridge.yaml`). Either bridge a
-  yaw-rate topic or have `navigation_executive` publish one, then add a moving sub-state in
-  `LedLogic`.
+- **Turning (`L`/`T`):** `V` already shows rotation as a circulating ring. To use the amber
+  turn patterns instead, choose them in `motion.pattern` from the odometry's `wz`.
 - **Charging (`C`) / real faults (e-stop, hardware health):** nothing publishes these yet. A
   latched "override" input in `LedLogic` that beats action state is the natural place to add
   them.

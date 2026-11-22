@@ -40,6 +40,7 @@
 
         <!-- Underglow LEDs: reflects BT action state; idles quietly when no LED Nano is attached -->
         <include file="$(find-pkg-share led_status)/launch/led_status.launch.xml" />
+        <include file="$(find-pkg-share voice_status)/launch/voice_status.launch.xml" />
 
     </group>
 </launch>

@@ -68,3 +68,24 @@ test('images are linked full size and never cropped', () => {
   expect(img.className).not.toMatch(/object-cover/);
   expect(img.closest('a')).toHaveAttribute('href', `${TIP_CHECK_URL}/runs/c/crop.jpg`);
 });
+
+test('mixed results mark only the clogged row, not the whole card', () => {
+  const { container } = render(<ClogCheckCard recordings={[
+    tip('r-1', { status: 'done', anomaly_detected: false, p_tip_empty: 0.13 }),
+    tip('r-2', { status: 'done', anomaly_detected: true, p_tip_empty: 0.59 }),
+  ]} />);
+  const panel = container.firstChild;
+  expect(panel.className).not.toMatch(/k-bad/);
+  expect(panel.className).toMatch(/k-none/);
+  const rows = container.querySelectorAll('ul.ax-rows > li');
+  expect(rows[0].className).toMatch(/k-ok/);
+  expect(rows[1].className).toMatch(/k-bad/);
+});
+
+test('when every check agrees the card takes that tone', () => {
+  const { container } = render(<ClogCheckCard recordings={[
+    tip('r-1', { status: 'done', anomaly_detected: true, p_tip_empty: 0.7 }),
+    tip('r-2', { status: 'done', anomaly_detected: true, p_tip_empty: 0.8 }),
+  ]} />);
+  expect(container.firstChild.className).toMatch(/k-bad/);
+});

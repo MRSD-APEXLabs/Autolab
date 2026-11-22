@@ -344,6 +344,27 @@ TEST(ProtocolStep, CheckErrorIsPublishedAndTheStepStillSucceeds) {
     EXPECT_EQ(s.published[0]["status"], "error");
 }
 
+TEST(ProtocolStep, CheckThatThrowsIsPublishedAsAnErrorAndTheStepStillSucceeds) {
+    std::vector<json> published;
+    bool ok = lab_machine::run_protocol_step(
+        ASPIRATE, 0, "run7", [](const json&) { return true; },
+        [](const std::string&) -> json { throw std::runtime_error("camera gone"); },
+        [&published](const json& r) { published.push_back(r); });
+    EXPECT_TRUE(ok);
+    ASSERT_EQ(published.size(), 1u);
+    EXPECT_EQ(published[0]["status"], "error");
+    EXPECT_NE(published[0]["error"].get<std::string>().find("camera gone"), std::string::npos);
+    EXPECT_EQ(published[0]["type"], "tip_check");
+}
+
+TEST(ProtocolStep, PublishThatThrowsDoesNotFailTheStep) {
+    bool ok = lab_machine::run_protocol_step(
+        ASPIRATE, 0, "run7", [](const json&) { return true; },
+        [](const std::string&) { return json{{"status", "done"}, {"anomaly_detected", false}}; },
+        [](const json&) { throw std::runtime_error("publisher gone"); });
+    EXPECT_TRUE(ok);
+}
+
 TEST(ProtocolStep, FailedAspirateIsNotCheckedAndFailsTheStep) {
     StepRun s;
     s.dispatch_ok = false;

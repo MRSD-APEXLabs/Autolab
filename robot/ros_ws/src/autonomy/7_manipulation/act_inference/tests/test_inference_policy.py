@@ -30,14 +30,14 @@ def test_numpy2_stats_load_without_numpy_private_core(monkeypatch):
         np.testing.assert_array_equal(actual[key], expected[key])
 
 
-@pytest.mark.parametrize('name', ['xarm6_placing_act_ft_all_20261105b',   # OT-2
-                                  'xarm6_shaker_act_ft_vg_20261120', 'xarm6_base_act_ft_20261108b'])
+@pytest.mark.parametrize('name', ['xarm6_placing_act_ft_vg_tilt_20261121',   # OT-2
+                                  'xarm6_shaker_act_ft_vg_tilt_strict_20261121', 'xarm6_base_act_ft_20261108b'])
 def test_bundled_ft_placing_checkpoint_without_hardware(name):
     from act_inference.rollout import warm_up
     directory = Path(__file__).resolve().parents[1] / 'models' / name
     loaded = load_policy(directory)
     policy, stats, device = loaded
-    # The virtual-grasp shaker model is RGB + F/T: its training frames were re-rendered, and re-rendered depth
+    # The virtual-grasp (OT-2, shaker) models are RGB + F/T: their training frames were re-rendered, and re-rendered depth
     # through the clear plate is unreliable, so depth is not an input.
     assert policy.use_depth == ('_vg_' not in name)
     assert policy.use_force_torque and policy.state_inputs == 'none'

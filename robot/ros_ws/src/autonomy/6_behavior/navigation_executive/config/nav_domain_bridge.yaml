@@ -1,4 +1,5 @@
-# Bridges ONLY the nav_api contract, plus the gamepad's /joy for the arm teleop, between the robot_1 domain (0) and
+# Bridges ONLY the nav_api contract, plus the gamepad's /joy for the arm teleop and /odom (as /nav/odom) for the
+# underglow LEDs, between the robot_1 domain (0) and
 # the isolated navigation domain (42, the default NAVIGATION_DOMAIN_ID in autonomy/1_navigation/run.sh). Nav2 internals,
 # TF, cmd_vel etc. stay on 42 and are not visible on domain 0 (GCS, LAN). If run.sh is started
 # with a different NAVIGATION_DOMAIN_ID, change 42 below to match.
@@ -32,3 +33,11 @@ topics:
     type: sensor_msgs/msg/Joy
     from_domain: 42
     to_domain: 0
+
+  # swerve_bridge drivetrain odometry (50 Hz; twist in base_footprint) -> led_status, so the underglow follows
+  # the base's motion while navigating. Renamed so it cannot be mistaken for a domain-0 odometry source.
+  /odom:
+    type: nav_msgs/msg/Odometry
+    from_domain: 42
+    to_domain: 0
+    remap: /nav/odom

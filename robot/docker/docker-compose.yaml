@@ -58,6 +58,9 @@ services:
       # host gid of the "input" group: /dev/input/event* is root:input 0660, so without this the
       # container user cannot read the gamepad (joy_node then finds no joystick at all).
       - "996"
+      # host gid of the "audio" group: /dev/snd/* is root:audio 0660, so without this the container
+      # user cannot open the HDMI speaker (voice_status).
+      - "29"
     extends:
       file: ./robot-base-docker-compose.yaml
       service: robot_base

@@ -81,9 +81,10 @@ bool run_protocol_step(const nlohmann::json& step, int index, const std::string&
                        const PublishFn& publish);
 
 // Live OT-2 progress (topic ot2_progress), what the GCS shows while the protocol runs:
-// {"run_id", "phase" (connecting | command | tip_check | homing | disconnecting | done | failed),
+// {"run_id", "phase" (connecting | command | tip_check | homing | done | failed),
 //  "command": 0-based index or null, "commands": count, "action": that command's action or null,
 //  "tip_check": the client's progress during a tip check, else null}.
+// "done" is sent once homed; the wrapper session stays open for the next run.
 nlohmann::json ot2_progress(const std::string& run_id, const std::string& phase,
                             const nlohmann::json& steps, int command = -1,
                             const nlohmann::json& tip_check = nlohmann::json());

@@ -254,10 +254,6 @@ bool LabMachineExecutive::home_ot2() {
     return ot2_post("/robot/home", "{}");
 }
 
-bool LabMachineExecutive::disconnect_ot2() {
-    return ot2_post("/robot/disconnect", "{}");
-}
-
 // Converts OT-2 step action name to REST endpoint path.
 // e.g. "pick_up_tips" → "/commands/pick-up-tips"
 std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
@@ -266,8 +262,9 @@ std::string LabMachineExecutive::action_to_endpoint(const std::string& action) {
     return "/commands/" + slug;
 }
 
-// POST /robot/connect {"host": ot2_host_}
-// Returns true on 200 (connected) or 400 (already connected).
+// POST /robot/connect {"host": ot2_host_}, before every protocol. The wrapper keeps a healthy
+// session (200, "reused": true — no new run, no homing) and rebuilds a dead one.
+// 400 = "already connected" from an older wrapper; also fine.
 bool LabMachineExecutive::connect_ot2() {
     nlohmann::json body = {{"host", ot2_host_}};
     std::string body_str = body.dump();
@@ -303,6 +300,18 @@ bool LabMachineExecutive::connect_ot2() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void LabMachineExecutive::timer_callback() {
+    // Watchdog: conditions/statuses are only published here, and the BT drops any that are older
+    // than its timeout (1 s). Say how long the timer did not run so a stall can be traced.
+    const auto now = std::chrono::steady_clock::now();
+    if (last_tick_.time_since_epoch().count() != 0) {
+        const double gap = std::chrono::duration<double>(now - last_tick_).count();
+        if (gap > 0.5)
+            RCLCPP_WARN(this->get_logger(),
+                        "Timer stalled %.2fs (expected 0.05s) — BT conditions went %s",
+                        gap, gap > 1.0 ? "stale" : "late");
+    }
+    last_tick_ = now;
+
     tick_ot2();
     tick_shaker();
 
@@ -315,8 +324,24 @@ void LabMachineExecutive::timer_callback() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void LabMachineExecutive::tick_ot2() {
+    static const char* const PHASE_NAMES[] = {"idle", "connecting", "stepping", "homing"};
+    const char* phase_name = PHASE_NAMES[static_cast<int>(ot2_phase_)];
+
     if (!ot2_action_->is_active()) {
         if (ot2_action_->active_has_changed()) {
+            RCLCPP_INFO(this->get_logger(), "OT-2 action deactivated (BT id %lu, step %d, %s%s)",
+                        static_cast<unsigned long>(ot2_action_->get_id()), ot2_current_step_,
+                        phase_name, ot2_terminal_ ? ", finished" : "");
+            if (ot2_phase_ != OT2Phase::IDLE && !ot2_terminal_) {
+                // Not a stop: the BT drops an action whose conditions went stale past its timeout,
+                // then re-activates it (ot2_condition_ is still true). Resetting here re-ran the
+                // protocol from pick_up_tips with the tip still on (HasTipError). The wrapper call
+                // in flight cannot be cancelled anyway, so keep the run and resume on re-activation.
+                RCLCPP_WARN(this->get_logger(),
+                            "OT-2 run interrupted mid-protocol — keeping it, will resume at step %d",
+                            ot2_current_step_);
+                return;
+            }
             ot2_current_step_ = 0;
             ot2_phase_        = OT2Phase::IDLE;
             ot2_terminal_     = false;
@@ -326,6 +351,31 @@ void LabMachineExecutive::tick_ot2() {
     }
 
     if (ot2_terminal_) return;
+
+    if (ot2_action_->active_has_changed())
+        RCLCPP_INFO(this->get_logger(), "OT-2 action activated (BT id %lu, step %d, %s)",
+                    static_cast<unsigned long>(ot2_action_->get_id()), ot2_current_step_,
+                    phase_name);
+
+    // ── Re-activation of an interrupted run: carry on where it was ──────────────
+    if (ot2_action_->active_has_changed() && ot2_phase_ != OT2Phase::IDLE) {
+        RCLCPP_WARN(this->get_logger(), "OT-2 run resumed at step %d (%s)", ot2_current_step_,
+                    phase_name);
+        ot2_action_->set_running();
+        return;
+    }
+
+    // A worker that throws must fail the run, not escape the timer callback and kill the node.
+    auto take_result = [this]() {
+        try {
+            return pending_http_.get();
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "OT-2 worker threw: %s", e.what());
+        } catch (...) {
+            RCLCPP_ERROR(this->get_logger(), "OT-2 worker threw an unknown exception");
+        }
+        return false;
+    };
 
     // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
@@ -365,7 +415,7 @@ void LabMachineExecutive::tick_ot2() {
     // ── CONNECTING ────────────────────────────────────────────────────────────
     if (ot2_phase_ == OT2Phase::CONNECTING) {
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 connect failed — FAILURE");
@@ -409,7 +459,7 @@ void LabMachineExecutive::tick_ot2() {
             return;
         }
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(),
@@ -430,7 +480,7 @@ void LabMachineExecutive::tick_ot2() {
     // ── HOMING ────────────────────────────────────────────────────────────────
     if (ot2_phase_ == OT2Phase::HOMING) {
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 home failed — FAILURE");
@@ -441,32 +491,9 @@ void LabMachineExecutive::tick_ot2() {
                 ot2_action_->set_failure();
                 return;
             }
-            RCLCPP_INFO(this->get_logger(), "OT-2 homed — disconnecting…");
-            ot2_phase_      = OT2Phase::DISCONNECTING;
-            publish_ot2_progress("disconnecting");
-            http_in_flight_ = true;
-            pending_http_   = std::async(std::launch::async,
-                                         &LabMachineExecutive::disconnect_ot2, this);
-        }
-        ot2_action_->set_running();
-        return;
-    }
-
-    // ── DISCONNECTING ─────────────────────────────────────────────────────────
-    if (ot2_phase_ == OT2Phase::DISCONNECTING) {
-        if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
-            http_in_flight_ = false;
-            if (!ok) {
-                RCLCPP_ERROR(this->get_logger(), "OT-2 disconnect failed — FAILURE");
-                command_lab_machine_condition_->set(false);
-                ot2_condition_->set(false);
-                ot2_terminal_ = true;
-                publish_ot2_progress("failed", ot2_current_step_);
-                ot2_action_->set_failure();
-                return;
-            }
-            RCLCPP_INFO(this->get_logger(), "OT-2 disconnected — SUCCESS");
+            // Homed = safe; the session stays open. The next run's connect reuses it, or
+            // rebuilds it if it died (wrapper checks the OT-2 run), so no disconnect here.
+            RCLCPP_INFO(this->get_logger(), "OT-2 homed — SUCCESS (session kept open)");
             publish_ot2_progress("done");
             command_lab_machine_condition_->set(false);
             ot2_condition_->set(false);
@@ -527,7 +554,16 @@ nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label, int 
     client.on_progress([this, index](const nlohmann::json& p) {
         publish_ot2_progress("tip_check", index, p);
     });
-    return client.run(label);
+    const auto started = std::chrono::steady_clock::now();
+    nlohmann::json result = client.run(label);
+    const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const std::string outcome = result.is_object() && result.contains("status") &&
+                                        result["status"].is_string()
+                                    ? result["status"].get<std::string>()
+                                    : "no result";
+    RCLCPP_INFO(this->get_logger(), "Tip check for step %d finished in %.1fs (%s)", index, took,
+                outcome.c_str());
+    return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

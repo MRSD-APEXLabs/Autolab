@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <future>
 #include <string>
 #include <vector>
@@ -37,7 +38,7 @@ class LabMachineExecutive : public rclcpp::Node {
     std::string shaker_protocol_json_; // latest LabMachineCommand for shaker
 
     // ── OT-2 step-machine state ───────────────────────────────────────────────
-    enum class OT2Phase { IDLE, CONNECTING, STEPPING, HOMING, DISCONNECTING };
+    enum class OT2Phase { IDLE, CONNECTING, STEPPING, HOMING };
     nlohmann::json ot2_steps_;     // parsed steps array
     int ot2_current_step_;         // index into ot2_steps_
     OT2Phase ot2_phase_;
@@ -45,6 +46,9 @@ class LabMachineExecutive : public rclcpp::Node {
     std::future<bool> pending_http_; // in-flight HTTP call
     bool http_in_flight_;
     std::string ot2_run_id_;       // names this protocol run's tip-check results
+    // Timer-gap watchdog: the BT drops a condition whose status is older than its timeout (1 s),
+    // so a stall of this node's 20 Hz timer is logged with its length.
+    std::chrono::steady_clock::time_point last_tick_{};
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;
@@ -78,7 +82,6 @@ class LabMachineExecutive : public rclcpp::Node {
     // Static HTTP helper — runs in std::async thread
     bool connect_ot2();
     bool home_ot2();
-    bool disconnect_ot2();
     static bool http_post(const std::string& url,
                           const std::string& body,
                           const std::string& content_type);

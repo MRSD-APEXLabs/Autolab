@@ -5,8 +5,10 @@ import time
 import rclpy
 from rclpy.node import Node
 from behavior_tree_msgs.msg import Active, Status
+from nav_msgs.msg import Odometry
 
 from led_status.logic import LedLogic, topic_base
+from led_status.motion import pattern
 from led_status.serial_link import DEFAULT_BY_ID, LedLink, SerialPort, find_port
 
 # Ordered by priority: earlier groups win when several actions run at once.
@@ -38,6 +40,12 @@ class LedStatusNode(Node):
         )
         self._warned = False
         self._letter = None
+        # While navigating ('M'), fresh odometry turns the pattern into the velocity-following one.
+        self._odom_stale_s = self.declare_parameter('odom_stale_s', 0.5).value
+        self._velocity_resend_s = self.declare_parameter('velocity_resend_s', 0.5).value
+        self._odom = None   # (receive time, vx, vy, wz)
+        odom_topic = self.declare_parameter('odom_topic', '/nav/odom').value
+        self.create_subscription(Odometry, odom_topic, self._on_odom, 10)
 
         for _, labels in GROUPS:
             for label in labels:
@@ -62,13 +70,19 @@ class LedStatusNode(Node):
         self.get_logger().info(f'LED Nano opened on {path}')
         return port
 
+    def _on_odom(self, msg):
+        twist = msg.twist.twist
+        self._odom = (time.monotonic(), twist.linear.x, twist.linear.y, twist.angular.z)
+
     def _tick(self):
         now = time.monotonic()
-        letter = self._logic.tick(now)
+        letter, command = pattern(self._logic.tick(now), self._odom, now, self._odom_stale_s)
+        resend_s = self._velocity_resend_s if letter == 'V' else None
         if letter != self._letter:
-            self.get_logger().info(f'LED status -> {letter}')
+            self.get_logger().info(f'LED status -> {letter}'
+                                   + (' (following /nav/odom)' if letter == 'V' else ''))
             self._letter = letter
-        self._link.update(letter, now)
+        self._link.update(command, now, resend_s)
 
         if self._link.connected:
             self._warned = False

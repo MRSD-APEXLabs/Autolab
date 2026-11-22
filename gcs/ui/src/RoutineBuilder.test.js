@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import RoutineBuilder from './RoutineBuilder';
 import { PRESETS } from './shared/presets';
+import { EMPTY_TUBE, TUBE_FOR_LIQUID } from './shared/tips';
 
 function Harness({ initial }) {
   const [value, setValue] = useState(initial);
@@ -21,11 +22,11 @@ test('offers a no-anomaly and an anomaly experiment that differ in the aspirated
   expect(screen.getByText('Custom routine', { exact: false })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('radio', { name: /^No anomaly/ }));
-  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(3);
+  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(TUBE_FOR_LIQUID.brown);
   expect(screen.getByRole('radio', { name: /^No anomaly/ })).toHaveAttribute('aria-checked', 'true');
 
   fireEvent.click(screen.getByRole('radio', { name: /^Anomaly/ }));
-  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(9);
+  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(EMPTY_TUBE);
   expect(screen.getByRole('radio', { name: /^Anomaly/ })).toHaveAttribute('aria-checked', 'true');
   expect(screen.getAllByTestId('routine-block')).toHaveLength(PRESETS[1].routine.steps.length);
 });

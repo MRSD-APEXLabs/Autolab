@@ -191,13 +191,26 @@ bool run_protocol_step(const json& step, int index, const std::string& run_id,
     if (!dispatch(command)) return false;
     if (command.value("action", "") != "aspirate" || !tip_check || !wants_check) return true;
 
-    json result = tip_check("OT-2 aspirate " + command.dump());
+    // The aspirate is done: from here nothing may fail the step. A check that breaks in any way
+    // is published as an error (a warning on the GCS) and the protocol moves on.
+    json result;
+    try {
+        result = tip_check("OT-2 aspirate " + command.dump());
+    } catch (const std::exception& e) {
+        result = {{"status", "error"}, {"error", std::string("tip check crashed: ") + e.what()}};
+    } catch (...) {
+        result = {{"status", "error"}, {"error", "tip check crashed"}};
+    }
     if (!result.is_object()) result = {{"status", "error"}, {"error", "no tip-check result"}};
     result["type"] = "tip_check";
     result["id"] = run_id + "-" + std::to_string(index);
     result["protocol_step"] = index;
     result["aspirate"] = command;
-    publish(result);
+    try {
+        publish(result);
+    } catch (...) {
+        // Losing the result only hides it from the GCS; the step itself succeeded.
+    }
     return true;
 }
 
