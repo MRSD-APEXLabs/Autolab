@@ -9,19 +9,26 @@ from act_inference.robot import XArm6Robot
 from test_base_placement import ClockStop, setup_robot
 
 
-def setup_release(monkeypatch, stop, open_error=False, open_wait=4.):
+def setup_release(monkeypatch, stop, open_error=False, open_wait=4., before_open=None):
+    """`before_open`: a list that collects servo targets sent before the open command (else those fail)."""
     _, calls, commands = setup_robot(monkeypatch, stop)
     base_robot = bp.XArm6Robot
+    opened_at = []
 
     class Robot(base_robot):
         def open_gripper(self):
             assert not self.read_only
             calls.append('open')
+            opened_at.append(stop.now)
             if open_error:
                 raise RuntimeError('gripper failed')
 
         def servo(self, target, period, measured):
-            assert 'open' in calls and stop.now >= open_wait
+            if 'open' in calls:
+                assert stop.now >= opened_at[0] + open_wait
+            else:
+                assert before_open is not None
+                before_open.append(target.copy())
             super().servo(target, period, measured)
 
     monkeypatch.setattr(pp, 'XArm6Robot', Robot)
@@ -42,6 +49,33 @@ def test_open_then_lift_without_changing_xy_orientation(monkeypatch, lift_mm):
     np.testing.assert_allclose(np.asarray(commands)[:, :2], np.tile(initial[:2], (len(commands), 1)))
     np.testing.assert_allclose(np.asarray(commands)[:, 3:], np.tile(commands[0][3:], (len(commands), 1)))
     assert stop.now >= 4. + lift_mm / 1000 / .01 + .3
+
+
+def test_ot2_shift_along_base_x_before_opening(monkeypatch):
+    stop = ClockStop()
+    before_open = []
+    calls, commands = setup_release(monkeypatch, stop, before_open=before_open)
+    initial = bp.BasePlacementConfig().target_pose()
+    initial[:3] -= [.002, .001, 0]
+    config = InferenceConfig(motion=MotionConfig(translation_speed=.01))
+    assert pp.release_and_lift(config, execute=True, stop=stop, speed_mm_s=25., shift_x_mm=-2.) == 'done'
+    assert calls == ['connect', 'enable', 'open', 'enable', 'close']
+    shift = np.asarray(before_open)
+    assert shift[-1][0] == pytest.approx(initial[0] - .002)
+    np.testing.assert_allclose(shift[:, 1:3], np.tile(initial[1:3], (len(shift), 1)))
+    np.testing.assert_allclose(shift[:, 3:], np.tile(shift[0][3:], (len(shift), 1)))
+    assert np.diff(np.r_[initial[0], shift[:, 0]]).min() >= -.01 / 50 - 1e-12   # ACT speed, not the 25 mm/s lift
+    lift = np.asarray(commands[len(shift):])
+    np.testing.assert_allclose(lift[:, :2], np.tile([initial[0] - .002, initial[1]], (len(lift), 1)))
+    assert lift[-1][2] == pytest.approx(initial[2] + .1)
+
+
+def test_stop_during_shift_never_opens(monkeypatch):
+    stop = ClockStop(cancel_at=.1)
+    calls, commands = setup_release(monkeypatch, stop, before_open=[])
+    config = InferenceConfig(motion=MotionConfig(translation_speed=.001))
+    assert pp.release_and_lift(config, execute=True, stop=stop, shift_x_mm=-2.) == 'stopped'
+    assert 'open' not in calls
 
 
 def test_lift_at_the_given_speed(monkeypatch):
@@ -80,6 +114,14 @@ def test_base_lift_waits_its_open_time_on_fast_reports(monkeypatch):
     assert calls == ['connect', 'open', 'enable', 'close'] and bp.XArm6Robot.report_types[-1] == 'real'
     # 1.5 s open wait, 60 mm at 150 mm/s plus 0.3 s of ramps, then the 0.1 s measured arrival
     assert 1.5 + .06 / .15 + .3 + .1 - .05 <= stop.now < 1.5 + .06 / .15 + .3 + .1 + .1
+
+
+def test_bad_shift_is_refused_before_connecting(monkeypatch):
+    stop = ClockStop()
+    calls, commands = setup_release(monkeypatch, stop)
+    with pytest.raises(ValueError, match='shift_x_mm'):
+        pp.release_and_lift(InferenceConfig(), execute=True, stop=stop, shift_x_mm=float('nan'))
+    assert not calls and not commands
 
 
 @pytest.mark.parametrize('open_wait_sec', [-1., float('nan')])

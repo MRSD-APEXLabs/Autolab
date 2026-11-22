@@ -20,6 +20,10 @@ public:
     return true;
   }
 
+  // Checked before the controller manager activates anything: it activates controllers even
+  // when the later switch_claims() fails, so a refusal has to come before that.
+  bool may_claim(uint32_t started) const { return !started || !(state_.load() & SDK); }
+
   bool acquire()
   {
     uint32_t expected = 0;

@@ -42,7 +42,8 @@ Each target has its own placing policy (`ckpt_dir` for OT-2, `shaker_ckpt_dir`, 
 loaded and warmed up once, at startup. Each run switches the camera hub to the Nano (`select_service`), reads
 its rectified image and depth from the zedx_nano_depth topics (camera_source ros), connects to the arm, runs
 up to `duration_sec` and closes the arm again. OT-2/shaker first align yaw to 90 degrees (their demos end
-there), then open the gripper and lift 100 mm (25 mm/s) after a successful policy run. Shaker moves at
+there), then open the gripper and lift 100 mm (25 mm/s) after a successful policy run; OT-2 first moves the
+closed gripper 2 mm along base -X (OT2_RELEASE_SHIFT_X_MM). Shaker moves at
 `shaker_approach_speed` (1.5 mm/s) below `shaker_slow_below_z_mm` (110 mm TCP height, ~47 mm above the clamp seat),
 so the plate reaches the clamp's bounds slowly. Base first moves straight to
 `base_start_pose_mm_deg` (~80 mm above the bracket at yaw ~0, where its demos started) instead of aligning
@@ -90,12 +91,13 @@ from .robot import XArm6Robot
 STATUS_QOS = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 MODELS = Path(__file__).resolve().parents[1] / 'models'
 TARGETS = ('ot2', 'shaker', 'base')
-DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_all_20261105b',
-                 'shaker': MODELS / 'xarm6_shaker_act_ft_vg_20261120',
+DEFAULT_CKPTS = {'ot2': MODELS / 'xarm6_placing_act_ft_vg_tilt_20261121',
+                 'shaker': MODELS / 'xarm6_shaker_act_ft_vg_tilt_strict_20261121',
                  'base': MODELS / 'xarm6_base_act_ft_20261108b'}
 DEFAULT_CKPT = DEFAULT_CKPTS['ot2']
 BASE_LIFT_MM = 60.0
 ACT_LIFT_SPEED_MM_S = 25.0   # OT-2/shaker lift after the policy (2.5x the ACT translation_speed default, 10)
+OT2_RELEASE_SHIFT_X_MM = -2.0   # OT-2: move the closed gripper this far along base X after the policy, then open
 # BasePlacementConfig approach, lift and F/T seating fields, exposed as base_<name> parameters.
 BASE_SEATING_PARAMS = {'approach_speed_mm_s': float, 'approach_clearance_mm': float, 'lift_speed_mm_s': float,
                        'accel_mm_s2': float, 'open_wait_sec': float,
@@ -355,6 +357,8 @@ class ActInferenceNode(Node):
         if stop.is_set():
             return 'stopped'
         lift = base_lift_args(self.base_placement) if target == 'base' else {'speed_mm_s': ACT_LIFT_SPEED_MM_S}
+        if target == 'ot2':
+            lift['shift_x_mm'] = OT2_RELEASE_SHIFT_X_MM
         return self._post_placement_fn(self.config, execute=self.rollout.execute, stop=stop, **lift)
 
     def _jog(self, stop, move):

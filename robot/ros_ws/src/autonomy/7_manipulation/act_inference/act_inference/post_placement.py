@@ -8,8 +8,12 @@ from .robot import XArm6Robot
 
 
 def release_and_lift(config, execute=False, stop=None, *, lift_mm=100.0, speed_mm_s=None, accel_mm_s2=None,
-                     open_wait_sec=4.0, report_type='rich', arrival_sec=.3):
-    """Open once, allow `open_wait_sec` for jaw travel, then lift along base-frame +Z.
+                     open_wait_sec=4.0, report_type='rich', arrival_sec=.3, shift_x_mm=0.0):
+    """Optionally shift along base-frame X, open once, allow `open_wait_sec` for jaw travel, then lift along
+    base-frame +Z.
+
+    `shift_x_mm` (non-zero): before opening, move the closed gripper that far along base-frame X, holding Y, Z and
+    orientation, at the configured ACT translation speed (or the lift speed if lower), until measured arrival.
 
     Hold XY/orientation and lift at `speed_mm_s` (None: the configured ACT translation limit), speeding up and
     slowing down at `accel_mm_s2` (None: full speed at once), until the measured TCP has held the top for
@@ -24,6 +28,8 @@ def release_and_lift(config, execute=False, stop=None, *, lift_mm=100.0, speed_m
         raise ValueError('Post-placement accel_mm_s2 must be finite and positive')
     if not math.isfinite(open_wait_sec) or open_wait_sec < 0:
         raise ValueError('Post-placement open_wait_sec must be finite and non-negative')
+    if not math.isfinite(shift_x_mm):
+        raise ValueError('Post-placement shift_x_mm must be finite')
     stop = stop if stop is not None else threading.Event()
     if stop.is_set():
         return 'stopped'
@@ -34,12 +40,25 @@ def release_and_lift(config, execute=False, stop=None, *, lift_mm=100.0, speed_m
         robot.initialize_target_pose()
         if stop.is_set():
             return 'stopped'
+        shift_motion = replace(motion, translation_speed=min(motion.translation_speed,
+                                                             config.motion.translation_speed))
         print(f'Post-placement {"EXECUTE" if execute else "PREDICTION ONLY"}: '
-              f'open gripper, wait {open_wait_sec:g} s, lift {lift_mm:g} mm along base +Z at '
+              + (f'move {shift_x_mm:+g} mm along base X at {shift_motion.translation_speed * 1000:g} mm/s, '
+                 if shift_x_mm else '')
+              + f'open gripper, wait {open_wait_sec:g} s, lift {lift_mm:g} mm along base +Z at '
               f'{motion.translation_speed * 1000:g} mm/s'
               + (f' ({accel_mm_s2:g} mm/s^2 ramps)' if accel_mm_s2 is not None else ''), flush=True)
         if not execute:
             return 'done'
+        if shift_x_mm:
+            start = robot.initialize_target_pose()
+            shifted = start.copy()
+            shifted[0] += shift_x_mm / 1000
+            robot.enable()
+            result = _move_goals(robot, start, (shifted,), shift_motion, stop, 10.0, 'Pre-release X shift',
+                                 arrival_sec=arrival_sec)
+            if result != 'done' or stop.is_set():
+                return 'stopped' if stop.is_set() else result
         robot.open_gripper()
         if stop.wait(open_wait_sec):
             return 'stopped'

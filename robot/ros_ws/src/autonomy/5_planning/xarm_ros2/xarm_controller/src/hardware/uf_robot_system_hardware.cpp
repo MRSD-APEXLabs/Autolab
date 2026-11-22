@@ -375,19 +375,45 @@ namespace uf_robot_hardware
         return hardware_interface::return_type::OK;
     }
 
-    hardware_interface::return_type UFRobotSystemHardware::perform_command_mode_switch(
+    void UFRobotSystemHardware::claim_bits_(
         const std::vector<std::string>& start_interfaces,
-        const std::vector<std::string>& stop_interfaces)
+        const std::vector<std::string>& stop_interfaces,
+        uint32_t& started, uint32_t& stopped) const
     {
-        unsigned int stopped = 0, started = 0;
+        started = 0;
+        stopped = 0;
         for (size_t i = 0; i < info_.joints.size(); ++i) {
             for (size_t kind = 0; kind < 2; ++kind) {
                 const std::string command = info_.joints[i].name + (kind ? "/velocity" : "/position");
-                const unsigned int bit = 1u << (i + 7 * kind);
+                const uint32_t bit = 1u << (i + 7 * kind);
                 for (const auto& name : stop_interfaces) if (name == command) stopped |= bit;
                 for (const auto& name : start_interfaces) if (name == command) started |= bit;
             }
         }
+    }
+
+    // controller_manager 2.x activates the controllers even when perform_command_mode_switch()
+    // fails, which left the trajectory controller active with its commands dropped while an SDK
+    // client held the arm (2026-11-21). A refusal here aborts the switch before any activation.
+    hardware_interface::return_type UFRobotSystemHardware::prepare_command_mode_switch(
+        const std::vector<std::string>& start_interfaces,
+        const std::vector<std::string>& stop_interfaces)
+    {
+        uint32_t started, stopped;
+        claim_bits_(start_interfaces, stop_interfaces, started, stopped);
+        if (!command_gate_.may_claim(started)) {
+            RCLCPP_ERROR(LOGGER, "Cannot start ROS arm controllers while SDK owns the arm");
+            return hardware_interface::return_type::ERROR;
+        }
+        return hardware_interface::return_type::OK;
+    }
+
+    hardware_interface::return_type UFRobotSystemHardware::perform_command_mode_switch(
+        const std::vector<std::string>& start_interfaces,
+        const std::vector<std::string>& stop_interfaces)
+    {
+        uint32_t started, stopped;
+        claim_bits_(start_interfaces, stop_interfaces, started, stopped);
         return command_gate_.switch_claims(stopped, started) ?
             hardware_interface::return_type::OK : hardware_interface::return_type::ERROR;
     }

@@ -9,6 +9,7 @@
 
   <depend>rclpy</depend>
   <depend>behavior_tree_msgs</depend>
+  <depend>nav_msgs</depend>
 
   <test_depend>python3-pytest</test_depend>
 

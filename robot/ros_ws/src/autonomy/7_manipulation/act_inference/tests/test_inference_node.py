@@ -95,7 +95,8 @@ def test_policy_then_release_only_on_success(outcome, target):
         stages.append(f'release/lift {kwargs.get("lift_mm", 100.0):g}'
                       + (f' at {kwargs["speed_mm_s"]:g}' if 'speed_mm_s' in kwargs else '')
                       + (f' ramp {kwargs["accel_mm_s2"]:g}' if 'accel_mm_s2' in kwargs else '')
-                      + (f' wait {kwargs["open_wait_sec"]:g} {kwargs["report_type"]}' if 'open_wait_sec' in kwargs else ''))
+                      + (f' wait {kwargs["open_wait_sec"]:g} {kwargs["report_type"]}' if 'open_wait_sec' in kwargs else '')
+                      + (f' shift x {kwargs["shift_x_mm"]:g}' if 'shift_x_mm' in kwargs else ''))
         return 'done'
 
     node = SimpleNamespace(config=None, rollout=SimpleNamespace(execute=True),
@@ -113,7 +114,9 @@ def test_policy_then_release_only_on_success(outcome, target):
     # Base moves to its start pose (no 90 degree yaw alignment) and lifts 60 mm.
     expected = (['start pose'] if target == 'base' else ['yaw']) + ['policy']
     if outcome == 'done':
-        expected.append('release/lift 60 at 40 ramp 500 wait 1.5 real' if target == 'base' else 'release/lift 100 at 25')
+        expected.append({'base': 'release/lift 60 at 40 ramp 500 wait 1.5 real',
+                         'ot2': 'release/lift 100 at 25 shift x -2',
+                         'shaker': 'release/lift 100 at 25'}[target])
     assert stages == expected
 
 
@@ -153,7 +156,7 @@ def test_start_stop_and_status_over_ros(target):
         aligned.append('start pose')
         return 'done'
 
-    checkpoints = {'ot2': 'xarm6_placing_act_ft_all_20261105b', 'shaker': 'xarm6_shaker_act_ft_vg_20261120',
+    checkpoints = {'ot2': 'xarm6_placing_act_ft_vg_tilt_20261121', 'shaker': 'xarm6_shaker_act_ft_vg_tilt_strict_20261121',
                    'base': 'xarm6_base_act_ft_20261108b'}
 
     def rollout(config, rollout_config, policy, stop):
@@ -178,7 +181,7 @@ def test_start_stop_and_status_over_ros(target):
                                                  rclpy.parameter.Parameter('base_mode', value='policy'),
                                                  rclpy.parameter.Parameter('select_service', value='')])
     client_node = rclpy.create_node('act_client', namespace=namespace)
-    assert node.ckpt_dir.name == 'xarm6_placing_act_ft_all_20261105b'
+    assert node.ckpt_dir.name == 'xarm6_placing_act_ft_vg_tilt_20261121'
     assert {t: d.name for t, d in node.ckpt_dirs.items()} == checkpoints and node.base_mode == 'policy'
     assert all(d.is_dir() for d in node.ckpt_dirs.values())
     assert node.rollout.duration_sec == 60 and node.rollout.enable_rotation

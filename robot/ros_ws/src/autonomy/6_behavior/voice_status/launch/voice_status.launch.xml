@@ -1,0 +1,16 @@
+<launch>
+    <!-- voice_dir: Piper binary + voice from fetch_voice.sh (git-ignored) -->
+    <arg name="voice_dir" default="/home/robot/AutoLab/robot/ros_ws/src/autonomy/6_behavior/voice_status/voice" />
+    <!-- device: HDMI 0 on the Jetson; plughw converts Piper's 22.05 kHz mono to what the sink takes -->
+    <arg name="device" default="plughw:CARD=HDA,DEV=3" />
+    <!-- voice: a model name in voice_dir (pick one with `ros2 run voice_status audition`) -->
+    <arg name="voice" default="en_US-ljspeech-high" />
+    <!-- length_scale: speaking pace, 1.0 = the voice's normal speed, larger = slower -->
+    <arg name="length_scale" default="1.3" />
+    <node pkg="voice_status" exec="voice_status" output="screen">
+        <param name="voice_dir" value="$(var voice_dir)" />
+        <param name="device" value="$(var device)" />
+        <param name="voice" value="$(var voice)" />
+        <param name="length_scale" value="$(var length_scale)" />
+    </node>
+</launch>

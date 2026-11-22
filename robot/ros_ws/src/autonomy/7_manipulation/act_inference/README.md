@@ -7,15 +7,19 @@ weighted x4):
 
 | target | checkpoint | demos | held-out check (80:20 run, median end error) |
 |---|---|---|---|
-| `ot2` | `models/xarm6_placing_act_ft_all_20261105b/` | 103, 11000 steps | 1.34 mm |
-| `shaker` | `models/xarm6_shaker_act_ft_vg_20261120/` | 82 (about 8 base parking spots + 33 at newer spots), 30000 steps; RGB + F/T (no depth), trained with virtual-grasp augmentation (frames re-rendered as if the plate sat up to 4 mm elsewhere in the gripper) | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
+| `ot2` | `models/xarm6_placing_act_ft_vg_tilt_20261121/` | 103, 70000 steps; RGB + F/T (no depth), trained with the shaker model's virtual-grasp augmentation (frames re-rendered as if the plate sat up to 4 mm elsewhere in the gripper or turned up to 3 degrees in it, plus corrective offsets of up to 3 mm and turns of up to 3 degrees in yaw and 2 degrees in roll/pitch) | 1.34 mm for the RGB-D version without augmentation |
+| `shaker` | `models/xarm6_shaker_act_ft_vg_tilt_strict_20261121/` | 54 of the 82 (only demos with no wall/rim contact or >2 N touch more than 8 mm above the seat, no press >25 N), 45000 steps; RGB + F/T (no depth), trained with virtual-grasp augmentation (frames re-rendered as if the plate sat up to 4 mm elsewhere in the gripper or turned up to 3 degrees in it, plus corrective turns of up to 3 degrees in yaw and 2 degrees in roll/pitch, which stop the gripper tilting during a run) | 0.92 mm (x/y 0.19, height 0.66) for the 49-demo version |
 | `base` | `models/xarm6_base_act_ft_20261108b/` | 43 (robot base deck bracket; 4 started at the base start pose), 4500 steps | 1.42 mm (x/y 0.74, height 0.84) for the 39-demo version |
 
 The ROS node and the wrapper scripts default to these. The previous OT-2 checkpoints
+`models/xarm6_placing_act_ft_all_20261105b/` (the same 103 demonstrations, RGB-D, no grasp augmentation, 11000 steps),
 `models/xarm6_placing_act_ft_all_20261105/` (8000 steps, 75 demonstrations),
 `models/xarm6_placing_act_ft_20261029/` (step 2000, 67 demonstrations) and
 `models/xarm_final_ckpt_placing/` remain available by explicit path.
-The previous shaker checkpoints `models/xarm6_shaker_act_ft_20261120/` (the same 82 demonstrations, RGB-D, no grasp augmentation,
+The previous shaker checkpoints `models/xarm6_shaker_act_ft_vg_rot_strict_20261121/` (the same 54 demonstrations, without the
+roll/pitch corrections), `models/xarm6_shaker_act_ft_vg_strict_20261121/` (the same 54 demonstrations, grasp shifts only,
+20000 steps), `models/xarm6_shaker_act_ft_vg_20261120/` (all 82 demonstrations, grasp shifts only,
+30000 steps), `models/xarm6_shaker_act_ft_20261120/` (82 demonstrations, RGB-D, no grasp augmentation,
 11000 steps), `models/xarm6_shaker_act_ft_20261113/` (77 demonstrations, 10500 steps),
 `models/xarm6_shaker_act_ft_20261110/` (66, 9000 steps), `models/xarm6_shaker_act_ft_20261108c/` (59, 8000 steps), `models/xarm6_shaker_act_ft_20261108b/` (54, 7500 steps) and
 `models/xarm6_shaker_act_ft_20261108/` (49, 6500 steps) are kept too, and so is the previous base
@@ -106,7 +110,10 @@ sustained contact. `/stop` also interrupts initial inference and any final-offse
 
 ## OT-2/shaker release and retreat
 
-After the ACT rollout returns `done`, the node opens the custom gripper (Modbus device
+After the ACT rollout returns `done`, OT-2 runs first move the still-closed gripper **2 mm along
+robot base-frame -X** (`OT2_RELEASE_SHIFT_X_MM` in node.py), holding Y, Z and orientation, at the
+ACT `translation_speed`, until the measured TCP arrives (10 s limit; `/act_inference/stop` or a
+timeout leaves the gripper closed). Shaker runs skip this. The node then opens the custom gripper (Modbus device
 0x08, setpoint 0 at 57600 baud), waits **4 seconds** for jaw travel, then moves **100 mm up
 along robot base-frame +Z**, holding XY and orientation, at **25 mm/s** (`ACT_LIFT_SPEED_MM_S`
 in node.py), independently of the ACT `translation_speed` and of base-placement speed.

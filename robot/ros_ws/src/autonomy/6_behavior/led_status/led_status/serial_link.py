@@ -1,6 +1,7 @@
 """Serial link to the underglow Nano (led/robot_status firmware). No ROS dependency.
 
-The firmware takes one status letter per line at 115200 baud (see led/robot_status/README.md).
+The firmware takes one status letter per line at 115200 baud, or a "V<vx>,<vy>,<turn>" navigation command
+(see led/robot_status/README.md).
 """
 
 import glob
@@ -107,7 +108,10 @@ class LedLink:
         self._port = None
         self._next_open_t = now + self._retry_s
 
-    def update(self, letter, now):
+    def update(self, letter, now, resend_s=None):
+        """Send `letter` (a status letter or a whole command such as "V120,0,0") if it changed or `resend_s`
+        (default: the link's resend_s) has passed since it was last sent."""
+        resend_s = self._resend_s if resend_s is None else resend_s
         if self._port is None:
             if self._next_open_t is not None and now < self._next_open_t:
                 return
@@ -121,7 +125,7 @@ class LedLink:
             self._sent = None
         if now < self._ready_t:
             return
-        if letter == self._sent and now - self._sent_t < self._resend_s:
+        if letter == self._sent and now - self._sent_t < resend_s:
             return
         try:
             self._port.write((letter + '\n').encode('ascii'))
