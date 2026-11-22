@@ -12,6 +12,7 @@ def make_node():
     sm.acknowledge_dispatch()
     logger = SimpleNamespace(info=lambda message: None, warn=lambda message: None)
     return SimpleNamespace(_sm=sm, _listening=True, _seen_running=False,
+                           _last_status_id={}, _dispatch_status_id=None,
                            get_logger=lambda: logger)
 
 
@@ -66,3 +67,35 @@ def test_zero_retries_fails_on_first_attempt():
     feedback(node, Status.FAILURE)
     assert node._sm.state == 'failed'
     assert node._sm.retry_count == 0
+
+
+def status_with_id(node, status, status_id):
+    RoutineExecutorNode._on_action_status(node, Status(status=status, id=status_id), 'pick')
+
+
+def test_success_from_a_new_activation_counts_even_if_running_was_missed():
+    # A quick command (the shaker stop) can go RUNNING -> SUCCESS inside the 100 ms deaf
+    # window after dispatch; its SUCCESS carries the BT's new activation id.
+    node = make_node()
+    node._dispatch_status_id = 4
+    status_with_id(node, Status.SUCCESS, 5)
+    assert node._sm.state == 'success'
+
+
+def test_stale_success_with_the_dispatch_id_is_still_ignored():
+    node = make_node()
+    node._dispatch_status_id = 4
+    for _ in range(20):
+        status_with_id(node, Status.SUCCESS, 4)  # previous command's result, re-broadcast
+    assert node._sm.state == 'running'
+    status_with_id(node, Status.RUNNING, 5)
+    status_with_id(node, Status.SUCCESS, 5)
+    assert node._sm.state == 'success'
+
+
+def test_status_id_is_tracked_even_while_not_listening():
+    node = make_node()
+    node._listening = False
+    status_with_id(node, Status.SUCCESS, 7)
+    assert node._last_status_id == {'pick': 7}
+    assert node._sm.state == 'running'

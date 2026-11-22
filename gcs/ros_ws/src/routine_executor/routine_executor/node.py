@@ -39,6 +39,8 @@ class RoutineExecutorNode(Node):
         self._robot = 'robot_1'
         self._listening = False    # ignore status msgs until after command is published
         self._seen_running = False  # ignore FAILURE until action has reported RUNNING
+        self._last_status_id: dict = {}  # step_name -> latest Status.id (BT activation id)
+        self._dispatch_status_id = None  # that id when the current command was sent
         self._listen_timer = None
         self._wait_timer = None     # a wait step's timer, or a timed shaker step's hold
         self._shaker = ShakerPhase()
@@ -277,6 +279,8 @@ class RoutineExecutorNode(Node):
             self.get_logger().warn(f'Skip received but state is {self._sm.state}')
 
     def _on_action_status(self, msg: Status, step_name: str) -> None:
+        # Tracked on every message: the id the BT gave the action's latest activation.
+        self._last_status_id[step_name] = msg.id
         if self._sm.state not in ('running', 'paused'):
             return
         if step_name != self._sm.current_step_name():
@@ -284,9 +288,16 @@ class RoutineExecutorNode(Node):
         if not self._listening:
             return  # ignore stale messages published before this step started
 
+        # A terminal status belongs to this attempt once RUNNING was heard, or once its id differs
+        # from the one before dispatch (the BT re-activated the action). The id check matters when
+        # RUNNING is too brief to hear: the shaker stop is one quick HTTP call, so RUNNING could
+        # come and go inside the 100 ms deaf window and the SUCCESS was then ignored forever.
+        fresh = self._seen_running or (
+            self._dispatch_status_id is not None and msg.id != self._dispatch_status_id)
+
         if msg.status == Status.RUNNING:
             self._seen_running = True
-        elif msg.status == Status.SUCCESS and self._seen_running:
+        elif msg.status == Status.SUCCESS and fresh:
             if step_name == 'shaker' and self._shaker.on_success(self._sm.current_step()) == 'hold':
                 self._listening = False
                 self._seen_running = False
@@ -296,7 +307,7 @@ class RoutineExecutorNode(Node):
             self._sm.on_success()
             self._listening = False
             self._seen_running = False
-        elif msg.status == Status.FAILURE and self._seen_running:
+        elif msg.status == Status.FAILURE and fresh:
             # Status is broadcast repeatedly. Consume this attempt's terminal
             # result once, then wait for a new dispatch/RUNNING before counting
             # another failure. Otherwise one failed plan exhausts every retry.
@@ -355,6 +366,7 @@ class RoutineExecutorNode(Node):
 
         self._listening = False
         self._seen_running = False
+        self._dispatch_status_id = self._last_status_id.get(self._sm.current_step_name())
 
         # One-shot timer: enable listening after 100ms
         if self._listen_timer is not None and not self._listen_timer.is_canceled():
