@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <future>
 #include <string>
 #include <vector>
@@ -45,6 +46,9 @@ class LabMachineExecutive : public rclcpp::Node {
     std::future<bool> pending_http_; // in-flight HTTP call
     bool http_in_flight_;
     std::string ot2_run_id_;       // names this protocol run's tip-check results
+    // Timer-gap watchdog: the BT drops a condition whose status is older than its timeout (1 s),
+    // so a stall of this node's 20 Hz timer is logged with its length.
+    std::chrono::steady_clock::time_point last_tick_{};
 
     // ── ROS2 params ───────────────────────────────────────────────────────────
     std::string ot2_base_url_;

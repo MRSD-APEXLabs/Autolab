@@ -132,6 +132,8 @@ class Action {
     bool is_failure();
 
     std::string get_label();
+    // Id of the latest Active message: the BT bumps it on every new activation.
+    uint64_t get_id() const;
 
     void publish();
 };

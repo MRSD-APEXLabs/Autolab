@@ -300,6 +300,18 @@ bool LabMachineExecutive::connect_ot2() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void LabMachineExecutive::timer_callback() {
+    // Watchdog: conditions/statuses are only published here, and the BT drops any that are older
+    // than its timeout (1 s). Say how long the timer did not run so a stall can be traced.
+    const auto now = std::chrono::steady_clock::now();
+    if (last_tick_.time_since_epoch().count() != 0) {
+        const double gap = std::chrono::duration<double>(now - last_tick_).count();
+        if (gap > 0.5)
+            RCLCPP_WARN(this->get_logger(),
+                        "Timer stalled %.2fs (expected 0.05s) — BT conditions went %s",
+                        gap, gap > 1.0 ? "stale" : "late");
+    }
+    last_tick_ = now;
+
     tick_ot2();
     tick_shaker();
 
@@ -312,8 +324,24 @@ void LabMachineExecutive::timer_callback() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void LabMachineExecutive::tick_ot2() {
+    static const char* const PHASE_NAMES[] = {"idle", "connecting", "stepping", "homing"};
+    const char* phase_name = PHASE_NAMES[static_cast<int>(ot2_phase_)];
+
     if (!ot2_action_->is_active()) {
         if (ot2_action_->active_has_changed()) {
+            RCLCPP_INFO(this->get_logger(), "OT-2 action deactivated (BT id %lu, step %d, %s%s)",
+                        static_cast<unsigned long>(ot2_action_->get_id()), ot2_current_step_,
+                        phase_name, ot2_terminal_ ? ", finished" : "");
+            if (ot2_phase_ != OT2Phase::IDLE && !ot2_terminal_) {
+                // Not a stop: the BT drops an action whose conditions went stale past its timeout,
+                // then re-activates it (ot2_condition_ is still true). Resetting here re-ran the
+                // protocol from pick_up_tips with the tip still on (HasTipError). The wrapper call
+                // in flight cannot be cancelled anyway, so keep the run and resume on re-activation.
+                RCLCPP_WARN(this->get_logger(),
+                            "OT-2 run interrupted mid-protocol — keeping it, will resume at step %d",
+                            ot2_current_step_);
+                return;
+            }
             ot2_current_step_ = 0;
             ot2_phase_        = OT2Phase::IDLE;
             ot2_terminal_     = false;
@@ -323,6 +351,31 @@ void LabMachineExecutive::tick_ot2() {
     }
 
     if (ot2_terminal_) return;
+
+    if (ot2_action_->active_has_changed())
+        RCLCPP_INFO(this->get_logger(), "OT-2 action activated (BT id %lu, step %d, %s)",
+                    static_cast<unsigned long>(ot2_action_->get_id()), ot2_current_step_,
+                    phase_name);
+
+    // ── Re-activation of an interrupted run: carry on where it was ──────────────
+    if (ot2_action_->active_has_changed() && ot2_phase_ != OT2Phase::IDLE) {
+        RCLCPP_WARN(this->get_logger(), "OT-2 run resumed at step %d (%s)", ot2_current_step_,
+                    phase_name);
+        ot2_action_->set_running();
+        return;
+    }
+
+    // A worker that throws must fail the run, not escape the timer callback and kill the node.
+    auto take_result = [this]() {
+        try {
+            return pending_http_.get();
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "OT-2 worker threw: %s", e.what());
+        } catch (...) {
+            RCLCPP_ERROR(this->get_logger(), "OT-2 worker threw an unknown exception");
+        }
+        return false;
+    };
 
     // ── New activation: parse protocol then connect ───────────────────────────
     if (ot2_action_->active_has_changed()) {
@@ -362,7 +415,7 @@ void LabMachineExecutive::tick_ot2() {
     // ── CONNECTING ────────────────────────────────────────────────────────────
     if (ot2_phase_ == OT2Phase::CONNECTING) {
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 connect failed — FAILURE");
@@ -406,7 +459,7 @@ void LabMachineExecutive::tick_ot2() {
             return;
         }
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(),
@@ -427,7 +480,7 @@ void LabMachineExecutive::tick_ot2() {
     // ── HOMING ────────────────────────────────────────────────────────────────
     if (ot2_phase_ == OT2Phase::HOMING) {
         if (pending_http_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-            bool ok = pending_http_.get();
+            bool ok = take_result();
             http_in_flight_ = false;
             if (!ok) {
                 RCLCPP_ERROR(this->get_logger(), "OT-2 home failed — FAILURE");
@@ -501,7 +554,16 @@ nlohmann::json LabMachineExecutive::run_tip_check(const std::string& label, int 
     client.on_progress([this, index](const nlohmann::json& p) {
         publish_ot2_progress("tip_check", index, p);
     });
-    return client.run(label);
+    const auto started = std::chrono::steady_clock::now();
+    nlohmann::json result = client.run(label);
+    const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const std::string outcome = result.is_object() && result.contains("status") &&
+                                        result["status"].is_string()
+                                    ? result["status"].get<std::string>()
+                                    : "no result";
+    RCLCPP_INFO(this->get_logger(), "Tip check for step %d finished in %.1fs (%s)", index, took,
+                outcome.c_str());
+    return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -128,6 +128,8 @@ bool Action::is_failure() { return status.status == behavior_tree_msgs::msg::Sta
 
 std::string Action::get_label() { return label; }
 
+uint64_t Action::get_id() const { return current_id; }
+
 void Action::publish() {
     status.id = current_id;
     status_pub->publish(status);
