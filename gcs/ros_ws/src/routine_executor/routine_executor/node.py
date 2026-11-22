@@ -383,7 +383,10 @@ class RoutineExecutorNode(Node):
             return
 
         if step_name == 'shaker':
-            msg = make_shaker_msg(self._shaker.dispatch_pwm(self._sm.current_step_idx, step))
+            pwm = self._shaker.dispatch_pwm(self._sm.current_step_idx, step)
+            msg = make_shaker_msg(pwm)
+            # The UI's shaker panel: starting -> hold (timed, with a progress bar) -> stopping.
+            self._sm.set_step_progress({'machine': 'shaker', 'phase': 'starting' if pwm else 'stopping'})
         else:
             msg = config['make_msg'](step)
         self._sm.acknowledge_dispatch()
@@ -419,6 +422,8 @@ class RoutineExecutorNode(Node):
         if self._wait_timer is not None and not self._wait_timer.is_canceled():
             self._wait_timer.cancel()
         self._wait_timer = self.create_timer(hold_s, self._on_shaker_hold_complete)
+        self._sm.start_timed_phase('shaker', 'hold', hold_s)
+        self._publish_status()
         self.get_logger().info(f'Shaker running; stopping it in {hold_s}s')
 
     def _on_shaker_hold_complete(self) -> None:
@@ -426,6 +431,7 @@ class RoutineExecutorNode(Node):
         self._wait_timer.cancel()
         self._wait_timer = None
         self._shaker.on_hold_done()
+        self._sm.set_step_progress({'machine': 'shaker', 'phase': 'stopping'})
         self._publish_and_listen(STEPS['shaker'], make_shaker_msg(0))
         self.get_logger().info('Shaker hold complete; sent PWM 0')
 

@@ -1,10 +1,12 @@
+import time
+
 _ACTIVE = frozenset({'running', 'paused'})
 
 
 class RoutineStateMachine:
     """Pure state machine — no ROS2 dependency. Tracks routine execution progress."""
 
-    def __init__(self, steps: list, max_retries: int = 3, no_retry=frozenset()):
+    def __init__(self, steps: list, max_retries: int = 3, no_retry=frozenset(), clock=time.monotonic):
         self.steps = list(steps)  # list[dict], each dict has at least {'name': str}
         self.max_retries = max_retries
         # Step names that are never re-sent: a failure ends the run, and an operator retry
@@ -20,6 +22,13 @@ class RoutineStateMachine:
         # how far the tip check is), tagged with the routine step it belongs to. None when unknown.
         self.step_progress = None
         self.skipped_steps = []      # indices the operator skipped after they failed
+        self._clock = clock
+        # Run clock: set on start, frozen while the run is over (success / failed), so the UI
+        # shows how long the routine has been going. A retry or skip resumes it.
+        self._started_at = None
+        self._ended_at = None
+        # When the current timed phase (step_progress with duration_s) began.
+        self._phase_started_at = None
 
     def start(self):
         if self.state in _ACTIVE:
@@ -31,6 +40,8 @@ class RoutineStateMachine:
         self.needs_dispatch = True
         self.step_progress = None
         self.skipped_steps = []
+        self._started_at = self._clock()
+        self._ended_at = None
 
     def pause(self):
         if self.state != 'running':
@@ -58,6 +69,7 @@ class RoutineStateMachine:
         self.step_progress = None
         if self.current_step_idx >= len(self.steps):
             self.state = 'success'
+            self._ended_at = self._clock()
             self.needs_dispatch = False
         else:
             self.needs_dispatch = True
@@ -67,6 +79,7 @@ class RoutineStateMachine:
             return
         if self._current_is_no_retry():
             self.state = 'failed'
+            self._ended_at = self._clock()
             self.error = (
                 f"Step '{self.current_step_name()}' failed and was not retried: it handles liquid, "
                 'so the tip may still hold liquid. Inspect the machine before retrying.'
@@ -76,6 +89,7 @@ class RoutineStateMachine:
         # max_retries counts re-dispatches after the initial attempt.
         if self.retry_count >= self.max_retries:
             self.state = 'failed'
+            self._ended_at = self._clock()
             self.error = (
                 f"Step '{self.current_step_name()}' failed after {self.max_retries} retries"
             )
@@ -89,6 +103,7 @@ class RoutineStateMachine:
         if self.state not in _ACTIVE:
             return
         self.state = 'failed'
+        self._ended_at = self._clock()
         self.error = 'cancelled'
         self.needs_dispatch = False
 
@@ -110,6 +125,7 @@ class RoutineStateMachine:
         if self._retry_needs_force() and not force:
             return False
         self.state = 'running'
+        self._ended_at = None
         self.retry_count = 0
         self.error = None
         self.needs_dispatch = True
@@ -126,12 +142,14 @@ class RoutineStateMachine:
             return False
         self.skipped_steps.append(self.current_step_idx)
         self.state = 'running'
+        self._ended_at = None
         self.retry_count = 0
         self.error = None
         self.step_progress = None
         self.current_step_idx += 1
         if self.current_step_idx >= len(self.steps):
             self.state = 'success'
+            self._ended_at = self._clock()
             self.needs_dispatch = False
         else:
             self.needs_dispatch = True
@@ -161,6 +179,32 @@ class RoutineStateMachine:
         self.step_progress = {**progress, 'step': self.current_step_idx}
         return True
 
+    def start_timed_phase(self, machine: str, phase: str, duration_s: float) -> bool:
+        """Begin a phase of known length in the current step (e.g. the shaker hold).
+
+        step_progress becomes {machine, phase, duration_s, step}; to_dict adds elapsed_s to it.
+        """
+        if not self.set_step_progress({'machine': machine, 'phase': phase,
+                                       'duration_s': float(duration_s)}):
+            return False
+        self._phase_started_at = self._clock()
+        return True
+
+    def elapsed_s(self):
+        """Seconds since the run started (frozen once it ended), or None before any run."""
+        if self._started_at is None:
+            return None
+        end = self._ended_at if self._ended_at is not None else self._clock()
+        return max(0.0, end - self._started_at)
+
+    def _progress_dict(self):
+        progress = self.step_progress
+        if not progress or 'duration_s' not in progress or self._phase_started_at is None:
+            return progress
+        end = self._ended_at if self._ended_at is not None else self._clock()
+        elapsed = min(max(0.0, end - self._phase_started_at), progress['duration_s'])
+        return {**progress, 'elapsed_s': round(elapsed, 2)}
+
     def acknowledge_dispatch(self):
         self.needs_dispatch = False
 
@@ -179,6 +223,7 @@ class RoutineStateMachine:
             'error': self.error,
             'recordings': list(self.recordings),
             'retry_needs_force': self._retry_needs_force(),
-            'step_progress': self.step_progress,
+            'step_progress': self._progress_dict(),
             'skipped_steps': list(self.skipped_steps),
+            'elapsed_s': None if self.elapsed_s() is None else round(self.elapsed_s(), 2),
         }
