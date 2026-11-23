@@ -3,7 +3,7 @@
 // check (anomaly detection) should find right after the aspirate. Tubes and tips: shared/tips.js.
 import { EMPTY_TUBE, TIP_FOR_EMPTY_TUBE, TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './tips';
 
-const TUBE_WITH_LIQUID = TUBE_FOR_LIQUID.brown; // A2, brown: easy for the tip camera to see in the tip
+const TUBE_WITH_LIQUID = TUBE_FOR_LIQUID.red; // A1, red: easy for the tip camera to see in the tip
 
 function experiment(tube, tip) {
   return {
@@ -39,15 +39,15 @@ export const PRESETS = [
   {
     id: 'normal',
     title: 'No anomaly',
-    blurb: 'Aspirates 200 µL from tube A2 (brown liquid). The clog check should see liquid in the tip.',
+    blurb: 'Aspirates 200 µL from tube A1 (red liquid). The clog check should see liquid in the tip.',
     expect: 'Liquid in tip',
     tone: 'ok',
-    routine: experiment(TUBE_WITH_LIQUID, TIP_FOR_LIQUID.brown),
+    routine: experiment(TUBE_WITH_LIQUID, TIP_FOR_LIQUID.red),
   },
   {
     id: 'anomaly',
     title: 'Anomaly',
-    blurb: 'Aspirates from tube A3 (listed as red), which is empty. The tip comes up dry and the clog check should flag it.',
+    blurb: 'Aspirates from slot A3 (listed as blue), which has no tube. The tip comes up dry and the clog check should flag it.',
     expect: 'Clog suspected',
     tone: 'bad',
     routine: experiment(EMPTY_TUBE, TIP_FOR_EMPTY_TUBE),

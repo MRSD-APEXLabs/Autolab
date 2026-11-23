@@ -512,7 +512,7 @@ OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5}
 
 def _checked(action):
     """Whether lab_machine_executive runs the tip check after this command: every aspirate
-    unless it has "tip_check": false (e.g. clear liquid the tip camera cannot see)."""
+    unless it has "tip_check": false (a liquid the tip camera cannot see)."""
     return action.get('action') == 'aspirate' and action.get('tip_check') is not False
 
 

@@ -13,8 +13,8 @@ import mix_colors
 import server
 
 PROMPT_ID = hashlib.sha256(mix_colors.SYSTEM_PROMPT.encode()).hexdigest()
-BROWN_CLEAR = mix_colors.expected(("brown", "clear"))
-REFUSAL = {"error": "Specify two different liquids to mix: brown, clear or red."}
+RED_YELLOW = mix_colors.expected(("red", "yellow"))
+REFUSAL = {"error": "Specify two different liquids to mix: red, yellow or blue."}
 
 
 class FakeMod:
@@ -58,86 +58,86 @@ def seed_with(task, plan, prompt=PROMPT_ID):
 
 
 def test_live_plan_returned_and_cached(tmp_path):
-    planner, cache = make(tmp_path, FakeMod(answer=BROWN_CLEAR))
-    r = planner.ask("Mix brown and clear.")
+    planner, cache = make(tmp_path, FakeMod(answer=RED_YELLOW))
+    r = planner.ask("Mix red and yellow.")
     assert r["ok"] and r["source"] == "live"
     assert r["plan"]["steps"][3]["name"] == "ot2"
     assert isinstance(r["seconds"], float)
     saved = json.loads(cache.read_text())
-    assert "Mix brown and clear." in saved
-    assert saved["Mix brown and clear."]["prompt"] == PROMPT_ID
+    assert "Mix red and yellow." in saved
+    assert saved["Mix red and yellow."]["prompt"] == PROMPT_ID
 
 
 def test_refusal_is_a_live_answer(tmp_path):
     planner, _ = make(tmp_path, FakeMod(answer=REFUSAL))
-    r = planner.ask("Mix brown and blue liquids and shake them.")
+    r = planner.ask("Mix red and green liquids and shake them.")
     assert r["ok"] and r["source"] == "live" and r["plan"] == REFUSAL
 
 
 def test_invalid_live_plan_is_discarded_not_cached(tmp_path):
-    bad = {"steps": BROWN_CLEAR["steps"][:10]}
+    bad = {"steps": RED_YELLOW["steps"][:10]}
     planner, cache = make(tmp_path, FakeMod(answer=bad))
-    r = planner.ask("Mix brown and clear.")
+    r = planner.ask("Mix red and yellow.")
     assert r["ok"] is False and "plan" not in r
     assert not cache.exists()
 
 
 def test_ollama_down_uses_recorded_answer(tmp_path):
-    planner, _ = make(tmp_path, FakeMod(error="Connection refused"), seed=seed_with("Mix brown and clear.", BROWN_CLEAR))
-    r = planner.ask("Mix brown and clear.")
+    planner, _ = make(tmp_path, FakeMod(error="Connection refused"), seed=seed_with("Mix red and yellow.", RED_YELLOW))
+    r = planner.ask("Mix red and yellow.")
     assert r["ok"] and r["source"] == "recorded"
-    assert r["plan"] == BROWN_CLEAR
+    assert r["plan"] == RED_YELLOW
     assert "Connection refused" in r["why"]
     assert r["recordedAt"]
 
 
 def test_timeout_uses_recorded_answer(tmp_path):
-    planner, _ = make(tmp_path, FakeMod(answer=BROWN_CLEAR, delay=1.0),
-                      seed=seed_with("Mix brown and clear.", BROWN_CLEAR), timeout=0.2)
-    r = planner.ask("Mix brown and clear.")
+    planner, _ = make(tmp_path, FakeMod(answer=RED_YELLOW, delay=1.0),
+                      seed=seed_with("Mix red and yellow.", RED_YELLOW), timeout=0.2)
+    r = planner.ask("Mix red and yellow.")
     assert r["source"] == "recorded"
     assert "0.2" in r["why"]
 
 
 def test_down_and_nothing_saved_is_error(tmp_path):
     planner, _ = make(tmp_path, FakeMod(error="Connection refused"))
-    r = planner.ask("Mix brown and clear.")
+    r = planner.ask("Mix red and yellow.")
     assert r == {"ok": False, "error": "Connection refused"}
 
 
 def test_seed_with_other_prompt_hash_ignored(tmp_path):
-    planner, _ = make(tmp_path, FakeMod(error="down"), seed=seed_with("Mix brown and clear.", BROWN_CLEAR, prompt="old"))
-    assert planner.ask("Mix brown and clear.")["ok"] is False
+    planner, _ = make(tmp_path, FakeMod(error="down"), seed=seed_with("Mix red and yellow.", RED_YELLOW, prompt="old"))
+    assert planner.ask("Mix red and yellow.")["ok"] is False
 
 
 def test_cache_entry_with_other_prompt_hash_ignored(tmp_path):
-    cache = {"Mix brown and clear.": {"raw": json.dumps(BROWN_CLEAR), "at": "x", "from": "live", "prompt": "old"}}
+    cache = {"Mix red and yellow.": {"raw": json.dumps(RED_YELLOW), "at": "x", "from": "live", "prompt": "old"}}
     planner, _ = make(tmp_path, FakeMod(error="down"), cache=cache)
-    assert planner.ask("Mix brown and clear.")["ok"] is False
+    assert planner.ask("Mix red and yellow.")["ok"] is False
 
 
 def test_cache_entry_with_current_prompt_is_used(tmp_path):
-    cache = {"Mix brown and clear.": {"raw": json.dumps(BROWN_CLEAR), "at": "x", "from": "live", "prompt": PROMPT_ID}}
+    cache = {"Mix red and yellow.": {"raw": json.dumps(RED_YELLOW), "at": "x", "from": "live", "prompt": PROMPT_ID}}
     planner, _ = make(tmp_path, FakeMod(error="down"), cache=cache)
-    assert planner.ask("Mix brown and clear.")["source"] == "recorded"
+    assert planner.ask("Mix red and yellow.")["source"] == "recorded"
 
 
 def test_task_is_trimmed_before_lookup(tmp_path):
     mod = FakeMod(error="down")
-    planner, _ = make(tmp_path, mod, seed=seed_with("Mix brown and clear.", BROWN_CLEAR))
-    r = planner.ask("  Mix brown and clear. \n")
+    planner, _ = make(tmp_path, mod, seed=seed_with("Mix red and yellow.", RED_YELLOW))
+    r = planner.ask("  Mix red and yellow. \n")
     assert r["source"] == "recorded"
-    assert mod.tasks == ["Mix brown and clear."]
+    assert mod.tasks == ["Mix red and yellow."]
 
 
 def test_busy_when_three_in_flight(tmp_path):
-    planner, _ = make(tmp_path, FakeMod(answer=BROWN_CLEAR, delay=0.5), timeout=2.0)
+    planner, _ = make(tmp_path, FakeMod(answer=RED_YELLOW, delay=0.5), timeout=2.0)
     results = []
-    threads = [threading.Thread(target=lambda: results.append(planner.ask("Mix brown and clear."))) for _ in range(3)]
+    threads = [threading.Thread(target=lambda: results.append(planner.ask("Mix red and yellow."))) for _ in range(3)]
     for t in threads:
         t.start()
     time.sleep(0.1)
-    fourth = planner.ask("Mix brown and clear.")
+    fourth = planner.ask("Mix red and yellow.")
     for t in threads:
         t.join()
     assert fourth == {"ok": False, "error": "the planner is busy"}
@@ -154,7 +154,7 @@ def test_status_ready_and_down(tmp_path):
 
 @pytest.fixture
 def http(tmp_path):
-    planner, _ = make(tmp_path, FakeMod(answer=BROWN_CLEAR))
+    planner, _ = make(tmp_path, FakeMod(answer=RED_YELLOW))
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(planner))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield "http://127.0.0.1:%d" % httpd.server_address[1]
@@ -172,7 +172,7 @@ def call(url, body=None, raw=None):
 
 
 def test_http_routes(http):
-    code, ctype, body = call(http + "/api/nlp", {"task": "Mix brown and clear."})
+    code, ctype, body = call(http + "/api/nlp", {"task": "Mix red and yellow."})
     assert code == 200 and ctype == "application/json" and body["source"] == "live"
     code, _, body = call(http + "/api/nlp/status")
     assert code == 200 and body["state"] == "ready"

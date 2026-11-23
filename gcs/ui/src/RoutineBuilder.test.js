@@ -22,7 +22,7 @@ test('offers a no-anomaly and an anomaly experiment that differ in the aspirated
   expect(screen.getByText('Custom routine', { exact: false })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('radio', { name: /^No anomaly/ }));
-  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(TUBE_FOR_LIQUID.brown);
+  expect(aspirateWell(screen.getByTestId('json').textContent)).toBe(TUBE_FOR_LIQUID.red);
   expect(screen.getByRole('radio', { name: /^No anomaly/ })).toHaveAttribute('aria-checked', 'true');
 
   fireEvent.click(screen.getByRole('radio', { name: /^Anomaly/ }));
@@ -34,8 +34,8 @@ test('offers a no-anomaly and an anomaly experiment that differ in the aspirated
 const pickedTip = (routine) => routine.steps.find((s) => s.name === 'ot2')
   .parameters_json.steps.find((c) => c.action === 'pick_up_tips').well_indices;
 
-test('presets use one tip per liquid: brown tip 1, empty tube tip 3', () => {
-  expect(pickedTip(PRESETS[0].routine)).toEqual([1]);
+test('presets use one tip per liquid: red tip 0, empty (blue) tube tip 3', () => {
+  expect(pickedTip(PRESETS[0].routine)).toEqual([0]);
   expect(pickedTip(PRESETS[1].routine)).toEqual([3]);
 });
 
@@ -72,7 +72,7 @@ test('a PWM 0 shaker block is a stop and has no duration', () => {
 
 const ot2Cmds = (json) => JSON.parse(json).steps.find((s) => s.name === 'ot2').parameters_json.steps;
 
-test('an aspirate can skip the clog check (e.g. clear liquid) and turn it back on', () => {
+test('an aspirate can skip the clog check and turn it back on', () => {
   const initial = { steps: [{ name: 'ot2', parameters_json: { steps: [
     { action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [200] },
     { action: 'dispense', resource_name: 'empty_plate', well_indices: [0], volumes: [200] },

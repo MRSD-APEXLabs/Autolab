@@ -66,8 +66,8 @@ const DEFAULT_ROUTINE = JSON.stringify(
       { name: 'pick_base' },
       { name: 'place', target_machine: 'ot2' },
       { name: 'ot2', parameters_json: {steps: [
-                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [TIP_FOR_LIQUID.clear]},
-                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.clear], volumes: [200], tip_check: false},
+                  {action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [TIP_FOR_LIQUID.red]},
+                  {action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.red], volumes: [200]},
                   {action: 'dispense', resource_name: 'empty_plate', well_indices: [0, 5, 10, 15, 20], volumes: [40, 40, 40, 40, 40]},
                   {action: 'return_tips'}
                   ]}

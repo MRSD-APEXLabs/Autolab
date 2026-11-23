@@ -244,7 +244,7 @@ def test_ot2_step_attaches_one_tip_check_per_aspirate(ex, clock):
 
 
 def test_aspirate_with_tip_check_false_is_not_checked(ex, clock):
-    skipped = {**ASPIRATE_A1, 'tip_check': False}  # e.g. clear liquid
+    skipped = {**ASPIRATE_A1, 'tip_check': False}
     start(ex, ot2(skipped, ASPIRATE_A2), HOME)
     seen = _progress_trace(ex, clock, STEP_TIME + 0.5)
     recs = status(ex)['recordings']

@@ -1,7 +1,7 @@
 // The language planner's answer (gcs/nlp_proxy, FVD-Presentation/NLP/mix_colors.py) as a
 // routine_executor routine. The planner writes the OT-2 work as abstract transfers
 // ({action: 'transfer', source: 'red_tube', volume_ul: 100}); each becomes pick up the liquid's
-// tip, aspirate from its tube (no clog check for clear liquid), dispense into plate well A1, return
+// tip, aspirate from its tube (no clog check for NO_TIP_CHECK_LIQUIDS), dispense into plate well A1, return
 // the tip. Other steps are
 // already in executor form.
 import { NO_TIP_CHECK_LIQUIDS, TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './tips';

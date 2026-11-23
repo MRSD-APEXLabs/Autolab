@@ -1,6 +1,6 @@
 import { planToRoutine, usesLiquid } from './nlpRoutine';
 
-// The planner's answer (FVD-Presentation/NLP/mix_colors.py expected()): 11 steps, two transfers.
+// The planner's answer (gcs/nlp_proxy/mix_colors.py expected()): 11 steps, two transfers.
 const plan = (pair, vols = [200, 200], seconds = 20, pwm = 150) => ({
   steps: [
     { name: 'go_to', target_machine: 'ot2' },
@@ -26,28 +26,29 @@ const plan = (pair, vols = [200, 200], seconds = 20, pwm = 150) => ({
 
 const ot2 = (routine) => routine.steps.find((s) => s.name === 'ot2').parameters_json.steps;
 
-test('red then clear becomes pick/aspirate/dispense/return per liquid, in order; clear skips the clog check', () => {
-  const r = planToRoutine(plan(['red', 'clear'], [100, 50]), null);
+test('yellow then red becomes pick/aspirate/dispense/return per liquid, in order', () => {
+  const r = planToRoutine(plan(['yellow', 'red'], [100, 50]), null);
   expect(ot2(r)).toEqual([
-    { action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [2] },
-    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [6], volumes: [100] },
+    { action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [1] },
+    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [3], volumes: [100] },
     { action: 'dispense', resource_name: 'empty_plate', well_indices: [0], volumes: [100] },
     { action: 'return_tips' },
     { action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [0] },
-    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [50], tip_check: false },
+    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [0], volumes: [50] },
     { action: 'dispense', resource_name: 'empty_plate', well_indices: [0], volumes: [50] },
     { action: 'return_tips' },
   ]);
 });
 
-test('brown uses tube 3 (A2) and tip 1', () => {
-  const cmds = ot2(planToRoutine(plan(['brown', 'clear']), null));
-  expect(cmds[0].well_indices).toEqual([1]);
-  expect(cmds[1].well_indices).toEqual([3]);
+test('blue uses the empty slot A3 (tube 6) and tip 2, with the clog check on', () => {
+  const cmds = ot2(planToRoutine(plan(['blue', 'red']), null));
+  expect(cmds[0].well_indices).toEqual([2]);
+  expect(cmds[1].well_indices).toEqual([6]);
+  expect(cmds[1]).not.toHaveProperty('tip_check');
 });
 
 test('non-ot2 steps are copied unchanged', () => {
-  const p = plan(['clear', 'brown'], [200, 200], 45, 90);
+  const p = plan(['red', 'yellow'], [200, 200], 45, 90);
   const r = planToRoutine(p, null);
   expect(r.steps).toHaveLength(11);
   r.steps.forEach((s, i) => { if (i !== 3) expect(s).toEqual(p.steps[i]); });
@@ -55,29 +56,29 @@ test('non-ot2 steps are copied unchanged', () => {
 });
 
 test('keeps max_retries and robot from the base routine', () => {
-  const r = planToRoutine(plan(['brown', 'red']), { steps: [], max_retries: 5, robot: 'robot_2' });
+  const r = planToRoutine(plan(['yellow', 'red']), { steps: [], max_retries: 5, robot: 'robot_2' });
   expect(r.max_retries).toBe(5);
   expect(r.robot).toBe('robot_2');
 });
 
 test('defaults to 3 retries and robot_1 without a base', () => {
-  const r = planToRoutine(plan(['brown', 'red']), null);
+  const r = planToRoutine(plan(['yellow', 'red']), null);
   expect(r.max_retries).toBe(3);
   expect(r.robot).toBe('robot_1');
 });
 
 test('an unknown liquid throws', () => {
-  expect(() => planToRoutine(plan(['brown', 'blue']), null)).toThrow(/blue/);
+  expect(() => planToRoutine(plan(['yellow', 'green']), null)).toThrow(/green/);
 });
 
 test('an ot2 step without transfers throws', () => {
-  const p = plan(['brown', 'clear']);
+  const p = plan(['yellow', 'red']);
   p.steps[3] = { name: 'ot2', parameters_json: { steps: [] } };
   expect(() => planToRoutine(p, null)).toThrow(/transfer/);
 });
 
-test('usesLiquid finds the clear liquid by its tube', () => {
-  expect(usesLiquid(planToRoutine(plan(['red', 'clear']), null), 'clear')).toBe(true);
-  expect(usesLiquid(planToRoutine(plan(['red', 'brown']), null), 'clear')).toBe(false);
-  expect(usesLiquid({ steps: [{ name: 'home' }] }, 'clear')).toBe(false);
+test('usesLiquid finds the blue liquid by its tube', () => {
+  expect(usesLiquid(planToRoutine(plan(['red', 'blue']), null), 'blue')).toBe(true);
+  expect(usesLiquid(planToRoutine(plan(['red', 'yellow']), null), 'blue')).toBe(false);
+  expect(usesLiquid({ steps: [{ name: 'home' }] }, 'blue')).toBe(false);
 });
