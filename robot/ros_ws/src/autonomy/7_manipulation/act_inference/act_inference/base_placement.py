@@ -35,12 +35,15 @@ class BasePlacementConfig:
     # then slide along base -X until the sideways force |(Fx, Fy) - baseline after the touch| > ridge_force_n
     # (the plate edge meets the ridge). The first probe_fast_mm of the descent and slide_fast_mm of the slide
     # (before the deck, ~7 mm down, and the ridge, ~19 mm along) go at fast_speed_mm_s, still force-guarded.
+    # The ridge force counts only once the measured TCP has slid slide_ignore_mm along -X: the static friction
+    # that holds the plate on the deck until it breaks loose would otherwise read as the ridge.
     probe_speed_mm_s: float = 2.0
     probe_depth_mm: float = 11.0          # no touch this far below the start fails the run
     touch_force_n: float = 1.0
     slide_speed_mm_s: float = 4.0
     slide_max_mm: float = 50.0            # no ridge after this much -X travel fails the run
-    ridge_force_n: float = 0.7
+    ridge_force_n: float = 1.0
+    slide_ignore_mm: float = 5.0
     fast_speed_mm_s: float = 10.0
     probe_fast_mm: float = 3.5
     slide_fast_mm: float = 12.0
@@ -61,7 +64,7 @@ class BasePlacementConfig:
                      'fast_speed_mm_s', 'open_wait_sec'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'base {name} must be finite and positive')
-        for name in ('approach_clearance_mm', 'probe_fast_mm', 'slide_fast_mm'):
+        for name in ('approach_clearance_mm', 'probe_fast_mm', 'slide_fast_mm', 'slide_ignore_mm'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) < 0:
                 raise ValueError(f'base {name} must be finite and non-negative')
         if (self.probe_speed_mm_s > self.speed_mm_s or self.slide_speed_mm_s > self.speed_mm_s
@@ -69,6 +72,8 @@ class BasePlacementConfig:
             raise ValueError('base probe/slide/fast speeds must not exceed speed_mm_s')
         if self.probe_fast_mm >= self.probe_depth_mm or self.slide_fast_mm >= self.slide_max_mm:
             raise ValueError('base probe_fast_mm/slide_fast_mm must be below probe_depth_mm/slide_max_mm')
+        if self.slide_ignore_mm >= self.slide_max_mm:
+            raise ValueError('base slide_ignore_mm must be below slide_max_mm')
         if int(self.force_count) != self.force_count or self.force_count < 1:
             raise ValueError('base force_count must be a positive integer')
 
@@ -176,8 +181,8 @@ def run_base_placement(config, placement, execute=False, stop=None, ft_factory=N
        until |dFz| > touch_force_n.
     3. Hold at the touch height, re-baseline, slide along base -X (slide_fast_mm at fast_speed_mm_s, then
        slide_speed_mm_s) until the sideways force |(dFx, dFy)| > ridge_force_n: the plate edge is against the
-       ridge. Then step back to the measured X (no push left on the ridge) and finish; the node then releases and
-       lifts.
+       ridge. The force counts only after the measured TCP has slid slide_ignore_mm (static friction). Then step
+       back to the measured X (no push left on the ridge) and finish; the node then releases and lifts.
 
     No touch within probe_depth_mm below the start, or no ridge within slide_max_mm, fails the run.
     Prediction only reads the initial TCP and logs the plan. No camera, policy inference, or gripper commands.
@@ -210,7 +215,8 @@ def run_base_placement(config, placement, execute=False, stop=None, ft_factory=N
               f'descend ({placement.probe_fast_mm:g} mm at {placement.fast_speed_mm_s:g} mm/s, then '
               f'{placement.probe_speed_mm_s:g} mm/s) until |dFz| > {placement.touch_force_n:g} N, '
               f'slide -X ({placement.slide_fast_mm:g} mm at {placement.fast_speed_mm_s:g} mm/s, then '
-              f'{placement.slide_speed_mm_s:g} mm/s) until |dFxy| > {placement.ridge_force_n:g} N'
+              f'{placement.slide_speed_mm_s:g} mm/s) until |dFxy| > {placement.ridge_force_n:g} N '
+              f'after {placement.slide_ignore_mm:g} mm of sliding'
               f'{" (debug)" if placement.debug else ""}', flush=True)
         if not execute:
             return 'done'
@@ -275,7 +281,8 @@ def _seat(robot, ft, start, placement, motion, stop, deadline, trace):
     trace.note(f'contact baseline F_N={np.round(rest, 4).tolist()}')
     ridge = lambda wrench: math.hypot(wrench[0] - rest[0], wrench[1] - rest[1])
     found = _guarded_move(ctx, target, 0, -1, placement.slide_speed_mm_s, placement.slide_max_mm / 1000, ridge,
-                          placement.ridge_force_n, 'slide', placement.fast_speed_mm_s, placement.slide_fast_mm / 1000)
+                          placement.ridge_force_n, 'slide', placement.fast_speed_mm_s, placement.slide_fast_mm / 1000,
+                          placement.slide_ignore_mm / 1000)
     if found is None:
         return 'stopped'
     target, measured, value = found
@@ -326,10 +333,11 @@ def _hold(ctx, target, goal, speed_mm_s, seconds, phase):
 
 
 def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, threshold, phase,
-                  fast_mm_s=None, fast_travel=0.):
+                  fast_mm_s=None, fast_travel=0., ignore_travel=0.):
     """Step the target along base axis `axis` (0 X, 2 Z) by `direction` at `speed_mm_s` for at most `travel` m,
     until `metric(wrench)` exceeds `threshold` for placement.force_count consecutive ticks. The first
-    `fast_travel` m go at `fast_mm_s` instead, with the same force check.
+    `fast_travel` m go at `fast_mm_s` instead, with the same force check. The force is not counted until the
+    measured pose has moved `ignore_travel` m along the axis from where it was at the start.
 
     Returns (target, measured pose, metric) at detection, or None if stopped. Reaching the end of travel (and
     0.5 s for the TCP to catch up) without contact fails.
@@ -339,7 +347,7 @@ def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, thre
     end = origin + direction * travel
     step = speed_mm_s / 1000 * ctx.period
     fast_step = (fast_mm_s or speed_mm_s) / 1000 * ctx.period
-    hits, end_since = 0, None
+    hits, end_since, measured_origin = 0, None, None
     while True:
         now = time.monotonic()
         if ctx.stop.is_set():
@@ -347,9 +355,11 @@ def _guarded_move(ctx, target, axis, direction, speed_mm_s, travel, metric, thre
         if now >= ctx.deadline:
             raise RuntimeError('Base placement timed out')
         measured, _ = ctx.robot.observation()
+        measured_origin = measured[axis] if measured_origin is None else measured_origin
+        moved = (measured[axis] - measured_origin) * direction >= ignore_travel - 1e-9
         wrench = ctx.ft.read()
         value = float(metric(wrench))
-        hits = hits + 1 if value > threshold else 0
+        hits = hits + 1 if moved and value > threshold else 0
         ctx.trace.row(now, phase, measured, target, wrench, value, hits)
         if hits >= ctx.placement.force_count:
             return target, measured, value

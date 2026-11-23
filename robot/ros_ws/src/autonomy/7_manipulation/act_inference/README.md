@@ -153,7 +153,9 @@ wrist F/T sensor finish the job:
    (`base_probe_fast_mm`, `base_fast_speed_mm_s`; the deck is ~7 mm down), the rest at **2 mm/s**. No touch
    within **11 mm** below the start fails the run.
 3. Hold at the touch height, re-baseline, then slide along base **-X** until the sideways force
-   |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. The first **12 mm** go at
+   |(Fx, Fy) - baseline| > **1.0 N** for 2 reads: the plate edge is against the ridge. The force only counts once
+   the arm has slid **2 mm** (`base_slide_ignore_mm`), so the static friction holding the plate on the deck
+   until it breaks loose is not taken for the ridge. The first **12 mm** go at
    **10 mm/s** (`base_slide_fast_mm`; the ridge is ~19 mm along), the rest at **4 mm/s**. No ridge within
    **50 mm** fails the run. The arm then steps back to its measured X so it no longer pushes on the ridge.
 
@@ -191,7 +193,7 @@ Node parameters: `base_mode` (`scripted` or `policy`); `base_pose_mm_deg` (six X
 (150.0, both modes), `base_accel_mm_s2` (500.0, the lift and the scripted approach); scripted
 `base_approach_speed_mm_s` (150.0), `base_approach_clearance_mm` (20.0); scripted seating
 `base_probe_speed_mm_s` (2.0), `base_probe_depth_mm` (11.0), `base_touch_force_n` (1.0), `base_slide_speed_mm_s` (4.0), `base_slide_max_mm`
-(50.0), `base_ridge_force_n` (0.7), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
+(50.0), `base_ridge_force_n` (1.0), `base_slide_ignore_mm` (2.0), `base_fast_speed_mm_s` (10.0), `base_probe_fast_mm` (3.5),
 `base_slide_fast_mm` (12.0), `base_force_count` (2), `base_settle_sec` (0.2), `base_baseline_sec` (0.2),
 `base_open_wait_sec` (1.5, both modes),
 `base_debug` (false), `base_debug_dir`; policy mode `base_ckpt_dir`, `base_start_pose_mm_deg`,

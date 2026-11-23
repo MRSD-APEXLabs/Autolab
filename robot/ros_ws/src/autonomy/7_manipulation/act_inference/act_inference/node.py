@@ -102,8 +102,8 @@ OT2_RELEASE_SHIFT_X_MM = -2.0   # OT-2: move the closed gripper this far along b
 BASE_SEATING_PARAMS = {'approach_speed_mm_s': float, 'approach_clearance_mm': float, 'lift_speed_mm_s': float,
                        'accel_mm_s2': float, 'open_wait_sec': float,
                        'probe_speed_mm_s': float, 'probe_depth_mm': float, 'touch_force_n': float, 'slide_speed_mm_s': float,
-                       'slide_max_mm': float, 'ridge_force_n': float, 'fast_speed_mm_s': float, 'probe_fast_mm': float,
-                       'slide_fast_mm': float, 'force_count': int, 'settle_sec': float,
+                       'slide_max_mm': float, 'ridge_force_n': float, 'slide_ignore_mm': float, 'fast_speed_mm_s': float,
+                       'probe_fast_mm': float, 'slide_fast_mm': float, 'force_count': int, 'settle_sec': float,
                        'baseline_sec': float, 'debug': bool, 'debug_dir': str}
 
 

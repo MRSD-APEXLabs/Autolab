@@ -27,9 +27,11 @@ STIFFNESS_N_PER_M = 5000.   # fake deck and ridge: 5 N/mm
 HOME_POSE = np.r_[[-.0206, .3438, .1853], Rotation.from_euler('xyz', [180., 0., 0.], degrees=True).as_rotvec()]
 
 
-def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, ridge_x=None, reports=True):
+def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, ridge_x=None, reports=True,
+                breakaway=None):
     """Fake arm and F/T report socket. By default the deck is 8 mm below the probing start and the ridge 13 mm
-    along -X from it; deck_z/ridge_x = nan removes them."""
+    along -X from it; deck_z/ridge_x = nan removes them. `breakaway` (mm, N): static friction, that sideways
+    force while on the deck and less than mm along -X from the start."""
     placement = bp.BasePlacementConfig()
     goal = placement.target_pose()
     initial = goal.copy()
@@ -47,6 +49,8 @@ def setup_robot(monkeypatch, stop, tracks=True, initial_pose=None, deck_z=None, 
         pose = state['pose']
         fz = STIFFNESS_N_PER_M * max(0., deck_z - pose[2]) if np.isfinite(deck_z) else 0.
         fx = STIFFNESS_N_PER_M * max(0., ridge_x - pose[0]) if np.isfinite(ridge_x) else 0.
+        if breakaway is not None and pose[2] < deck_z and 0 < goal[0] - pose[0] < breakaway[0] / 1000:
+            fx += breakaway[1]
         noise = .01 * (-1) ** state['tick']
         return [.2 + fx + noise, -.1 + noise, -.3 - fz + noise, 0., 0., 0.]
 
@@ -184,6 +188,22 @@ def test_touch_then_slide_to_the_ridge(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'touch at z=' in out and 'mm below the start' in out and 'ridge at x=' in out
     assert '[base debug]' not in out
+
+
+@pytest.mark.parametrize('ignore_mm, ridge_found', [(2., True), (0., False)])
+def test_static_friction_at_the_slide_start_is_not_the_ridge(monkeypatch, capsys, ignore_mm, ridge_found):
+    stop = ClockStop()
+    placement, calls, commands = setup_robot(monkeypatch, stop, breakaway=(1.5, 3.))   # 3 N for the first 1.5 mm
+    placement = replace(placement, slide_ignore_mm=ignore_mm)
+    approach = placement.target_pose()
+    assert bp.run_base_placement(InferenceConfig(), placement, execute=True, stop=stop) == 'done'
+    stopped_at = min(p[0] for p in commands if p[2] < approach[2] - .007)   # the slide, on the deck
+    ridge_x = approach[0] - .013
+    if ridge_found:
+        assert ridge_x - .0004 < stopped_at < ridge_x - .0002
+    else:   # counting the force from the start takes the breakaway for the ridge
+        assert approach[0] - stopped_at < .0015
+    assert 'after %g mm of sliding' % ignore_mm in capsys.readouterr().out
 
 
 def test_from_above_fast_to_the_clearance_then_straight_down_to_the_start(monkeypatch):
@@ -348,7 +368,9 @@ def test_timeout_requires_measured_arrival_and_closes(monkeypatch):
                                      {'approach_speed_mm_s': 0}, {'approach_clearance_mm': -1},
                                      {'lift_speed_mm_s': float('nan')}, {'accel_mm_s2': 0},
                                      {'fast_speed_mm_s': 50}, {'fast_speed_mm_s': 0}, {'probe_fast_mm': -1},
-                                     {'probe_fast_mm': 11}, {'slide_fast_mm': 50}, {'open_wait_sec': 0}])
+                                     {'probe_fast_mm': 11}, {'slide_fast_mm': 50}, {'open_wait_sec': 0},
+                                     {'slide_ignore_mm': -1}, {'slide_ignore_mm': 50},
+                                     {'slide_ignore_mm': float('nan')}])
 def test_invalid_configuration(changes):
     with pytest.raises(ValueError):
         bp.BasePlacementConfig(**changes)
