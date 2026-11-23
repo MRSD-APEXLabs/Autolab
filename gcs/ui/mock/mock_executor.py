@@ -243,7 +243,7 @@ class MockExecutor:
         self._rng = rng or random.Random()
         self._queue = deque()
         self._lock = threading.Lock()
-        self._sm = RoutineStateMachine([], no_retry=self._no_retry)
+        self._sm = RoutineStateMachine([], no_retry=self._no_retry, clock=clock)
         self._robot = 'robot_1'
         self._attempts = defaultdict(int)  # step index -> attempts dispatched this run
         self._active = None
@@ -368,7 +368,7 @@ class MockExecutor:
                 return
         self._robot = routine.get('robot', 'robot_1')
         self._sm = RoutineStateMachine(steps, max_retries=int(routine.get('max_retries', 3)),
-                                       no_retry=self._no_retry)
+                                       no_retry=self._no_retry, clock=self._clock)
         self._attempts.clear()
         self._active = None
         self._sm.start()
@@ -403,6 +403,8 @@ class MockExecutor:
             'idx': idx, 'name': name, 'started': now, 'duration': duration,
             'finish_at': finish_at,
             'outcome': 'fail' if fail else 'success', 'events': events,
+            'hold': (float(step.get('wait_time_s', 0) or 0)
+                     if name == 'shaker' and int(step.get('pwm', 0)) > 0 else 0.0),
         }
         _log(f'step {idx + 1}/{len(self._sm.steps)} "{name}" dispatched '
              f'(attempt {attempt}, {duration:.1f}s{", WILL FAIL" if fail else ""})')
@@ -414,6 +416,8 @@ class MockExecutor:
         elapsed = now - act['started']
         while act['events'] and act['events'][0][0] <= elapsed:
             self._fire(act['events'].pop(0), out)
+        if act['name'] == 'shaker':
+            self._advance_shaker(act, elapsed, out)
         if act['name'] in MANIP_STEPS:
             phase = _manip_phase(elapsed / act['duration'] if act['duration'] else 1.0)
             if phase != 'PLANNING' and act.get('planned') is None and elapsed > 0:
@@ -426,6 +430,21 @@ class MockExecutor:
                 self._sm.set_step_progress({**progress, 'machine': 'ot2', 'phase': 'failed',
                                             'tip_check': None})
             self._finish_active(act['outcome'], out)
+
+    def _advance_shaker(self, act, elapsed, out):
+        # Like node.py: starting (PWM ack) -> hold (wait_time_s, timed) -> stopping (PWM 0 ack).
+        hold = act['hold']
+        spin = (act['duration'] - hold) / 2
+        phase = 'starting' if elapsed < spin or not hold else 'hold' if elapsed < spin + hold else 'stopping'
+        if phase == act.get('phase'):
+            return
+        act['phase'] = phase
+        if phase == 'hold':
+            ok = self._sm.start_timed_phase('shaker', 'hold', hold)
+        else:
+            ok = self._sm.set_step_progress({'machine': 'shaker', 'phase': phase})
+        if ok:
+            out.append(self.status_message())
 
     def _fire(self, event, out):
         _, kind, data = event
@@ -493,7 +512,7 @@ OT2_UNITS = {'connecting': 1.0, 'command': 2.0, 'tip_pass': 1.0, 'homing': 1.5}
 
 def _checked(action):
     """Whether lab_machine_executive runs the tip check after this command: every aspirate
-    unless it has "tip_check": false (e.g. clear liquid the tip camera cannot see)."""
+    unless it has "tip_check": false (a liquid the tip camera cannot see)."""
     return action.get('action') == 'aspirate' and action.get('tip_check') is not False
 
 

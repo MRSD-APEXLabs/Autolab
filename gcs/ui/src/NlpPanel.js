@@ -1,16 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { planToRoutine, usesLiquid } from './shared/nlpRoutine';
+import { EMPTY_LIQUID } from './shared/tips';
 
 // "Describe the experiment": a plain-English request goes to the language planner (gcs/nlp_proxy,
 // POST /api/nlp) and its routine replaces the one in the builder. A refusal or an error leaves the
 // routine as it is. Answers are LIVE (the model just produced it) or RECORDED (saved earlier for
 // exactly this request, used when the model does not answer in time).
 
-// The demo deck's saved prompts (FVD-Presentation/config.json "nlp.prompts"); all have saved answers.
+// Demo prompts. Each is a test case in gcs/nlp_proxy/mix_colors.py, so regenerating
+// pair_test_results.json there gives each one a saved answer. Blue's tube is not on the deck: the
+// clog check should flag that routine.
 export const DEMO_PROMPTS = [
-  { label: 'Plain request', task: 'Please combine the brown liquid with the clear liquid, then shake the mixture.' },
-  { label: 'Amounts and units', task: 'Mix 0.1 ml red with 0.05 ml clear and shake for 0.5 minutes.' },
-  { label: 'Unknown liquid', task: 'Mix brown and blue liquids and shake them.' },
+  { label: 'Plain request', task: 'Please combine the red liquid with the yellow liquid, then shake the mixture.' },
+  { label: 'Amounts and units', task: 'Mix 0.2 ml yellow with 0.2 ml red and shake for 0.5 minutes.' },
+  { label: 'Blue (clog)', task: 'Mix blue and yellow liquids and shake them.' },
+  { label: 'Unknown liquid', task: 'Mix yellow and green liquids and shake them.' },
 ];
 
 const REQUEST_TIMEOUT_MS = 30000;
@@ -47,8 +51,8 @@ function resultFor(answer, routine) {
   return {
     tone: 'ok',
     text: `Built ${next.steps.length} steps from your request · ${how}`,
-    note: usesLiquid(next, 'clear')
-      ? 'Clear liquid is hard for the tip camera to see, so its aspirate skips the clog check.'
+    note: usesLiquid(next, EMPTY_LIQUID)
+      ? 'There is no blue tube on the deck: its aspirate comes up dry and the clog check should flag it.'
       : '',
     routine: next,
   };
@@ -120,7 +124,7 @@ export default function NlpPanel({ routine, onRoutine }) {
       <form className="rb-nlp-form" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input
           className="rb-input rb-nlp-input" aria-label="Request" value={text} maxLength={500}
-          placeholder="Mix 0.1 ml red with 0.05 ml clear and shake for 30 seconds"
+          placeholder="Mix 0.2 ml red with 0.2 ml yellow and shake for 30 seconds"
           onChange={(e) => setText(e.target.value)}
         />
         <button type="submit" className="ax-btn solid" disabled={busy || !text.trim()}>Build</button>

@@ -244,7 +244,7 @@ def test_ot2_step_attaches_one_tip_check_per_aspirate(ex, clock):
 
 
 def test_aspirate_with_tip_check_false_is_not_checked(ex, clock):
-    skipped = {**ASPIRATE_A1, 'tip_check': False}  # e.g. clear liquid
+    skipped = {**ASPIRATE_A1, 'tip_check': False}
     start(ex, ot2(skipped, ASPIRATE_A2), HOME)
     seen = _progress_trace(ex, clock, STEP_TIME + 0.5)
     recs = status(ex)['recordings']
@@ -434,3 +434,29 @@ def test_skip_of_a_failed_step_goes_on_with_the_next_one(clock, tips):
     assert (s['state'], s['current_step'], s['skipped_steps']) == ('running', 2, [1])
     advance(ex, clock, STEP_TIME + 0.5)
     assert status(ex)['state'] == 'success'
+
+
+def test_shaker_reports_starting_hold_with_elapsed_then_stopping(ex, clock):
+    start(ex, {'name': 'shaker', 'pwm': 150, 'wait_time_s': 10})
+    advance(ex, clock, 0.5)
+    assert status(ex)['step_progress']['phase'] == 'starting'
+    advance(ex, clock, STEP_TIME / 2 + 4)  # 4 s into the 10 s hold
+    p = status(ex)['step_progress']
+    assert p['machine'] == 'shaker' and p['phase'] == 'hold' and p['duration_s'] == 10
+    assert 3.5 <= p['elapsed_s'] <= 4.5
+    advance(ex, clock, 6.2)  # hold over at 11 s, step done at 12 s
+    assert status(ex)['step_progress']['phase'] == 'stopping'
+    advance(ex, clock, STEP_TIME)
+    assert status(ex)['state'] == 'success'
+
+
+def test_status_has_run_elapsed_frozen_after_success(ex, clock):
+    assert status(ex)['elapsed_s'] is None
+    start(ex, GO)
+    advance(ex, clock, STEP_TIME + 0.5)
+    s = status(ex)
+    assert s['state'] == 'success'
+    done = s['elapsed_s']
+    assert STEP_TIME - 0.2 <= done <= STEP_TIME + 0.6
+    advance(ex, clock, 5)
+    assert status(ex)['elapsed_s'] == done

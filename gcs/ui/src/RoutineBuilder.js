@@ -165,7 +165,7 @@ function Ot2Editor({ step, onChange }) {
                 </label>
               )}
               {cmd?.action === 'aspirate' && (
-                <label className="rb-field inline" title="Off for liquids the tip camera cannot see (e.g. clear)">
+                <label className="rb-field inline" title="Off for liquids the tip camera cannot see">
                   <input
                     type="checkbox" aria-label={`Command ${i + 1} clog check`} checked={cmd.tip_check !== false}
                     onChange={(e) => setCmds(cmds.map((c, j) => {

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """nlp-proxy: the language planner for the GCS routine builder (Python standard library only).
 
-POST /api/nlp {"task": "..."} runs the tested planner in mix_colors.py (copied unchanged from
-FVD-Presentation/NLP) against Ollama on this host, checks the answer with its own validate(), and
-returns it. If Ollama does not answer in time, the answer saved earlier for exactly that task is
+POST /api/nlp {"task": "..."} runs the planner in mix_colors.py (adapted from FVD-Presentation/NLP
+for the red / yellow / blue tubes) against Ollama on this host, checks the answer with its own
+validate(), and returns it. If Ollama does not answer in time, the answer saved earlier for exactly that task is
 returned instead, marked "recorded" (never "live"). GET /api/nlp/status says whether Ollama answers.
 
 It only generates plans; nothing here talks to lab hardware. Adapted from the Planner class in
@@ -27,7 +27,7 @@ MAX_TASK = 500
 MAX_IN_FLIGHT = 3
 KEEP_CACHED = 200
 WARM_EVERY_S = 120
-WARM_TASK = "Please combine the brown liquid with the clear liquid, then shake the mixture."
+WARM_TASK = "Please combine the red liquid with the yellow liquid, then shake the mixture."
 
 log = logging.getLogger("nlp-proxy")
 

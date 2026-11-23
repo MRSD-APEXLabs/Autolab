@@ -3,9 +3,11 @@ import mqtt from "mqtt";
 import ClogCheckCard from "./ClogCheckCard";
 import CameraStage from "./CameraStage";
 import Ot2Progress from "./Ot2Progress";
+import ShakerProgress, { shakerProgressFor } from "./ShakerProgress";
 import { Brand, TitleBar } from "./Chrome";
 import { GROUPS, OT2_ACTIONS, ot2Commands, stepDetail, stepGroup, stepName, stepStation, stepTitle } from "./shared/steps";
 import { OT2_PHASE_LABEL, ot2ProgressFor, tipCheckStageText } from "./shared/ot2Progress";
+import { formatDuration, useLiveSeconds } from "./shared/liveClock";
 
 const BROKER_URL = `ws://${window.location.hostname}:9001`;
 const STATUS_TOPIC = "ros2/routine_executor/status";
@@ -77,14 +79,22 @@ function ot2LiveLine(step, progress) {
 }
 
 // Right-hand run timeline: one node per step, the rail filled up to the current step.
-function Timeline({ steps, state, currentStepIdx, completedCount, liveLine, skipped }) {
+function Timeline({ steps, state, currentStepIdx, completedCount, liveLine, skipped, elapsed }) {
   const total = steps.length;
   const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
   return (
     <aside className="xt" aria-label="Run progress">
       <div className="xt-head">
         <span className="ax-h3">Progress</span>
-        <div className="xt-pct"><b>{pct}</b>%</div>
+        <div className="xt-row">
+          <div className="xt-pct"><b>{pct}</b>%</div>
+          {elapsed !== null && (
+            <div className={`xt-clock ${state === "running" ? "on" : ""}`} role="timer" aria-label="Run time">
+              <b>{formatDuration(elapsed)}</b>
+              <small>{state === "running" || state === "paused" ? "Elapsed" : "Run time"}</small>
+            </div>
+          )}
+        </div>
         <div className="xt-count">{completedCount}/{total} Steps Completed</div>
       </div>
       <ol className="xt-list">
@@ -235,6 +245,9 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
   const nextStep = active ? steps[currentStepIdx + 1] : null;
   const isOt2 = stepName(currentStep) === "ot2";
   const ot2Progress = isOt2 ? ot2ProgressFor(status) : null;
+  const isShaker = stepName(currentStep) === "shaker";
+  const shakerProgress = isShaker ? shakerProgressFor(status) : null;
+  const runElapsed = useLiveSeconds(status?.elapsed_s, active);
   const recordings = status?.recordings ?? [];
   // The tip check running right now, until its result is attached to the run.
   const pendingCheck = ot2Progress?.phase === "tip_check"
@@ -317,6 +330,7 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
                 </div>
                 {stepDetail(currentStep) && !isOt2 && <p className="xp-sub">{stepDetail(currentStep)}</p>}
                 {isOt2 && <Ot2Progress step={currentStep} progress={ot2Progress} />}
+                {isShaker && <ShakerProgress step={currentStep} progress={shakerProgress} ticking={active} />}
 
                 {displayTopics.length > 0 && (
                   <dl className="ax-kv mt-4 pt-3" style={{ borderTop: "1px solid var(--line)" }}>
@@ -435,6 +449,7 @@ export default function ExperimentSequence({ onNewExperiment, onHome }) {
           <div className="xp-time">
             {status && totalSteps > 0 ? (
               <Timeline steps={steps} state={state} currentStepIdx={currentStepIdx} completedCount={completedCount} skipped={skipped}
+                elapsed={runElapsed}
                 liveLine={active && isOt2 ? ot2LiveLine(currentStep, ot2Progress) : null} />
             ) : (
               <aside className="xt"><span className="ax-h3">Progress</span><p className="ax-hint mt-3">No steps loaded</p></aside>

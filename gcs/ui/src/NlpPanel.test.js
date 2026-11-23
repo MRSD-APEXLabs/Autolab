@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import RoutineBuilder from './RoutineBuilder';
 import { DEMO_PROMPTS } from './NlpPanel';
 
-// The planner's 11-step answer (FVD-Presentation/NLP/mix_colors.py expected()).
+// The planner's 11-step answer (gcs/nlp_proxy/mix_colors.py expected()).
 const plan = (pair) => ({
   steps: [
     { name: 'go_to', target_machine: 'ot2' },
@@ -51,29 +51,29 @@ function build(text) {
 afterEach(() => { delete global.fetch; });
 
 test('a live routine replaces the blocks and says LIVE', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 1.1, plan: plan(['red', 'brown']) } });
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 1.1, plan: plan(['red', 'yellow']) } });
   render(<Harness />);
-  build('Mix red and brown and shake.');
+  build('Mix red and yellow and shake.');
   expect(await screen.findByText(/Built 11 steps/)).toHaveTextContent('LIVE · 1.1 s');
   expect(screen.getAllByTestId('routine-block')).toHaveLength(11);
   const routine = JSON.parse(screen.getByTestId('json').textContent);
   expect(routine.max_retries).toBe(2);
-  expect(JSON.parse(planCalls()[0][1].body)).toEqual({ task: 'Mix red and brown and shake.' });
+  expect(JSON.parse(planCalls()[0][1].body)).toEqual({ task: 'Mix red and yellow and shake.' });
 });
 
 test('a recorded answer is labelled RECORDED, not LIVE', async () => {
-  mockFetch({ answer: { ok: true, source: 'recorded', why: 'down', recordedAt: 'x', plan: plan(['red', 'brown']) } });
+  mockFetch({ answer: { ok: true, source: 'recorded', why: 'down', recordedAt: 'x', plan: plan(['red', 'yellow']) } });
   render(<Harness />);
-  build('Mix red and brown and shake.');
+  build('Mix red and yellow and shake.');
   const line = await screen.findByText(/Built 11 steps/);
   expect(line).toHaveTextContent('RECORDED (planner offline)');
   expect(line).not.toHaveTextContent('LIVE');
 });
 
 test('a refusal shows the reason and keeps the routine', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 0.9, plan: { error: 'Specify two different liquids to mix: brown, clear or red.' } } });
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 0.9, plan: { error: 'Specify two different liquids to mix: red, yellow or blue.' } } });
   render(<Harness />);
-  build('Mix brown and blue.');
+  build('Mix yellow and green.');
   expect(await screen.findByText(/The planner refused: Specify two different liquids/)).toBeInTheDocument();
   expect(screen.getByTestId('json').textContent).toBe(START);
 });
@@ -81,7 +81,7 @@ test('a refusal shows the reason and keeps the routine', async () => {
 test('a planner error keeps the routine', async () => {
   mockFetch({ answer: { ok: false, error: 'the model did not answer within 20 s' } });
   render(<Harness />);
-  build('Mix brown and clear.');
+  build('Mix red and yellow.');
   expect(await screen.findByText('Planner unavailable: the model did not answer within 20 s')).toBeInTheDocument();
   expect(screen.getByTestId('json').textContent).toBe(START);
 });
@@ -89,13 +89,13 @@ test('a planner error keeps the routine', async () => {
 test('an HTML 502 is reported, not thrown', async () => {
   mockFetch({ answer: () => Promise.resolve({ ok: false, status: 502, json: () => Promise.reject(new SyntaxError('Unexpected token <')) }) });
   render(<Harness />);
-  build('Mix brown and clear.');
+  build('Mix red and yellow.');
   expect(await screen.findByText(/Planner unavailable: .*502/)).toBeInTheDocument();
   expect(screen.getByTestId('json').textContent).toBe(START);
 });
 
 test('a chip fills the box and sends its prompt', async () => {
-  mockFetch({ answer: { ok: true, source: 'recorded', why: 'down', plan: plan(['red', 'clear']) } });
+  mockFetch({ answer: { ok: true, source: 'recorded', why: 'down', plan: plan(['yellow', 'red']) } });
   render(<Harness />);
   fireEvent.click(screen.getByRole('button', { name: DEMO_PROMPTS[1].label }));
   expect(screen.getByLabelText('Request')).toHaveValue(DEMO_PROMPTS[1].task);
@@ -105,10 +105,10 @@ test('a chip fills the box and sends its prompt', async () => {
 
 test('Build is disabled for an empty box and while planning', async () => {
   let finish;
-  mockFetch({ answer: () => new Promise((resolve) => { finish = () => resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, source: 'live', seconds: 1, plan: plan(['red', 'brown']) }) }); }) });
+  mockFetch({ answer: () => new Promise((resolve) => { finish = () => resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, source: 'live', seconds: 1, plan: plan(['red', 'yellow']) }) }); }) });
   render(<Harness />);
   expect(screen.getByRole('button', { name: 'Build' })).toBeDisabled();
-  build('Mix red and brown.');
+  build('Mix red and yellow.');
   expect(screen.getByRole('button', { name: 'Build' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Build' }));
   fireEvent.click(screen.getByRole('button', { name: DEMO_PROMPTS[0].label }));
@@ -119,25 +119,25 @@ test('Build is disabled for an empty box and while planning', async () => {
   expect(await screen.findByText(/Built 11 steps/)).toBeInTheDocument();
 });
 
-test('a routine with clear liquid notes that its clog check is skipped', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['clear', 'brown']) } });
+test('a routine with blue liquid notes that its tube is missing, so the clog check should flag it', async () => {
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['blue', 'yellow']) } });
   render(<Harness />);
-  build('Mix clear and brown.');
-  expect(await screen.findByText(/Clear liquid is hard for the tip camera to see, so its aspirate skips the clog check/)).toBeInTheDocument();
+  build('Mix blue and yellow.');
+  expect(await screen.findByText(/There is no blue tube on the deck/)).toBeInTheDocument();
 });
 
-test('a routine without clear liquid has no clog-check note', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'brown']) } });
+test('a routine without blue liquid has no missing-tube note', async () => {
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'yellow']) } });
   render(<Harness />);
-  build('Mix red and brown.');
+  build('Mix red and yellow.');
   await screen.findByText(/Built 11 steps/);
-  expect(screen.queryByText(/Clear liquid is hard/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/no blue tube/)).not.toBeInTheDocument();
 });
 
 test('building from invalid JSON still gives the default retries and robot', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'brown']) } });
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'yellow']) } });
   render(<Harness initial="{" />);
-  build('Mix red and brown.');
+  build('Mix red and yellow.');
   await screen.findByText(/Built 11 steps/);
   const routine = JSON.parse(screen.getByTestId('json').textContent);
   expect(routine.max_retries).toBe(3);
@@ -162,9 +162,9 @@ test('status is offline when the proxy cannot be reached', async () => {
 });
 
 test('works under StrictMode (dev server): the answer is applied', async () => {
-  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'brown']) } });
+  mockFetch({ answer: { ok: true, source: 'live', seconds: 1, plan: plan(['red', 'yellow']) } });
   render(<StrictMode><Harness /></StrictMode>);
-  build('Mix red and brown.');
+  build('Mix red and yellow.');
   expect(await screen.findByText(/Built 11 steps/)).toBeInTheDocument();
   expect(screen.queryByText('Planning…')).not.toBeInTheDocument();
 });

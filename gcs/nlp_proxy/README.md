@@ -1,12 +1,15 @@
 # nlp-proxy
 
 The language planner behind the routine builder's **Describe the experiment** box. It turns a
-plain-English request ("mix 0.1 ml red with clear and shake for 30 seconds") into the 11-step
+plain-English request ("mix 0.2 ml red with 0.2 ml yellow and shake for 30 seconds") into the 11-step
 routine, or a refusal with a reason. It only generates plans; nothing here talks to lab hardware.
 
-- `mix_colors.py` and `pair_test_results.json` are copied unchanged from
-  `FVD-Presentation/NLP/`. **Never edit `mix_colors.py` here**: re-copy it. Saved answers are keyed
-  by the sha256 of its prompt, so a changed prompt ignores them.
+- `mix_colors.py` started as a copy of `FVD-Presentation/NLP/mix_colors.py` and now differs from it:
+  the liquids are red (tube A1), yellow (A2) and blue (A3). A3 is left empty on the deck, so any
+  routine with blue aspirates nothing and the clog check flags it (the anomaly demo). Saved answers
+  in `pair_test_results.json` are keyed by the sha256 of the prompt, so after a prompt change they
+  are ignored until regenerated: `python3 mix_colors.py` (on the 5090, or `--host local`) rewrites
+  that file.
 - `server.py` (standard library only) calls Ollama on this host, checks every answer with the
   planner's own `validate()`, and saves passing live answers. If Ollama does not answer within
   `NLP_TIMEOUT`, the saved answer for exactly that request comes back marked `recorded`.
@@ -55,6 +58,7 @@ docker exec $(docker ps -qf name=ui) wget -qO- http://host.docker.internal:8090/
 ```
 
 By hand (any machine, Python 3.9+): `NLP_CACHE=/tmp/nlp_cache.json python3 gcs/nlp_proxy/server.py`.
-Without Ollama it still answers the three demo prompts from saved answers.
+Without Ollama it still answers the builder's demo prompts from saved answers (once
+`pair_test_results.json` has been regenerated for the current prompt).
 
 Tests: `cd gcs/nlp_proxy && python3 -m pytest -q`

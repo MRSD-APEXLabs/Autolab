@@ -124,3 +124,47 @@ test('skipped steps are marked on the timeline and in the result', () => {
   expect(within(timeline).getAllByText('Skipped')).toHaveLength(1);
   expect(screen.getByText(/1 step was skipped/i)).toBeInTheDocument();
 });
+
+describe('run timer and shaker bar', () => {
+  beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(new Date('2026-11-22T12:00:00Z')); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('the run clock sits beside the percentage and ticks between status messages', () => {
+    render(<Experiment />);
+    sendStatus({ elapsed_s: 65 });
+    const clock = screen.getByRole('timer', { name: 'Run time' });
+    expect(clock).toHaveTextContent('1:05');
+    act(() => { jest.advanceTimersByTime(2000); });
+    expect(clock).toHaveTextContent('1:07');
+    sendStatus({ state: 'success', current_step: steps.length, elapsed_s: 90 });
+    act(() => { jest.advanceTimersByTime(5000); });
+    expect(screen.getByRole('timer', { name: 'Run time' })).toHaveTextContent('1:30');
+  });
+
+  test('no clock before the executor reports one', () => {
+    render(<Experiment />);
+    sendStatus({});
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+  });
+
+  test('the run-shaker panel shows how long it has been shaking', () => {
+    const SH = steps.findIndex((s) => s.name === 'shaker');
+    const shaker = (fields) => ({ machine: 'shaker', step: SH, ...fields });
+    render(<Experiment />);
+    sendStatus({ current_step: SH, current_step_name: 'shaker', step_progress: shaker({ phase: 'starting' }) });
+    const panel = screen.getByLabelText('Shaker progress');
+    expect(within(panel).getByText('Starting the shaker…')).toBeInTheDocument();
+    expect(within(panel).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+
+    const total = steps[SH].wait_time_s;
+    sendStatus({ current_step: SH, current_step_name: 'shaker',
+      step_progress: shaker({ phase: 'hold', duration_s: total, elapsed_s: 5 }) });
+    act(() => { jest.advanceTimersByTime(1000); });
+    const bar = within(screen.getByLabelText('Shaker progress')).getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '6');
+    expect(bar).toHaveAttribute('aria-valuemax', String(total));
+
+    sendStatus({ current_step: SH, current_step_name: 'shaker', step_progress: shaker({ phase: 'stopping' }) });
+    expect(within(screen.getByLabelText('Shaker progress')).getByText('Done shaking')).toBeInTheDocument();
+  });
+});

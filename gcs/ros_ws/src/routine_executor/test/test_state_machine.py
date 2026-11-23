@@ -596,3 +596,63 @@ def test_skip_clears_step_progress_and_new_start_clears_skipped():
     sm.cancel()
     sm.start()
     assert sm.to_dict()['skipped_steps'] == []
+
+
+class FakeClock:
+    def __init__(self, t=100.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+def test_elapsed_none_before_start():
+    assert RoutineStateMachine([{'name': 'a'}], clock=FakeClock()).to_dict()['elapsed_s'] is None
+
+
+def test_elapsed_counts_while_running_and_freezes_at_end():
+    clock = FakeClock()
+    sm = RoutineStateMachine([{'name': 'a'}], clock=clock)
+    sm.start()
+    clock.t += 5
+    assert sm.to_dict()['elapsed_s'] == 5
+    sm.on_success()
+    clock.t += 30
+    assert sm.to_dict()['elapsed_s'] == 5
+
+
+def test_elapsed_resumes_on_retry_and_resets_on_start():
+    clock = FakeClock()
+    sm = RoutineStateMachine([{'name': 'a'}], max_retries=0, clock=clock)
+    sm.start()
+    clock.t += 2
+    sm.on_failure()
+    clock.t += 3
+    assert sm.to_dict()['elapsed_s'] == 2
+    assert sm.retry()
+    clock.t += 1
+    assert sm.to_dict()['elapsed_s'] == 6
+    sm.cancel()
+    sm.start()
+    clock.t += 1
+    assert sm.to_dict()['elapsed_s'] == 1
+
+
+def test_timed_phase_reports_elapsed_capped_at_duration():
+    clock = FakeClock()
+    sm = RoutineStateMachine([{'name': 'shaker', 'pwm': 150, 'wait_time_s': 20}], clock=clock)
+    sm.start()
+    assert sm.start_timed_phase('shaker', 'hold', 20)
+    clock.t += 7.5
+    p = sm.to_dict()['step_progress']
+    assert p == {'machine': 'shaker', 'phase': 'hold', 'duration_s': 20.0, 'step': 0, 'elapsed_s': 7.5}
+    clock.t += 60
+    assert sm.to_dict()['step_progress']['elapsed_s'] == 20.0
+    sm.set_step_progress({'machine': 'shaker', 'phase': 'stopping'})
+    assert 'elapsed_s' not in sm.to_dict()['step_progress']
+
+
+def test_timed_phase_only_while_active():
+    sm = RoutineStateMachine([{'name': 'shaker'}], clock=FakeClock())
+    assert not sm.start_timed_phase('shaker', 'hold', 20)
+    assert sm.to_dict()['step_progress'] is None
