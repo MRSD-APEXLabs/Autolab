@@ -1,7 +1,7 @@
 # nlp-proxy
 
 The language planner behind the routine builder's **Describe the experiment** box. It turns a
-plain-English request ("mix 0.1 ml red with yellow and shake for 30 seconds") into the 11-step
+plain-English request ("mix 0.2 ml red with 0.2 ml yellow and shake for 30 seconds") into the 11-step
 routine, or a refusal with a reason. It only generates plans; nothing here talks to lab hardware.
 
 - `mix_colors.py` started as a copy of `FVD-Presentation/NLP/mix_colors.py` and now differs from it:

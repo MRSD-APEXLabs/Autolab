@@ -12,7 +12,7 @@ import { EMPTY_LIQUID } from './shared/tips';
 // clog check should flag that routine.
 export const DEMO_PROMPTS = [
   { label: 'Plain request', task: 'Please combine the red liquid with the yellow liquid, then shake the mixture.' },
-  { label: 'Amounts and units', task: 'Mix 0.1 ml yellow with 0.05 ml red and shake for 0.5 minutes.' },
+  { label: 'Amounts and units', task: 'Mix 0.2 ml yellow with 0.2 ml red and shake for 0.5 minutes.' },
   { label: 'Blue (clog)', task: 'Mix blue and yellow liquids and shake them.' },
   { label: 'Unknown liquid', task: 'Mix yellow and green liquids and shake them.' },
 ];
@@ -124,7 +124,7 @@ export default function NlpPanel({ routine, onRoutine }) {
       <form className="rb-nlp-form" onSubmit={(e) => { e.preventDefault(); send(text); }}>
         <input
           className="rb-input rb-nlp-input" aria-label="Request" value={text} maxLength={500}
-          placeholder="Mix 0.1 ml red with 0.05 ml yellow and shake for 30 seconds"
+          placeholder="Mix 0.2 ml red with 0.2 ml yellow and shake for 30 seconds"
           onChange={(e) => setText(e.target.value)}
         />
         <button type="submit" className="ax-btn solid" disabled={busy || !text.trim()}>Build</button>

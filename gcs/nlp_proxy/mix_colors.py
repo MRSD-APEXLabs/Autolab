@@ -298,6 +298,7 @@ def extra_cases():
         ("combine_red_yellow", "Combine red with yellow and shake.", expected(("red", "yellow"))),
         ("explicit_values", "Mix 30 ul yellow with 70 ul red and shake for 8 seconds at PWM 90.", expected(("yellow", "red"), (30, 70), 8, 90)),
         ("milliliters_minutes", "Mix 0.1 ml yellow with 0.05 ml red and shake for 0.5 minutes.", expected(("yellow", "red"), (100, 50), 30)),
+        ("demo_full_tips", "Mix 0.2 ml yellow with 0.2 ml red and shake for 0.5 minutes.", expected(("yellow", "red"), (200, 200), 30)),
         ("partial_defaults", "Mix 40 µl red with yellow and shake for 6 seconds.", expected(("red", "yellow"), (40, 200), 6)),
         ("micro_sign", "Mix 150 µl yellow with 25 µL red and shake.", expected(("yellow", "red"), (150, 25))),
         ("duration_only", "Mix red and yellow and shake for 45 seconds.", expected(("red", "yellow"), (200, 200), 45)),
