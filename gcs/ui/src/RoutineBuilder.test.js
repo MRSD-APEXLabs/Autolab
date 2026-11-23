@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import RoutineBuilder from './RoutineBuilder';
 import { PRESETS } from './shared/presets';
-import { EMPTY_TUBE, TUBE_FOR_LIQUID } from './shared/tips';
+import { EMPTY_TUBE, TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './shared/tips';
 
 function Harness({ initial }) {
   const [value, setValue] = useState(initial);
@@ -37,6 +37,32 @@ const pickedTip = (routine) => routine.steps.find((s) => s.name === 'ot2')
 test('presets use one tip per liquid: red tip 0, empty (blue) tube tip 3', () => {
   expect(pickedTip(PRESETS[0].routine)).toEqual([0]);
   expect(pickedTip(PRESETS[1].routine)).toEqual([3]);
+});
+
+const presetById = (id) => PRESETS.find((p) => p.id === id);
+const ot2Of = (routine) => routine.steps.find((s) => s.name === 'ot2').parameters_json.steps;
+
+test('Gradient fills column 1 from all red to all yellow, 35 µL per well, one tip per liquid', () => {
+  const cmds = ot2Of(presetById('gradient').routine);
+  expect(cmds.map((c) => c.action)).toEqual([
+    'pick_up_tips', 'aspirate', 'dispense', 'return_tips', 'pick_up_tips', 'aspirate', 'dispense', 'return_tips',
+  ]);
+  const [redTip, redAsp, redDisp, , yelTip, yelAsp, yelDisp] = cmds;
+  expect(redTip.well_indices).toEqual([TIP_FOR_LIQUID.red]);
+  expect(redAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.red], volumes: [140] });
+  expect(redDisp.well_indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  expect(redDisp.volumes).toEqual([35, 30, 25, 20, 15, 10, 5]);
+  expect(yelTip.well_indices).toEqual([TIP_FOR_LIQUID.yellow]);
+  expect(yelAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.yellow], volumes: [140] });
+  expect(yelDisp.well_indices).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(yelDisp.volumes).toEqual([5, 10, 15, 20, 25, 30, 35]);
+});
+
+test('the Gradient preset can be picked', () => {
+  render(<Harness initial={JSON.stringify({ steps: [{ name: 'home' }] })} />);
+  fireEvent.click(screen.getByRole('radio', { name: /^Gradient/ }));
+  expect(screen.getByRole('radio', { name: /^Gradient/ })).toHaveAttribute('aria-checked', 'true');
+  expect(JSON.parse(screen.getByTestId('json').textContent)).toEqual(presetById('gradient').routine);
 });
 
 test('editing a preset makes it a custom routine again', () => {
