@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import RoutineBuilder from './RoutineBuilder';
-import { PRESETS } from './shared/presets';
+import { MIN_DISPENSE_UL, PRESETS } from './shared/presets';
 import { EMPTY_TUBE, TIP_FOR_LIQUID, TUBE_FOR_LIQUID } from './shared/tips';
 
 function Harness({ initial }) {
@@ -42,20 +42,24 @@ test('presets use one tip per liquid: red tip 0, empty (blue) tube tip 3', () =>
 const presetById = (id) => PRESETS.find((p) => p.id === id);
 const ot2Of = (routine) => routine.steps.find((s) => s.name === 'ot2').parameters_json.steps;
 
-test('Gradient fills column 1 from all red to all yellow, 35 µL per well, one tip per liquid', () => {
+test('Gradient fills column 1 from all red to all yellow, 100 µL per well over A1-D1, each 200 µL aspirate fully dispensed, no dispense under 30 µL', () => {
   const cmds = ot2Of(presetById('gradient').routine);
   expect(cmds.map((c) => c.action)).toEqual([
     'pick_up_tips', 'aspirate', 'dispense', 'return_tips', 'pick_up_tips', 'aspirate', 'dispense', 'return_tips',
   ]);
   const [redTip, redAsp, redDisp, , yelTip, yelAsp, yelDisp] = cmds;
   expect(redTip.well_indices).toEqual([TIP_FOR_LIQUID.red]);
-  expect(redAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.red], volumes: [140] });
-  expect(redDisp.well_indices).toEqual([0, 1, 2, 3, 4, 5, 6]);
-  expect(redDisp.volumes).toEqual([35, 30, 25, 20, 15, 10, 5]);
+  expect(redAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.red], volumes: [200] });
+  expect(redDisp.well_indices).toEqual([0, 1, 2]);
+  expect(redDisp.volumes).toEqual([100, 67, 33]);
   expect(yelTip.well_indices).toEqual([TIP_FOR_LIQUID.yellow]);
-  expect(yelAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.yellow], volumes: [140] });
-  expect(yelDisp.well_indices).toEqual([1, 2, 3, 4, 5, 6, 7]);
-  expect(yelDisp.volumes).toEqual([5, 10, 15, 20, 25, 30, 35]);
+  expect(yelAsp).toEqual({ action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID.yellow], volumes: [200] });
+  expect(yelDisp.well_indices).toEqual([1, 2, 3]);
+  expect(yelDisp.volumes).toEqual([33, 67, 100]);
+  expect(redDisp.volumes.reduce((a, b) => a + b)).toBe(200);
+  expect(yelDisp.volumes.reduce((a, b) => a + b)).toBe(200);
+  redDisp.volumes.slice(1).forEach((v, i) => expect(v + yelDisp.volumes[i]).toBe(100));
+  [...redDisp.volumes, ...yelDisp.volumes].forEach((v) => expect(v).toBeGreaterThanOrEqual(MIN_DISPENSE_UL));
 });
 
 test('the Gradient preset can be picked', () => {

@@ -39,28 +39,40 @@ function singleTube(tube, tip) {
   ]);
 }
 
-// Gradient down plate column 1 (wells 0-7 = A1-H1 on the 96-well plate). Every well gets
-// GRADIENT_WELL_UL in total: red goes 100% → 0% in equal steps and yellow makes up the rest, so with
-// 35 µL red is 35, 30, … 0 and yellow 0, 5, … 35. Each liquid is one aspirate of its total
-// (140 µL, within one 200 µL tip) and one multi-well dispense; a well that gets 0 µL is left out.
-export const GRADIENT_WELLS = [0, 1, 2, 3, 4, 5, 6, 7];
-export const GRADIENT_WELL_UL = 35;
+// Gradient down plate column 1 (wells 0-3 = A1-D1 on the 96-well plate): red goes 100% → 0% in equal
+// steps and yellow makes up the rest. Each liquid is one full-tip aspirate (GRADIENT_ASPIRATE_UL) split
+// over its wells with nothing left in the tip: red 100, 67, 33, 0 µL and yellow the mirror image, so
+// every well holds 100 µL. Volumes are whole µL, rounded so each liquid's dispenses add up to exactly
+// the aspirate; a well that gets 0 µL is left out of the dispense.
+// Four wells because no single dispense may be under MIN_DISPENSE_UL: the smallest share of 200 µL
+// over n wells is 400 / (n·(n−1)) µL, 33 µL for 4 wells but 20 µL for 5.
+export const GRADIENT_WELLS = [0, 1, 2, 3];
+export const GRADIENT_ASPIRATE_UL = 200;
+export const MIN_DISPENSE_UL = 30;
+
+// Red's share per well, falling linearly to 0, summing to exactly GRADIENT_ASPIRATE_UL.
+function redShares() {
+  const last = GRADIENT_WELLS.length - 1;
+  const weight = (last * (last + 1)) / 2;
+  const shares = GRADIENT_WELLS.map((_, i) => Math.round((GRADIENT_ASPIRATE_UL * (last - i)) / weight));
+  shares[0] += GRADIENT_ASPIRATE_UL - shares.reduce((a, b) => a + b, 0); // rounding leftover, if any
+  return shares;
+}
 
 function gradientShare(liquid, tip, volumes) {
   const wells = GRADIENT_WELLS.filter((_, i) => volumes[i] > 0);
   const amounts = volumes.filter((v) => v > 0);
   return [
     { action: 'pick_up_tips', resource_name: 'tip_rack', well_indices: [tip] },
-    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID[liquid]], volumes: [amounts.reduce((a, b) => a + b, 0)] },
+    { action: 'aspirate', resource_name: 'tube_rack', well_indices: [TUBE_FOR_LIQUID[liquid]], volumes: [GRADIENT_ASPIRATE_UL] },
     { action: 'dispense', resource_name: 'empty_plate', well_indices: wells, volumes: amounts },
     { action: 'return_tips' },
   ];
 }
 
 function gradient() {
-  const last = GRADIENT_WELLS.length - 1;
-  const red = GRADIENT_WELLS.map((_, i) => Math.round((GRADIENT_WELL_UL * (last - i)) / last));
-  const yellow = red.map((v) => GRADIENT_WELL_UL - v);
+  const red = redShares();
+  const yellow = [...red].reverse();
   return experiment([
     ...gradientShare('red', TIP_FOR_LIQUID.red, red),
     ...gradientShare('yellow', TIP_FOR_LIQUID.yellow, yellow),
@@ -87,7 +99,7 @@ export const PRESETS = [
   {
     id: 'gradient',
     title: 'Gradient',
-    blurb: 'Fills plate column 1 (A1–H1), 35 µL per well, from all red to all yellow in even steps. The clog check should see liquid in both tips.',
+    blurb: 'Fills A1–D1 of plate column 1, 100 µL per well, from all red to all yellow in even steps. Each tip aspirates 200 µL and dispenses all of it. The clog check should see liquid in both tips.',
     expect: 'Red → yellow column',
     tone: 'ok',
     routine: gradient(),
